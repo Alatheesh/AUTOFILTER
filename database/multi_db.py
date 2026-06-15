@@ -35,6 +35,16 @@ class MultiDB:
             logger.error(f"Insert error on shard {target_shard}: {e}")
             return False
 
+    # --- THE NEW DUPLICATE CHECKER FIX ---
+    async def check_exists(self, crypto_hash: str) -> bool:
+        if not self.collections:
+            return False
+        # Instantly check all shards strictly for this exact hash
+        tasks = [coll.find_one({"crypto_hash": crypto_hash}) for coll in self.collections]
+        results = await asyncio.gather(*tasks)
+        return any(res is not None for res in results)
+    # -------------------------------------
+
     async def _safe_search(self, collection, query_filter: dict, skip: int, limit: int) -> List[Dict[str, Any]]:
         cursor = collection.find(query_filter).skip(skip).limit(limit)
         return await cursor.to_list(length=limit)
@@ -60,10 +70,6 @@ class MultiDB:
             return []
 
     async def global_stats(self) -> Dict[str, Any]:
-        """
-        Aggregates deep stats across the multi-DB setup including storage capacities.
-        Assumes standard MongoDB Free Cluster limits (512MB per URI).
-        """
         stats = {
             "shards_active": len(self.collections),
             "total_files": 0,
@@ -83,12 +89,10 @@ class MultiDB:
                 stats["total_files"] += count
                 stats["total_size_bytes"] += size
             except Exception as e:
-                # Fallback if collStats fails (e.g. empty new collection)
                 count = await coll.count_documents({})
                 stats["shard_distribution"].append(count)
                 stats["total_files"] += count
 
-        # 512 MB per shard
         total_capacity_bytes = len(self.collections) * 512 * 1024 * 1024
         stats["space_left_bytes"] = max(0, total_capacity_bytes - stats["total_size_bytes"])
         
