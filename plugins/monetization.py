@@ -2,7 +2,7 @@ import aiohttp
 import logging
 from pyrogram import Client, filters, ContinuePropagation
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.errors import UserNotParticipant, ChatAdminRequired
+from pyrogram.errors import UserNotParticipant
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -12,41 +12,31 @@ REFERRAL_POINTS = {}
 USER_REFERRER = {}
 
 async def check_double_fsub(client: Client, user_id: int) -> bool:
-    logger.info(f"[DEBUG] Starting Force Sub check for User: {user_id}")
-    
     if user_id in VIP_USERS:
         return True
-        
     if not Config.FSUB_CHANNELS:
-        logger.info("[DEBUG] No FSUB_CHANNELS configured in secrets. Skipping check.")
         return True
 
     target_channels = Config.FSUB_CHANNELS[:2]
     for channel in target_channels:
-        logger.info(f"[DEBUG] Verifying membership in channel ID: {channel}")
         try:
             member = await client.get_chat_member(channel, user_id)
             if member.status in ["kicked", "left"]:
                 return False
         except UserNotParticipant:
-            logger.info(f"[DEBUG] User {user_id} has not joined {channel}.")
-            return False
-        except ChatAdminRequired:
-            logger.error(f"[CRITICAL] Bot is NOT an Admin in channel {channel}! I cannot check users.")
-            # We return False so you actually see the error happening instead of freezing
             return False
         except Exception as e:
-            logger.error(f"[CRITICAL] FSub connection error for {channel}: {e}")
-            return False
-            
-    logger.info("[DEBUG] Force Sub check passed successfully.")
+            logger.error(f"FSub channel membership lookup error for {channel}: {e}")
+            continue
     return True
 
 async def get_shortened_url(long_url: str) -> str:
     if not Config.USE_SHORTENERS:
         return long_url
+
     api_endpoint = "https://gplinks.in/api"
     api_token = "5b8f729da248937bc38d15ff16ea49" 
+    
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{api_endpoint}?api={api_token}&url={long_url}") as response:
@@ -60,49 +50,91 @@ async def get_shortened_url(long_url: str) -> str:
 
 @Client.on_message(filters.command("start") & filters.private)
 async def monetization_start_handler(client: Client, message: Message):
-    user_id = message.from_user.id
-    logger.info(f"[DEBUG] ====== /START COMMAND RECEIVED FROM {user_id} ======")
-    logger.info(f"[DEBUG] Full Command Text: {message.text}")
-    
-    try:
-        # 1. Force Sub Check
-        is_joined = await check_double_fsub(client, user_id)
-        if not is_joined:
-            logger.info("[DEBUG] Sending Force Sub Lock Screen to user.")
-            buttons = []
-            for idx, channel in enumerate(Config.FSUB_CHANNELS[:2], start=1):
-                buttons.append([InlineKeyboardButton(text=f"Join Channel #{idx}", url=f"https://t.me/{str(channel).replace('-100', '')}")])
-            buttons.append([InlineKeyboardButton(text="🔄 Request Verification", callback_data="check_membership_retry")])
-            
-            await message.reply_text(
-                "🛑 **Lock Warning:**\n\nYou must join our official distribution channels to unlock downloading capabilities.\n\n"
-                "*(Note: If you are the owner and seeing this, ensure the bot is an ADMIN in your channels!)*",
-                reply_markup=InlineKeyboardMarkup(buttons)
-            )
-            return
-
-        # 2. Deep-Links Check
-        if len(message.command) > 1:
-            logger.info("[DEBUG] Deep link detected. Processing payload...")
-            payload = message.command[1]
-            if payload.startswith("ref_"):
-                pass # Referral logic hidden for brevity
-            elif payload.startswith("file_"):
-                pass # File logic hidden for brevity
-            return
-
-        # 3. Bridge to Main Menu
-        logger.info("[DEBUG] Normal /start. Passing to UI Menu (ui_menus.py)...")
+    # If it is a normal /start with no file ID attached, send it straight to the UI menu!
+    if len(message.command) <= 1:
         raise ContinuePropagation
+        
+    user_id = message.from_user.id
+    
+    is_joined = await check_double_fsub(client, user_id)
+    if not is_joined:
+        buttons = []
+        for idx, channel in enumerate(Config.FSUB_CHANNELS[:2], start=1):
+            buttons.append([InlineKeyboardButton(text=f"Join Channel #{idx}", url=f"https://t.me/{str(channel).replace('-100', '')}")])
+        
+        buttons.append([InlineKeyboardButton(text="🔄 Request Verification", callback_data="check_membership_retry")])
+        await message.reply_text(
+            "🛑 **Lock Warning:**\n\n"
+            "You must join our official distribution channels to unlock downloading capabilities.",
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        return
 
-    except ContinuePropagation:
-        logger.info("[DEBUG] Bridge activated successfully.")
-        raise
-    except Exception as e:
-        logger.error(f"[FATAL ERROR] The bot crashed during /start: {e}")
-        await message.reply_text(f"⚠️ **System Crash Detected:**\n`{e}`\n\nCheck Hugging Face Logs immediately.")
+    payload = message.command[1]
+    
+    if payload.startswith("ref_"):
+        try:
+            referrer_id = int(payload.split("_")[1])
+            if referrer_id != user_id and user_id not in USER_REFERRER:
+                USER_REFERRER[user_id] = referrer_id
+                REFERRAL_POINTS[referrer_id] = REFERRAL_POINTS.get(referrer_id, 0) + 10
+                await message.reply_text(f"🎉 Welcome! You successfully registered via referral code from `{referrer_id}`.")
+                try:
+                    await client.send_message(referrer_id, f"👤 **New Referral Recorded:**\nAn anonymous user registered using your link. You received **+10 Points**!")
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.error(f"Referral processing exception: {e}")
 
+    elif payload.startswith("file_"):
+        file_id = payload.split("file_")[1]
+        
+        if user_id in VIP_USERS:
+            await message.reply_cached_media(file_id, caption="✨ Premium delivery bypass complete! Here is your requested file.")
+            return
+            
+        original_url = f"https://t.me/{client.me.username}?start=file_{file_id}"
+        shortened_url = await get_shortened_url(original_url)
+        
+        await message.reply_text(
+            f"📥 **Your File Download Link is Ready:**\n\n"
+            f"Click our secure links to download your file immediately. Premium users bypass this screen!\n\n"
+            f"🔗 **Download Link:** {shortened_url}",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(text="⚡ Click to Unlock", url=shortened_url)],
+                [InlineKeyboardButton(text="👑 Upgrade to Premium (Ad-free)", callback_data="upgrade_premium")]
+            ])
+        )
+        return
 
 @Client.on_callback_query(filters.regex(r"^(referral_menu|upgrade_premium|activate_premium_demo)$"))
 async def monetization_callbacks(client: Client, callback: Message):
-    pass # Keep your existing callback code here if needed
+    user_id = callback.from_user.id
+    target = callback.data
+    
+    if target == "referral_menu":
+        ref_link = f"https://t.me/{client.me.username}?start=ref_{user_id}"
+        await callback.message.edit_text(
+            f"👥 **Referral Hub:**\n\n"
+            f"Invite friends and earn **10 points** per user.\n\n"
+            f"🔗 **Your Link:** `{ref_link}`",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="monetization_home")]])
+        )
+    elif target == "upgrade_premium":
+        await callback.message.edit_text(
+            f"👑 **Unlock Premium Priority:**\n\n"
+            f"Benefits include:\n"
+            f"• Completely ads-free results\n"
+            f"• Direct instant delivery\n\n"
+            f"Click below to enable premium simulation.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(text="⚡ Enable Trial Premium", callback_data="activate_premium_demo")],
+                [InlineKeyboardButton(text="Back", callback_data="monetization_home")]
+            ])
+        )
+    elif target == "activate_premium_demo":
+        VIP_USERS.add(user_id)
+        await callback.message.edit_text(
+            "🎉 **Success!**\n\nYour account has been promoted to VIP status.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("OK", callback_data="monetization_home")]])
+        )
