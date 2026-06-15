@@ -14,7 +14,6 @@ class MultiDB:
         for uri in uris:
             try:
                 client = AsyncIOMotorClient(uri)
-                # Quick timeout configuration for stability testing
                 client.get_io_loop = asyncio.get_running_loop
                 self.clients.append(client)
                 self.collections.append(client[db_name]["files"])
@@ -25,10 +24,6 @@ class MultiDB:
             logger.warning("No database collections active. Bot features will fail.")
 
     async def insert_file(self, file_data: Dict[str, Any], shard_index: Optional[int] = None) -> bool:
-        """
-        Inserts file metadata. If shard_index is not provided, distributes via round-robin or smallest shard.
-        For simplicity, targets shard 0 strictly to avoid fragmenting same-file updates in this iteration.
-        """
         if not self.collections:
             return False
         
@@ -45,24 +40,13 @@ class MultiDB:
         return await cursor.to_list(length=limit)
 
     async def search_files(self, query: str, skip: int = 0, limit: int = 10, exact: bool = False) -> List[Dict[str, Any]]:
-        """
-        Executes an asynchronous fan-out search across all DB shards using asyncio.gather.
-        Implements basic fuzzy spelling search if exact is False.
-        """
         if not self.collections:
             return []
 
-        # Fuzzy regex for search matching. Supports spaces and slight misspellings conceptually.
         regex_pattern = query if exact else f".*{'.*'.join(query.split())}.*"
-        query_filter = {
-            "title": {"$regex": regex_pattern, "$options": "i"}
-        }
+        query_filter = {"title": {"$regex": regex_pattern, "$options": "i"}}
 
-        # Concurrently search all shards
-        tasks = [
-            self._safe_search(coll, query_filter, skip, limit) 
-            for coll in self.collections
-        ]
+        tasks = [self._safe_search(coll, query_filter, skip, limit) for coll in self.collections]
         
         try:
             results = await asyncio.gather(*tasks)
@@ -70,24 +54,47 @@ class MultiDB:
             for result_group in results:
                 combined_results.extend(result_group)
             
-            # Additional deduplication or sorting logic by DB ID or timestamp can go here
-            # Slicing the result down to the global limit requested across the layer
             return combined_results[:limit]
         except Exception as e:
             logger.error(f"Concurrent Search Failed: {e}")
             return []
 
-    async def global_stats(self) -> Dict[str, int]:
+    async def global_stats(self) -> Dict[str, Any]:
         """
-        Aggregates stats across the multi-DB setup.
+        Aggregates deep stats across the multi-DB setup including storage capacities.
+        Assumes standard MongoDB Free Cluster limits (512MB per URI).
         """
-        tasks = [coll.count_documents({}) for coll in self.collections]
-        counts = await asyncio.gather(*tasks)
-        return {
+        stats = {
             "shards_active": len(self.collections),
-            "total_files": sum(counts),
-            "shard_distribution": counts
+            "total_files": 0,
+            "total_size_bytes": 0,
+            "shard_distribution": []
         }
 
-# Global multi-database pool instance
+        for client, coll in zip(self.clients, self.collections):
+            try:
+                db_obj = client[Config.DB_NAME]
+                coll_stats = await db_obj.command("collStats", "files")
+                
+                count = coll_stats.get("count", 0)
+                size = coll_stats.get("storageSize", 0)
+                
+                stats["shard_distribution"].append(count)
+                stats["total_files"] += count
+                stats["total_size_bytes"] += size
+            except Exception as e:
+                # Fallback if collStats fails (e.g. empty new collection)
+                count = await coll.count_documents({})
+                stats["shard_distribution"].append(count)
+                stats["total_files"] += count
+
+        # 512 MB per shard
+        total_capacity_bytes = len(self.collections) * 512 * 1024 * 1024
+        stats["space_left_bytes"] = max(0, total_capacity_bytes - stats["total_size_bytes"])
+        
+        avg_obj_size = stats["total_size_bytes"] / stats["total_files"] if stats["total_files"] > 0 else 300
+        stats["estimated_files_left"] = int(stats["space_left_bytes"] / avg_obj_size) if avg_obj_size > 0 else 0
+
+        return stats
+
 db = MultiDB(Config.DB_URIS, Config.DB_NAME)
