@@ -22,7 +22,7 @@ def get_start_markup() -> InlineKeyboardMarkup:
         ]
     ])
 
-@Client.on_message(filters.command("start") & filters.private)
+@Client.on_message(filters.command("start") & filters.private, group=1)
 async def start_menu_handler(client: Client, message: Message):
     # Ensure it only fires when there's no payload (referral or file download)
     if len(message.command) > 1:
