@@ -17,9 +17,9 @@ if not Config.BOT_TOKEN or not Config.API_ID or not Config.API_HASH:
     logger.error("Missing essential configuration attributes. Please check BOT_TOKEN, API_ID, API_HASH.")
     exit(1)
 
-# Initialize Pyrogram Bot Client
+# Initialize Pyrogram Bot Client - V2 forces a clean session state
 app = Client(
-    "AutoFilterBot",
+    "AutoFilterBot_V2", 
     api_id=Config.API_ID,
     api_hash=Config.API_HASH,
     bot_token=Config.BOT_TOKEN,
@@ -40,11 +40,20 @@ async def web_server():
     await site.start()
     logger.info(f"Aiohttp web server started on port {Config.PORT}")
 
+# Background Heartbeat to prevent Hugging Face from sleeping the server
+async def heartbeat():
+    while True:
+        logger.info("💓 HEARTBEAT: The bot is awake and listening for messages...")
+        await asyncio.sleep(30)
+
 async def main():
     logger.info("Initializing multi-DB connections and starting bot...")
     
     # Start web server concurrently
     asyncio.create_task(web_server())
+    
+    # Start the Heartbeat loop
+    asyncio.create_task(heartbeat())
 
     try:
         await app.start()
