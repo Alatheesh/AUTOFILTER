@@ -103,9 +103,9 @@ async def auto_filter(client: Client, message: Message):
         suggestions = await get_fuzzy_suggestions(query)
         if suggestions:
             s_text = ", ".join([f"`{s}`" for s in suggestions])
-            await message.reply_text(f"😔 No files found matching your query.\n\n**Did you mean:** {s_text}?", quote=True)
+            await message.reply_text(f"😔 No files found matching your query.\n\n**Did you mean:** {s_text}?")
         else:
-            await message.reply_text("😔 No files found matching your query across our live shards.", quote=True)
+            await message.reply_text("😔 No files found matching your query across our live shards.")
         return
         
     metadata = await fetch_imdb_tmdb(query)
@@ -134,9 +134,13 @@ async def auto_filter(client: Client, message: Message):
     )
     
     try:
-        await message.reply_photo(photo=metadata["poster"], caption=caption, reply_markup=InlineKeyboardMarkup(buttons), quote=True)
+        await message.reply_photo(photo=metadata["poster"], caption=caption, reply_markup=InlineKeyboardMarkup(buttons))
     except Exception as e:
-        await message.reply_text(caption, reply_markup=InlineKeyboardMarkup(buttons), quote=True)
+        logger.warning(f"Failed to reply with photo poster, sending text-only fallback: {e}")
+        await message.reply_text(
+            caption,
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
 
 @Client.on_callback_query(filters.regex(r"^(next|prev)_(\d+)_(.+)$"))
 async def handle_pagination(client: Client, callback: CallbackQuery):
