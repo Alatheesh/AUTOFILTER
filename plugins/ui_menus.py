@@ -21,7 +21,6 @@ async def global_debug_logger(client: Client, message: Message):
     logger.info("========================================")
 # ==========================================
 
-
 # Start Menu Markup Template
 def get_start_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -34,7 +33,6 @@ def get_start_markup() -> InlineKeyboardMarkup:
             InlineKeyboardButton("✨ Features", callback_data="ui_features")
         ]
     ])
-
 
 @Client.on_message(filters.command("start") & filters.private)
 async def start_menu_handler(client: Client, message: Message):
