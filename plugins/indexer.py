@@ -4,7 +4,7 @@ import logging
 import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import Message
-from pyrogram.errors import FloodWait  # This is the magic fix for silent freezing
+from pyrogram.errors import FloodWait
 from database.multi_db import db
 from config import Config
 
@@ -64,7 +64,7 @@ async def mass_indexer_command(client: Client, message: Message):
     if not target_chat or not last_msg_id:
         return await message.reply_text("❌ **Usage:** Forward the **NEWEST** file from your channel, reply to it, and type `/index`")
 
-    progress_msg = await message.reply_text("⏳ **Initializing Smart Indexer...**")
+    progress_msg = await message.reply_text("⏳ **Initializing Full Deep Scan Indexer...**")
 
     try:
         chat_info = await client.get_chat(target_chat)
@@ -76,7 +76,6 @@ async def mass_indexer_command(client: Client, message: Message):
     total_duplicates = 0
     scanned_count = 0
     non_media_count = 0
-    consecutive_duplicates = 0
 
     try:
         for i in range(last_msg_id, 0, -200):
@@ -109,12 +108,10 @@ async def mass_indexer_command(client: Client, message: Message):
                 file_size = getattr(media, "file_size", 0)
                 crypto_hash = generate_file_hash(raw_title, file_size)
 
-                # The fixed duplicate check
+                # Standard duplicate check (ignores file, moves to next)
                 if await db.check_exists(crypto_hash):
                     total_duplicates += 1
-                    consecutive_duplicates += 1
                 else:
-                    consecutive_duplicates = 0
                     file_data = {
                         "file_id": media.file_id,
                         "file_unique_id": media.file_unique_id,
@@ -128,22 +125,17 @@ async def mass_indexer_command(client: Client, message: Message):
                     await db.insert_file(file_data)
                     total_found += 1
 
-            # SMART AUTO-SKIP
-            if consecutive_duplicates >= 400:
-                await progress_msg.edit_text(f"⏭️ **Smart Auto-Skip Triggered!**\nDetected 400 duplicates in a row. Skipping the rest!")
-                break
-
             messages_left = max(0, last_msg_id - scanned_count)
 
             if scanned_count % 200 == 0:
                 try:
                     await progress_msg.edit_text(
-                        f"🔄 **Smart Indexing in Progress...**\n"
+                        f"🔄 **Deep Scan in Progress...**\n"
                         f"• Target: `{target_chat_name}`\n"
                         f"• Scanned: `{scanned_count}` | Left: `{messages_left}`\n\n"
                         f"📂 **Breakdown:**\n"
                         f"• New Media Saved: `{total_found}`\n"
-                        f"• Already Indexed: `{total_duplicates}`\n"
+                        f"• Duplicates Skipped: `{total_duplicates}`\n"
                         f"• Text/Non-Media: `{non_media_count}`"
                     )
                 except FloodWait as fw:
@@ -155,7 +147,7 @@ async def mass_indexer_command(client: Client, message: Message):
             await asyncio.sleep(2.5)
 
         await progress_msg.edit_text(
-            f"✅ **Mass Index Completed Successfully!**\n\n"
+            f"✅ **Full Deep Scan Completed Successfully!**\n\n"
             f"• Source: `{target_chat_name}`\n"
             f"• Scanned Total: `{scanned_count}`\n"
             f"• Saved Media: `{total_found}`\n"
