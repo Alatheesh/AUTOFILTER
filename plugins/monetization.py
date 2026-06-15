@@ -48,15 +48,12 @@ async def get_shortened_url(long_url: str) -> str:
         logger.error(f"Failed to generate monetized shortlink: {e}")
     return long_url
 
-@Client.on_message(filters.command("start") & filters.private, group=1) # Set to group 1
+@Client.on_message(filters.command("start") & filters.private, group=1)
 async def monetization_start_handler(client: Client, message: Message):
-    # If there is NO deep-link data, stop immediately (don't interfere with UI menu)
     if len(message.command) <= 1:
         return
         
     user_id = message.from_user.id
-    # ... keep the rest of your existing logic here (FSub check, File distribution, etc)
-    # The logic you have for file_id and ref_ is perfect.
     
     is_joined = await check_double_fsub(client, user_id)
     if not is_joined:
@@ -68,7 +65,7 @@ async def monetization_start_handler(client: Client, message: Message):
                 invite_link = chat.invite_link if chat.invite_link else await client.export_chat_invite_link(channel)
             except Exception as e:
                 logger.error(f"Could not get invite link for {channel}: {e}")
-                invite_link = "https://t.me/telegram" # Safe fallback to prevent crashes
+                invite_link = "https://t.me/telegram" # Safe fallback
 
             buttons.append([InlineKeyboardButton(text=f"Join Channel #{idx}", url=invite_link)])
         
