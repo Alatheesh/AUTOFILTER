@@ -1,6 +1,6 @@
 import aiohttp
 import logging
-from pyrogram import Client, filters
+from pyrogram import Client, filters, ContinuePropagation
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import UserNotParticipant
 from config import Config
@@ -34,7 +34,6 @@ async def check_double_fsub(client: Client, user_id: int) -> bool:
             return False
         except Exception as e:
             logger.error(f"FSub channel membership lookup error for {channel}: {e}")
-            # If the bot is not an admin, skip blocking to prevent lock-outs
             continue
     return True
 
@@ -46,7 +45,6 @@ async def get_shortened_url(long_url: str) -> str:
     if not Config.USE_SHORTENERS:
         return long_url
 
-    # Standard configuration parameters for shortener API integration
     api_endpoint = "https://gplinks.in/api"
     api_token = "5b8f729da248937bc38d15ff16ea49" # Example Token/Key
     
@@ -64,12 +62,9 @@ async def get_shortened_url(long_url: str) -> str:
 
 @Client.on_message(filters.command("start") & filters.private)
 async def monetization_start_handler(client: Client, message: Message):
-    if len(message.command) <= 1:
-        return
     user_id = message.from_user.id
-    username = message.from_user.username or "User"
     
-    # Check force joining of channels
+    # 1. Check force joining of channels FIRST
     is_joined = await check_double_fsub(client, user_id)
     if not is_joined:
         buttons = []
@@ -85,7 +80,7 @@ async def monetization_start_handler(client: Client, message: Message):
         )
         return
 
-    # Analyze start command parameters (Deep-links)
+    # 2. Analyze start command parameters (Deep-links)
     if len(message.command) > 1:
         payload = message.command[1]
         
@@ -95,7 +90,7 @@ async def monetization_start_handler(client: Client, message: Message):
                 referrer_id = int(payload.split("_")[1])
                 if referrer_id != user_id and user_id not in USER_REFERRER:
                     USER_REFERRER[user_id] = referrer_id
-                    REFERRAL_POINTS[referrer_id] = REFERRAL_POINTS.get(referrer_id, 0) + 10  # 10 Points per invite
+                    REFERRAL_POINTS[referrer_id] = REFERRAL_POINTS.get(referrer_id, 0) + 10 
                     await message.reply_text(f"🎉 Welcome! You successfully registered via referral code from `{referrer_id}`.")
                     try:
                         await client.send_message(referrer_id, f"👤 **New Referral Recorded:**\nAn anonymous user registered using your link. You received **+10 Points**!")
@@ -116,7 +111,6 @@ async def monetization_start_handler(client: Client, message: Message):
             original_url = f"https://t.me/{client.me.username}?start=file_{file_id}"
             shortened_url = await get_shortened_url(original_url)
             
-            # Custom Monetization message
             await message.reply_text(
                 f"📥 **Your File Download Link is Ready:**\n\n"
                 f"Click our secure links to download your file immediately. Premium users bypass this screen!\n\n"
@@ -128,18 +122,8 @@ async def monetization_start_handler(client: Client, message: Message):
             )
             return
 
-    # Simple base private menu overview
-    await message.reply_text(
-        f"👋 **Greetings {username}!**\n\n"
-        f"I am an advanced Multi-DB Auto-Filter Telegram application. "
-        f"You can query titles inside groups or deep-link documents instantly.\n\n"
-        f"👑 **Premium/VIP Status:** `{'Active' if user_id in VIP_USERS else 'Basic Standard'}`\n"
-        f"⭐ **Referral Points:** `{REFERRAL_POINTS.get(user_id, 0)} pts`",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton(text="⭐ Invite Friends & Earn", callback_data="referral_menu")],
-            [InlineKeyboardButton(text="👑 Premium Upgrade", callback_data="upgrade_premium")]
-        ])
-    )
+    # 3. THE FIX: If it is a normal /start, pass the message forward to the UI Menu!
+    raise ContinuePropagation
 
 @Client.on_callback_query(filters.regex(r"^(referral_menu|upgrade_premium|activate_premium_demo)$"))
 async def monetization_callbacks(client: Client, callback: Message):
