@@ -62,7 +62,15 @@ async def monetization_start_handler(client: Client, message: Message):
     if not is_joined:
         buttons = []
         for idx, channel in enumerate(Config.FSUB_CHANNELS[:2], start=1):
-            buttons.append([InlineKeyboardButton(text=f"Join Channel #{idx}", url=f"https://t.me/{str(channel).replace('-100', '')}")])
+            try:
+                # Dynamically fetch the real invite link for private channels
+                chat = await client.get_chat(channel)
+                invite_link = chat.invite_link if chat.invite_link else await client.export_chat_invite_link(channel)
+            except Exception as e:
+                logger.error(f"Could not get invite link for {channel}: {e}")
+                invite_link = "https://t.me/telegram" # Safe fallback to prevent crashes
+
+            buttons.append([InlineKeyboardButton(text=f"Join Channel #{idx}", url=invite_link)])
         
         buttons.append([InlineKeyboardButton(text="🔄 Request Verification", callback_data="check_membership_retry")])
         await message.reply_text(
