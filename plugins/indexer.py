@@ -81,21 +81,47 @@ async def auto_indexer(client: Client, message: Message):
     if success:
         logger.info(f"Successfully indexed: '{sanitized_title}' ({file_size} bytes)")
 
-@Client.on_message(filters.command("index") & filters.user(Config.ADMINS))
+@Client.on_message(filters.command(["index", "batch"]) & filters.user(Config.ADMINS))
 async def mass_indexer_command(client: Client, message: Message):
     """
     Admin command to scrape historical media content from any group or channel
     fully asynchronously, bypassing rate limits.
     """
-    if len(message.command) < 2:
+    target_chat = None
+    offset = 0
+
+    # 1. Did the user reply to a forwarded message?
+    if message.reply_to_message and message.reply_to_message.forward_from_chat:
+        target_chat = message.reply_to_message.forward_from_chat.id
+        
+        # Check if they added an offset after the command, e.g., "/index 100"
+        if len(message.command) > 1:
+            try:
+                offset = int(message.command[1])
+            except ValueError:
+                pass
+
+    # 2. Did the user type the ID manually?
+    elif len(message.command) > 1:
+        try:
+            target_chat = int(message.command[1]) # Converts to int, bypassing the ResolvePhone bug
+        except ValueError:
+            target_chat = message.command[1] # Leaves as text if it's an @username
+            
+        if len(message.command) > 2:
+            try:
+                offset = int(message.command[2])
+            except ValueError:
+                pass
+
+    # 3. If neither, show the usage menu
+    if not target_chat:
         await message.reply_text(
-            "❌ **Usage:** `/index <chat_username_or_id> <optional_skip_offset>`\n"
-            "Example: `/index @movies_channel 100`"
+            "❌ **Usage:**\n\n"
+            "**Method 1:** `/index -1001844188498`\n"
+            "**Method 2:** Forward a file from the channel, reply to it, and type `/index`"
         )
         return
-
-    target_chat = message.command[1]
-    offset = int(message.command[2]) if len(message.command) > 2 else 0
 
     progress_msg = await message.reply_text(f"⏳ **Starting index sweep on `{target_chat}` at offset {offset}...**")
     
@@ -144,7 +170,7 @@ async def mass_indexer_command(client: Client, message: Message):
 
         await progress_msg.edit_text(
             f"✅ **Mass Index Completed Successfully!**\n\n"
-            f"• Scaped Source: `{target_chat}`\n"
+            f"• Scraped Source: `{target_chat}`\n"
             f"• Indexed Files: `{total_found}`\n"
             f"• Duplicates Skipped: `{total_duplicates}`"
         )
