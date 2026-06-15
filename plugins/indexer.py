@@ -4,6 +4,7 @@ import logging
 import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import Message
+from pyrogram.errors import FloodWait  # This is the magic fix for silent freezing
 from database.multi_db import db
 from config import Config
 
@@ -32,7 +33,6 @@ async def auto_indexer(client: Client, message: Message):
     file_size = getattr(media, "file_size", 0)
     crypto_hash = generate_file_hash(raw_title, file_size)
 
-    # Uses the fixed duplicate checker
     if await db.check_exists(crypto_hash): return
 
     file_data = {
@@ -49,21 +49,29 @@ async def auto_indexer(client: Client, message: Message):
 
 @Client.on_message(filters.command(["index", "batch"]) & filters.user(Config.ADMINS))
 async def mass_indexer_command(client: Client, message: Message):
-    if len(message.command) < 2:
-        return await message.reply_text(
-            "❌ **Usage:** `/index <chat_username_or_id>`\n"
-            "Example: `/index @movies_channel`"
-        )
+    target_chat = None
+    last_msg_id = 0
 
-    target_chat = message.command[1]
-    
+    if message.reply_to_message:
+        reply = message.reply_to_message
+        if getattr(reply, "forward_origin", None) and getattr(reply.forward_origin, "chat", None):
+            target_chat = reply.forward_origin.chat.id
+            last_msg_id = getattr(reply.forward_origin, "message_id", 0)
+        elif getattr(reply, "forward_from_chat", None):
+            target_chat = reply.forward_from_chat.id
+            last_msg_id = getattr(reply, "forward_from_message_id", 0)
+
+    if not target_chat or not last_msg_id:
+        return await message.reply_text("❌ **Usage:** Forward the **NEWEST** file from your channel, reply to it, and type `/index`")
+
+    progress_msg = await message.reply_text("⏳ **Initializing Smart Indexer...**")
+
     try:
-        target_chat = int(target_chat)
-    except ValueError:
-        pass
+        chat_info = await client.get_chat(target_chat)
+        target_chat_name = chat_info.title or str(target_chat)
+    except Exception as e:
+        return await progress_msg.edit_text(f"❌ **Error Accessing Chat:**\n`{e}`\nEnsure bot is Admin!")
 
-    progress_msg = await message.reply_text(f"⏳ **Starting Smart Indexer on `{target_chat}`...**")
-    
     total_found = 0
     total_duplicates = 0
     scanned_count = 0
@@ -71,18 +79,37 @@ async def mass_indexer_command(client: Client, message: Message):
     consecutive_duplicates = 0
 
     try:
-        async for msg in client.get_chat_history(target_chat):
-            scanned_count += 1
+        for i in range(last_msg_id, 0, -200):
+            start_id = max(1, i - 199)
+            batch_ids = list(range(start_id, i + 1))
             
-            media = msg.document or msg.video or msg.audio
-            if not media:
-                non_media_count += 1
-            else:
+            # Catching Telegram's invisible rate limits
+            try:
+                messages = await client.get_messages(target_chat, message_ids=batch_ids)
+            except FloodWait as fw:
+                await progress_msg.edit_text(f"⚠️ **Telegram Rate Limit!**\nSleeping for {fw.value} seconds to prevent ban...")
+                await asyncio.sleep(fw.value)
+                messages = await client.get_messages(target_chat, message_ids=batch_ids)
+            except Exception as e:
+                logger.error(f"Batch fetch error: {e}")
+                continue
+            
+            for msg in messages:
+                scanned_count += 1
+                if msg.empty: 
+                    non_media_count += 1
+                    continue
+                
+                media = msg.document or msg.video or msg.audio
+                if not media: 
+                    non_media_count += 1
+                    continue
+
                 raw_title = getattr(media, "file_name", "") or getattr(msg, "caption", "") or "Unknown"
                 file_size = getattr(media, "file_size", 0)
                 crypto_hash = generate_file_hash(raw_title, file_size)
 
-                # Uses the fixed duplicate checker
+                # The fixed duplicate check
                 if await db.check_exists(crypto_hash):
                     total_duplicates += 1
                     consecutive_duplicates += 1
@@ -101,35 +128,41 @@ async def mass_indexer_command(client: Client, message: Message):
                     await db.insert_file(file_data)
                     total_found += 1
 
+            # SMART AUTO-SKIP
             if consecutive_duplicates >= 400:
-                await progress_msg.edit_text("⏭️ **Smart Auto-Skip Triggered!**\nDetected 400 duplicates in a row. Stopping early to save resources.")
+                await progress_msg.edit_text(f"⏭️ **Smart Auto-Skip Triggered!**\nDetected 400 duplicates in a row. Skipping the rest!")
                 break
 
-            if scanned_count % 100 == 0:
+            messages_left = max(0, last_msg_id - scanned_count)
+
+            if scanned_count % 200 == 0:
                 try:
                     await progress_msg.edit_text(
                         f"🔄 **Smart Indexing in Progress...**\n"
-                        f"• Target: `{target_chat}`\n"
-                        f"• Scanned: `{scanned_count}`\n\n"
+                        f"• Target: `{target_chat_name}`\n"
+                        f"• Scanned: `{scanned_count}` | Left: `{messages_left}`\n\n"
                         f"📂 **Breakdown:**\n"
                         f"• New Media Saved: `{total_found}`\n"
                         f"• Already Indexed: `{total_duplicates}`\n"
                         f"• Text/Non-Media: `{non_media_count}`"
                     )
+                except FloodWait as fw:
+                    await asyncio.sleep(fw.value)
                 except Exception:
                     pass 
-                    
-            await asyncio.sleep(0.05)
+            
+            # Standard Anti-Flood Sleep
+            await asyncio.sleep(2.5)
 
         await progress_msg.edit_text(
-            f"✅ **Mass Index Completed!**\n\n"
-            f"• Target: `{target_chat}`\n"
-            f"• Total Scanned: `{scanned_count}`\n"
+            f"✅ **Mass Index Completed Successfully!**\n\n"
+            f"• Source: `{target_chat_name}`\n"
+            f"• Scanned Total: `{scanned_count}`\n"
             f"• Saved Media: `{total_found}`\n"
-            f"• Skipped Duplicates: `{total_duplicates}`\n"
-            f"• Skipped Text: `{non_media_count}`"
+            f"• Duplicates Ignored: `{total_duplicates}`\n"
+            f"• Text/Spam Ignored: `{non_media_count}`"
         )
 
     except Exception as e:
         logger.error(f"Error during mass indexing: {e}")
-        await progress_msg.edit_text(f"❌ **Failed:** `{str(e)}`\n\n*(Note: Ensure the bot is an Admin in the target channel!)*")
+        await progress_msg.edit_text(f"❌ **Failed:** `{str(e)}`")
