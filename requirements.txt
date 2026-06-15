@@ -1,6 +1,0 @@
-pyrogram==2.0.106
-motor==3.3.1
-aiohttp==3.8.5
-tgcrypto==1.2.5
-pillow==10.0.0
-matplotlib==3.7.2
