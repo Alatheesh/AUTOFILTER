@@ -22,18 +22,16 @@ def get_start_markup() -> InlineKeyboardMarkup:
         ]
     ])
 
-@Client.on_message(filters.command("start") & filters.private, group=1)
+@Client.on_message(filters.command("start") & filters.private)
 async def start_menu_handler(client: Client, message: Message):
-    # Ensure it only fires when there's no payload (referral or file download)
+    # Only show the menu if there is NO deep-link data (like file_ or ref_)
     if len(message.command) > 1:
         return
         
     username = message.from_user.username or message.from_user.first_name or "User"
     welcome_text = (
         f"👋 **Welcome to the Cloud Auto-Filter Bot, {username}!**\n\n"
-        f"I am a highly-optimized, multi-sharded Telegram repository search system. "
-        f"Send me any movie or file query and I'll find it instantly across our high-performing MongoDB clusters.\n\n"
-        f"✨ **Use the interactive buttons below to explore my built-in commands/specifications:**"
+        f"✨ **Use the interactive buttons below to explore my built-in commands:**"
     )
     await message.reply_text(
         text=welcome_text,
