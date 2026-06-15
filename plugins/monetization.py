@@ -48,13 +48,15 @@ async def get_shortened_url(long_url: str) -> str:
         logger.error(f"Failed to generate monetized shortlink: {e}")
     return long_url
 
-@Client.on_message(filters.command("start") & filters.private)
+@Client.on_message(filters.command("start") & filters.private, group=1) # Set to group 1
 async def monetization_start_handler(client: Client, message: Message):
-    # If it is a normal /start with no file ID attached, send it straight to the UI menu!
+    # If there is NO deep-link data, stop immediately (don't interfere with UI menu)
     if len(message.command) <= 1:
-        raise ContinuePropagation
+        return
         
     user_id = message.from_user.id
+    # ... keep the rest of your existing logic here (FSub check, File distribution, etc)
+    # The logic you have for file_id and ref_ is perfect.
     
     is_joined = await check_double_fsub(client, user_id)
     if not is_joined:
