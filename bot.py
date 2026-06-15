@@ -48,18 +48,40 @@ async def main():
 
     try:
         await app.start()
-        logger.info("Bot Started successfully.")
         
-        # Load Ghost mode cleanup tasks or scheduled events here if any
+        # --- THE NEW DIAGNOSTIC PING ---
+        # 1. Fetch Bot Profile to prove authentication
+        me = await app.get_me()
+        logger.info("==================================================")
+        logger.info("✅ BOT AUTHENTICATED SUCCESSFULLY!")
+        logger.info(f"🤖 Bot Name: {me.first_name}")
+        logger.info(f"🔗 Username: @{me.username}")
+        logger.info("==================================================")
+
+        # 2. Send Startup Message to Admin
+        if Config.ADMINS:
+            for admin in Config.ADMINS:
+                try:
+                    await app.send_message(
+                        chat_id=admin,
+                        text=f"🚀 **System Alert:**\n\n{me.first_name} (`@{me.username}`) has successfully started on Hugging Face and is ready!"
+                    )
+                    logger.info(f"📩 Successfully sent startup ping to Admin ID: {admin}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not send startup ping to Admin {admin}. Error: {e}")
+        else:
+            logger.warning("⚠️ No ADMINS found in Config. Skipping startup ping.")
+        # -------------------------------
         
         await idle()
     except (ApiIdInvalid, ApiIdPublishedFlood, AccessTokenInvalid) as e:
         logger.error(f"Telegram API Configuration Error: {e}")
     except Exception as e:
         logger.error(f"Unexpected bot startup error: {e}")
+        raise
     finally:
-        await app.stop()
-        logger.info("Bot Stopped.")
+        if app.is_initialized:
+            await app.stop()
 
 if __name__ == "__main__":
     asyncio.run(main())
