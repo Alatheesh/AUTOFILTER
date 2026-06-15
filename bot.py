@@ -19,7 +19,7 @@ if not Config.BOT_TOKEN or not Config.API_ID or not Config.API_HASH:
 
 # Initialize Pyrogram Bot Client - Memory Mode bypasses HF storage bugs
 app = Client(
-    "AutoFilterBot_V2", 
+    "AutoFilterBot_V3", 
     api_id=Config.API_ID,
     api_hash=Config.API_HASH,
     bot_token=Config.BOT_TOKEN,
