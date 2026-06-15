@@ -3,6 +3,7 @@ import hashlib
 import logging
 from pyrogram import Client, filters
 from pyrogram.types import Message
+from pyrogram.enums import ChatType
 from database.multi_db import db
 from config import Config
 
@@ -93,8 +94,6 @@ async def mass_indexer_command(client: Client, message: Message):
     # 1. Did the user reply to a forwarded message?
     if message.reply_to_message and message.reply_to_message.forward_from_chat:
         target_chat = message.reply_to_message.forward_from_chat.id
-        
-        # Check if they added an offset after the command, e.g., "/index 100"
         if len(message.command) > 1:
             try:
                 offset = int(message.command[1])
@@ -104,9 +103,9 @@ async def mass_indexer_command(client: Client, message: Message):
     # 2. Did the user type the ID manually?
     elif len(message.command) > 1:
         try:
-            target_chat = int(message.command[1]) # Converts to int, bypassing the ResolvePhone bug
+            target_chat = int(message.command[1])
         except ValueError:
-            target_chat = message.command[1] # Leaves as text if it's an @username
+            target_chat = message.command[1]
             
         if len(message.command) > 2:
             try:
@@ -114,7 +113,6 @@ async def mass_indexer_command(client: Client, message: Message):
             except ValueError:
                 pass
 
-    # 3. If neither, show the usage menu
     if not target_chat:
         await message.reply_text(
             "❌ **Usage:**\n\n"
@@ -123,7 +121,28 @@ async def mass_indexer_command(client: Client, message: Message):
         )
         return
 
-    progress_msg = await message.reply_text(f"⏳ **Starting index sweep on `{target_chat}` at offset {offset}...**")
+    progress_msg = await message.reply_text(f"⏳ **Initializing Indexer...**\nResolving chat: `{target_chat}`")
+
+    # ==========================================
+    # ---> THE PEER RESOLUTION FIX <---
+    # ==========================================
+    try:
+        # Force Pyrogram to look up the chat so it knows it is a Channel/Supergroup
+        chat_info = await client.get_chat(target_chat)
+        target_chat = chat_info.id 
+        
+        # Security Check: Telegram Bot API blocks history reading in Basic Groups
+        if chat_info.type in [ChatType.GROUP, ChatType.PRIVATE]:
+            return await progress_msg.edit_text(
+                "❌ **Telegram API Restriction:**\n\n"
+                "Bots are strictly forbidden from reading chat history in Basic Groups or Private Chats.\n\n"
+                "**How to fix:** If this is a group, upgrade it to a Supergroup by going to Group Settings -> Chat History -> Set to 'Visible'."
+            )
+    except Exception as e:
+        return await progress_msg.edit_text(f"❌ **Error Accessing Chat:**\n`{e}`\n\nMake sure I am added as an Admin in that channel/group!")
+    # ==========================================
+
+    await progress_msg.edit_text(f"⏳ **Starting index sweep on `{chat_info.title or target_chat}` at offset {offset}...**")
     
     total_found = 0
     total_duplicates = 0
@@ -134,13 +153,11 @@ async def mass_indexer_command(client: Client, message: Message):
             if not media:
                 continue
 
-            # Process indexing inline
             raw_title = getattr(media, "file_name", "") or getattr(msg, "caption", "") or "Unknown"
             sanitized_title = sanitize_title(raw_title)
             file_size = getattr(media, "file_size", 0)
             crypto_hash = generate_file_hash(raw_title, file_size)
 
-            # Deduplication Check
             existing = await db.search_files(crypto_hash, skip=0, limit=1, exact=True)
             if existing:
                 total_duplicates += 1
@@ -163,14 +180,14 @@ async def mass_indexer_command(client: Client, message: Message):
             if total_found % 50 == 0:
                 await progress_msg.edit_text(
                     f"🔄 **Index Progress Updated:**\n"
-                    f"• Target: `{target_chat}`\n"
+                    f"• Target: `{chat_info.title or target_chat}`\n"
                     f"• Indexed: `{total_found}`\n"
                     f"• Duplicates skipped: `{total_duplicates}`"
                 )
 
         await progress_msg.edit_text(
             f"✅ **Mass Index Completed Successfully!**\n\n"
-            f"• Scraped Source: `{target_chat}`\n"
+            f"• Scraped Source: `{chat_info.title or target_chat}`\n"
             f"• Indexed Files: `{total_found}`\n"
             f"• Duplicates Skipped: `{total_duplicates}`"
         )
