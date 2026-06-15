@@ -17,12 +17,13 @@ if not Config.BOT_TOKEN or not Config.API_ID or not Config.API_HASH:
     logger.error("Missing essential configuration attributes. Please check BOT_TOKEN, API_ID, API_HASH.")
     exit(1)
 
-# Initialize Pyrogram Bot Client - V2 forces a clean session state
+# Initialize Pyrogram Bot Client - Memory Mode bypasses HF storage bugs
 app = Client(
     "AutoFilterBot_V2", 
     api_id=Config.API_ID,
     api_hash=Config.API_HASH,
     bot_token=Config.BOT_TOKEN,
+    in_memory=True,       # <--- THE CRITICAL FIX TO PREVENT MESSAGE DROPS
     plugins=dict(root="plugins")
 )
 
@@ -73,7 +74,7 @@ async def main():
                 try:
                     await app.send_message(
                         chat_id=admin,
-                        text=f"🚀 **System Alert:**\n\n{me.first_name} (`@{me.username}`) has successfully started on Hugging Face and is ready!"
+                        text=f"🚀 **System Alert:**\n\n{me.first_name} (`@{me.username}`) has successfully started on Hugging Face and is ready to receive messages!"
                     )
                     logger.info(f"📩 Successfully sent startup ping to Admin ID: {admin}")
                 except Exception as e:
