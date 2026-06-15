@@ -105,8 +105,22 @@ async def get_fuzzy_suggestions(query: str) -> list:
 @Client.on_message((filters.group | filters.private) & filters.text & ~filters.command(["start", "help", "about", "source"]))
 async def auto_filter(client: Client, message: Message):
     query = message.text.strip()
+    logger.info(f"👉 Step 1: auto_filter triggered for query: '{query}'")
+    
     if len(query) < 3:
+        logger.info("❌ Step 2: Query too short, ignoring.")
         return
+        
+    logger.info("⏳ Step 3: Attempting database search...")
+    try:
+        # Standard DB file search
+        results = await db.search_files(query, skip=0, limit=10, exact=False)
+        logger.info(f"✅ Step 4: Database search finished! Found {len(results)} results.")
+    except Exception as e:
+        logger.error(f"💥 Step 4 FAILED: Database error: {e}")
+        return
+    
+    # ... rest of your code ...
         
     # Standard DB file search
     results = await db.search_files(query, skip=0, limit=10, exact=False)
