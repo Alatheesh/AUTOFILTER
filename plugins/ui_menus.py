@@ -9,6 +9,19 @@ from pyrogram.types import (
 
 logger = logging.getLogger(__name__)
 
+# ==========================================
+# 🚨 GLOBAL DEBUG BREADCRUMB
+# ==========================================
+@Client.on_message(group=-1)
+async def global_debug_logger(client: Client, message: Message):
+    logger.info("========================================")
+    logger.info(f"🚨 DEBUG BREADCRUMB: Bot received a message!")
+    logger.info(f"🚨 Chat ID: {message.chat.id} | Type: {message.chat.type}")
+    logger.info(f"🚨 Message Text: {message.text or 'No Text (Media/Event)'}")
+    logger.info("========================================")
+# ==========================================
+
+
 # Start Menu Markup Template
 def get_start_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -21,6 +34,7 @@ def get_start_markup() -> InlineKeyboardMarkup:
             InlineKeyboardButton("✨ Features", callback_data="ui_features")
         ]
     ])
+
 
 @Client.on_message(filters.command("start") & filters.private)
 async def start_menu_handler(client: Client, message: Message):
