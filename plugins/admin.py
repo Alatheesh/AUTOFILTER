@@ -46,7 +46,7 @@ async def send_settings_home(message_or_query):
     buttons = [
         [InlineKeyboardButton("🔗 Shortener Settings", callback_data="set_shortener")],
         [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests")],
-        [InlineKeyboardButton("🔙 Back", callback_data="set_home")]
+        [InlineKeyboardButton("🔙 Back", callback_data="tier_root_fallback")]
     ]
     
     if isinstance(message_or_query, Message):
