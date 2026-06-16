@@ -7,7 +7,132 @@ from database.multi_db import db
 
 logger = logging.getLogger(__name__)
 
-# Helper to verify if user is creator
+# ==========================================
+# --- ORIGINAL WELCOME & HELP MENUS ---
+# ==========================================
+
+def get_start_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🛠 Help", callback_data="ui_help"),
+            InlineKeyboardButton("ℹ️ About", callback_data="ui_about")
+        ],
+        [
+            InlineKeyboardButton("👨‍💻 Source", callback_data="ui_source"),
+            InlineKeyboardButton("✨ Features", callback_data="ui_features")
+        ]
+    ])
+
+@Client.on_message(filters.command("start") & filters.private, group=2)
+async def start_menu_handler(client: Client, message: Message):
+    # Ignore payload starts (getfile_, ref_) because monetization.py handles them
+    if len(message.command) > 1:
+        return
+        
+    username = message.from_user.username or message.from_user.first_name or "User"
+    welcome_text = (
+        f"👋 **Welcome to the Cloud Auto-Filter Bot, {username}!**\n\n"
+        f"✨ **Use the interactive buttons below to explore my built-in commands:**"
+    )
+    await message.reply_text(text=welcome_text, reply_markup=get_start_markup())
+
+@Client.on_message(filters.command("help") & filters.private)
+async def help_command_handler(client: Client, message: Message):
+    help_text = (
+        "🛠 **How to Use the Auto-Filter Bot:**\n\n"
+        "• **In Groups:** Just drop the title of any movie or document and I will automatically look it up.\n"
+        "• **In DMs:** Send any text keyword (directly to my PM) to trigger the multi-DB file search instantly.\n"
+        "• `/plot <movie>`: Generates a beautiful AI-powered movie plot summary.\n"
+        "• `/history`: Displays your 10 most recent searches.\n"
+        "• `/clear_history`: Wipes your query history records clean.\n"
+        "• `/settings`: Open the configuration dashboard."
+    )
+    await message.reply_text(text=help_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back")]]))
+
+@Client.on_message(filters.command("about") & filters.private)
+async def about_command_handler(client: Client, message: Message):
+    about_text = (
+        "ℹ️ **About This Bot:**\n\n"
+        "• **Engine:** Advanced Asynchronous Pyrogram V2\n"
+        "• **Core Framework:** Python 3.10 with `asyncio` parallel multi-shard pooling\n"
+        "• **Database Backend:** Scalable multi-cluster MongoDB connection routing\n"
+        "• **Primary Deployment:** Ready for Hugging Face Spaces free-tier hosting with aiohttp daemon\n"
+    )
+    await message.reply_text(text=about_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back")]]))
+
+@Client.on_message(filters.command("source") & filters.private)
+async def source_command_handler(client: Client, message: Message):
+    source_text = (
+        "👨‍💻 **Open Source Repository Details:**\n\n"
+        "This application is modularly crafted to separate route dispatchers, active sharding layers, and smart monetization tasks.\n\n"
+        "• **Developer:** Google AI Studio Build Architect\n"
+        "• **License:** Open Source MIT\n"
+        "• **Credits:** Pyrogram & MongoDB Motor Driver"
+    )
+    await message.reply_text(text=source_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back")]]))
+
+@Client.on_callback_query(filters.regex(r"^ui_(help|about|source|features|back)$"))
+async def callback_ui_router(client: Client, callback: CallbackQuery):
+    target = callback.data.split("_")[1]
+    
+    if target == "back":
+        username = callback.from_user.username or callback.from_user.first_name or "User"
+        welcome_text = (
+            f"👋 **Welcome to the Cloud Auto-Filter Bot, {username}!**\n\n"
+            f"I am a highly-optimized, multi-sharded Telegram repository search system. "
+            f"Send me any movie or file query and I'll find it instantly across our high-performing MongoDB clusters.\n\n"
+            f"✨ **Use the interactive buttons below to explore my built-in commands/specifications:**"
+        )
+        await callback.message.edit_text(text=welcome_text, reply_markup=get_start_markup())
+        return await callback.answer()
+
+    if target == "help":
+        help_text = (
+            "🛠 **How to Use the Auto-Filter Bot:**\n\n"
+            "• **In Groups:** Just drop the title of any movie or document and I will automatically look it up.\n"
+            "• **In DMs:** Send any text keyword (directly to my PM) to trigger the multi-DB file search instantly.\n"
+            "• `/plot <movie>`: Generates a beautiful AI-powered movie plot summary.\n"
+            "• `/history`: Displays your 10 most recent searches.\n"
+            "• `/settings`: Open the configuration dashboard."
+        )
+        await callback.message.edit_text(text=help_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ui_back")]]))
+
+    elif target == "about":
+        about_text = (
+            "ℹ️ **About This Bot:**\n\n"
+            "• **Engine:** Advanced Asynchronous Pyrogram V2\n"
+            "• **Core Framework:** Python 3.10 with `asyncio` parallel multi-shard pooling\n"
+            "• **Database Backend:** Scalable multi-cluster MongoDB connection routing\n"
+        )
+        await callback.message.edit_text(text=about_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ui_back")]]))
+
+    elif target == "source":
+        source_text = (
+            "👨‍💻 **Open Source Repository Details:**\n\n"
+            "This application is modularly crafted to separate route dispatchers, active sharding layers, and smart monetization tasks.\n\n"
+            "• **Developer:** Google AI Studio Build Architect\n"
+            "• **Credits:** Pyrogram & MongoDB Motor Driver"
+        )
+        await callback.message.edit_text(text=source_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ui_back")]]))
+
+    elif target == "features":
+        features_text = (
+            "✨ **Bot Feature Profile:**\n\n"
+            "• **Asynchronous Scaling:** Motor-driven multi-DB load array.\n"
+            "• **Search Enhancers:** Levenshtein-distance spelling suggestions.\n"
+            "• **Dynamic UI:** 3-Tier Default vs Interactive Search Engine.\n"
+            "• **Monetization Engine:** GPLinks shortener + force sub lock.\n"
+            "• **Admin Dashboard:** Mass system-wide broadcasting."
+        )
+        await callback.message.edit_text(text=features_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ui_back")]]))
+
+    await callback.answer()
+
+
+# ==========================================
+# --- 3-TIER SETTINGS DASHBOARD ---
+# ==========================================
+
 def is_creator(user_id: int) -> bool:
     return user_id == Config.ADMINS[0] if isinstance(Config.ADMINS, list) else user_id == Config.ADMINS
 
