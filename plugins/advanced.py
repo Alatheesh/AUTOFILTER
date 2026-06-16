@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 USER_SEARCH_HISTORY = {}
 ACTIVE_GHOST_TASKS = {}
 
-# THE FIX: This stops the Page buttons from spinning endlessly!
+# THE FIX 1: This stops the Page buttons from spinning endlessly!
 @Client.on_callback_query(filters.regex("^pages_info$"))
 async def ignore_page_button(client: Client, callback: CallbackQuery):
     await callback.answer("📖 You are currently viewing this page.", show_alert=False)
@@ -94,6 +94,11 @@ async def ghost_mode_delete_routine(client: Client, chat_id: int, message_id: in
         logger.info(f"[GHOST MODE] Successfully purged message {message_id} in {chat_id} after {expiry} seconds.")
     except Exception as e:
         logger.error(f"[GHOST MODE] Failed to remove message {message_id} in {chat_id}: {e}")
+    finally:
+        # THE FIX 2: Delete the task from RAM once it is finished to prevent memory leaks!
+        task_key = f"{chat_id}_{message_id}"
+        if task_key in ACTIVE_GHOST_TASKS:
+            del ACTIVE_GHOST_TASKS[task_key]
 
 def trigger_ghost_self_destruct(client: Client, chat_id: int, message_id: int):
     loop = asyncio.get_event_loop()
