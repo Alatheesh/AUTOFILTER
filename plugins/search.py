@@ -6,7 +6,7 @@ from database.multi_db import db
 # Active query runtime lookup container tracking filters state parameters safely
 FILTER_SESSION_CACHE = {}
 
-@Client.on_message(filters.text & ~filters.command(["start", "settings", "index"]))
+@Client.on_message(filters.text & (filters.group | filters.private) & ~filters.command(["start", "settings", "index", "request", "broadcast", "stats", "backup", "plot", "history", "clear_history"]))
 async def filter_search_handler(client: Client, message: Message):
     query_text = message.text.strip()
     if len(query_text) < 2: return
@@ -33,20 +33,21 @@ async def filter_search_handler(client: Client, message: Message):
         u_sett = await db.get_user_settings(user_id)
         resolved_mode = u_sett.get("search_mode", "default")
 
-    # STEP 2: QUERY MONGO FILES VIA REGEX PATTERN MATCH
-    search_regex = re.compile(query_text.replace(" ", ".*"), re.IGNORECASE)
-    matching_files = await db.files.find({"file_name": search_regex}).to_list(length=100)
+    # STEP 2: MULTI-SHARD QUERY (Fixed the MultiDB attribute error)
+    matching_files = await db.search_files(query_text, skip=0, limit=20, exact=False)
     
     if not matching_files:
-        return await message.reply_text("🔍 No files matched your query pattern.")
+        req_buttons = InlineKeyboardMarkup([[InlineKeyboardButton("🔔 Request this Movie", callback_data=f"req_{query_text[:40]}")]])
+        return await message.reply_text("🔍 No files matched your query pattern.", reply_markup=req_buttons)
 
     # STEP 3: DISTRIBUTE DISPLAY TO MATCH RESOLVED LAYOUT TYPE RULES
     if resolved_mode == "default":
         # Mode A: Instantly build full results array dump layout immediately
         buttons = []
-        for f in matching_files[:20]: # Safeguard output array limit boundary bounds
-            db_id = str(f["_id"])
-            buttons.append([InlineKeyboardButton(text=f"🎬 {f['file_name']}", callback_data=f"getfile_{db_id}")])
+        for f in matching_files:
+            db_id = str(f.get("_id", ""))
+            title = f.get("title", "Unknown Title")
+            buttons.append([InlineKeyboardButton(text=f"🎬 {title}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
         return await message.reply_text(f"🎯 **Results found matching:** `{query_text}`", reply_markup=InlineKeyboardMarkup(buttons))
 
     else:
@@ -81,15 +82,16 @@ async def filter_ui_callback_handler(client: Client, query: CallbackQuery):
         return await query.answer("Search validation cache expired. Please execute a fresh query.", show_alert=True)
         
     files_pool = session["files"]
-    buttons = []
 
     if action == "all":
-        for f in files_pool[:20]:
-            buttons.append([InlineKeyboardButton(text=f"🎬 {f['file_name']}", callback_data=f"getfile_{str(f['_id'])}")])
+        buttons = []
+        for f in files_pool:
+            db_id = str(f.get("_id", ""))
+            title = f.get("title", "Unknown Title")
+            buttons.append([InlineKeyboardButton(text=f"🎬 {title}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
         return await query.message.edit_text("🍿 **Displaying unparsed comprehensive file list index details:**", reply_markup=InlineKeyboardMarkup(buttons))
 
     elif action == "qual":
-        # Generate custom sub-filter options buttons row array structures
         buttons = [
             [
                 InlineKeyboardButton(text="1080p Only", callback_data=f"fsub_run_{session_id}_1080p"),
@@ -136,15 +138,17 @@ async def sub_filter_processing_execution_handler(client: Client, query: Callbac
         return await query.message.edit_text(f"✨ **Search Filter Panel:** `{session['query']}`\nRefine file distribution lists dynamically using filters:", reply_markup=InlineKeyboardMarkup(buttons))
         
     tag = parts[5].lower()
-    filtered_results = [f for f in session["files"] if tag in f["file_name"].lower()]
+    filtered_results = [f for f in session["files"] if tag in f.get("title", "").lower()]
     
     if not filtered_results:
         buttons = [[InlineKeyboardButton(text="🔙 Change Filter Settings", callback_data=f"fsub_back_{session_id}")]]
         return await query.message.edit_text(f"❌ No matching criteria parameters isolated for string marker segment: `{tag.upper()}`", reply_markup=InlineKeyboardMarkup(buttons))
         
     buttons = []
-    for f in filtered_results[:20]:
-        buttons.append([InlineKeyboardButton(text=f"🎬 {f['file_name']}", callback_data=f"getfile_{str(f['_id'])}")])
+    for f in filtered_results:
+        db_id = str(f.get("_id", ""))
+        title = f.get("title", "Unknown Title")
+        buttons.append([InlineKeyboardButton(text=f"🎬 {title}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
     buttons.append([InlineKeyboardButton(text="🔄 Adjust Filter Selection Rules", callback_data=f"fsub_back_{session_id}")])
     
     await query.message.edit_text(f"🎯 **Filtered Index Results Matrix List [Tag: {tag.upper()}]:**", reply_markup=InlineKeyboardMarkup(buttons))
