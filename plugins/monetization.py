@@ -68,11 +68,9 @@ async def monetization_start_handler(client: Client, message: Message):
                 await message.reply_text(f"🎉 Welcome! Registered via `{referrer_id}`.")
         except Exception: pass
 
-    # THE FIX: Intercept the safe 'getfile_' payload
+    # --- THE NEW FORMAT (Short Safe IDs) ---
     elif payload.startswith("getfile_"):
         db_id = payload.split("getfile_")[1]
-        
-        # Look up the real file directly from MongoDB using the safe short ID
         file_data = await db.get_file(db_id)
         if not file_data:
             return await message.reply_text("❌ **Error:** File not found in database.")
@@ -95,8 +93,6 @@ async def monetization_start_handler(client: Client, message: Message):
 
     elif payload.startswith("verify_"):
         db_id = payload.split("verify_")[1]
-        
-        # Look up the real file directly from MongoDB after verifying
         file_data = await db.get_file(db_id)
         if not file_data:
             return await message.reply_text("❌ **Error:** File not found in database.")
@@ -104,6 +100,30 @@ async def monetization_start_handler(client: Client, message: Message):
         file_id = file_data.get("file_id")
         try: await message.reply_document(document=file_id, caption="✨ Premium delivery complete! Here is your requested file.")
         except Exception: await message.reply_text("❌ **Error:** I cannot access this file. It may have been deleted.")
+        return
+
+    # --- THE FALLBACK FOR OLD BROKEN BUTTONS ---
+    elif payload.startswith("file_"):
+        file_id = payload.split("file_")[1]
+        settings = await db.get_settings()
+        
+        if user_id in VIP_USERS or not settings.get("shortener_enabled", False):
+            try: await message.reply_document(document=file_id, caption="✨ Here is your requested file.")
+            except Exception: await message.reply_text("❌ **Error:** Telegram ID limit reached. Please search for the movie again to generate a new link.")
+            return
+
+        original_url = f"https://t.me/{client.me.username}?start=verifyold_{file_id}"
+        shortened_url = await get_shortened_url(original_url)
+        await message.reply_text(
+            f"📥 **Your File Download Link is Ready:**\n\n🔗 **Download Link:** {shortened_url}",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(text="⚡ Click to Unlock", url=shortened_url)]])
+        )
+        return
+
+    elif payload.startswith("verifyold_"):
+        file_id = payload.split("verifyold_")[1]
+        try: await message.reply_document(document=file_id, caption="✨ Premium delivery complete! Here is your requested file.")
+        except Exception: await message.reply_text("❌ **Error:** Telegram ID limit reached. Please search for the movie again to generate a new link.")
         return
 
 @Client.on_callback_query(filters.regex(r"^(referral_menu|upgrade_premium|activate_premium_demo|check_membership_retry)$"))
