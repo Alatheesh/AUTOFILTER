@@ -152,13 +152,21 @@ def format_bytes(size):
 async def bot_stats_dashboard(client: Client, message: Message):
     status_msg = await message.reply_text("📊 **Aggregating multi-shard metadata...**")
     db_stats = await db.global_stats()
+    
     used_space = format_bytes(db_stats.get("total_size_bytes", 0))
     left_space = format_bytes(db_stats.get("space_left_bytes", 0))
     shards_text = "".join([f"• **Shard {idx + 1}**: `{count}` files\n" for idx, count in enumerate(db_stats.get("shard_distribution", []))])
     
+    total_files = db_stats.get('total_files', 0)
+    indexed_meta = db_stats.get('indexed_metadata', 0)
+    pending_meta = total_files - indexed_meta
+    
+    # THE FIX: Added the Metadata Background Worker tracker here!
     dashboard_text = (
         f"📊 **Advanced System Status Dashboard**\n\n"
-        f"🗂️ **Total Indexed Files:** `{db_stats.get('total_files', 0):,}`\n\n"
+        f"🗂️ **Total Indexed Files:** `{total_files:,}`\n"
+        f"🔍 **Metadata Extracted:** `{indexed_meta:,}` files\n"
+        f"⏳ **Metadata Pending:** `{pending_meta:,}` files\n\n"
         f"💾 **Storage Analytics:**\n"
         f"• **Space Used:** `{used_space}`\n"
         f"• **Space Remaining:** `{left_space}`\n"
@@ -189,3 +197,25 @@ async def multi_shard_json_backup(client: Client, message: Message):
         await message.reply_document("shard0_backup.json", caption=f"📦 **Backup Export**\nProcessed `{len(documents)}` files.")
         await progress.delete()
     except Exception as e: await progress.edit_text(f"❌ **Schema Export Failed:** `{str(e)}`")
+
+# ==========================================================
+# THE ONE-TIME DATABASE MIGRATION TOOL
+# ==========================================================
+@Client.on_message(filters.command("migrate_db") & filters.user(Config.ADMINS))
+async def migrate_old_database(client: Client, message: Message):
+    status = await message.reply_text("🔄 **Starting Database Migration...**\nTagging old files for the background worker.")
+    
+    total_updated = 0
+    try:
+        # Loop through all your Shards
+        for coll in db.collections:
+            # Find files that DO NOT have a language field, and set them to "pending"
+            result = await coll.update_many(
+                {"language": {"$exists": False}},
+                {"$set": {"language": "pending"}}
+            )
+            total_updated += result.modified_count
+            
+        await status.edit_text(f"✅ **Migration Complete!**\n\nSuccessfully tagged `{total_updated:,}` old files.\nThe Background Worker will now begin processing them silently!")
+    except Exception as e:
+        await status.edit_text(f"❌ **Migration Failed:** `{str(e)}`")
