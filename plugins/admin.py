@@ -86,7 +86,9 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         settings = await db.get_settings()
         current_state = settings.get("shortener_enabled", False)
         await db.update_settings({"shortener_enabled": not current_state})
-        await settings_callbacks(client, callback._replace(data="set_shortener"))
+        # THE FIX: Directly update the string instead of using the broken _replace method
+        callback.data = "set_shortener"
+        await settings_callbacks(client, callback)
 
     elif action == "set_api":
         ADMIN_STATE[user_id] = "waiting_for_api"
@@ -121,7 +123,9 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         settings = await db.get_settings()
         current_state = settings.get("requests_enabled", True)
         await db.update_settings({"requests_enabled": not current_state})
-        await settings_callbacks(client, callback._replace(data="set_requests"))
+        # THE FIX: Directly update the string instead of using the broken _replace method
+        callback.data = "set_requests"
+        await settings_callbacks(client, callback)
 
 async def process_broadcast_queue(client: Client):
     global BROADCAST_STATUS
