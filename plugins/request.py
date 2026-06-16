@@ -1,6 +1,7 @@
+import time
 import logging
 from pyrogram import Client, filters
-from pyrogram.types import Message, CallbackQuery
+from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from database.multi_db import db
 from config import Config
 
@@ -20,6 +21,20 @@ async def request_command(client: Client, message: Message):
         
     movie_name = message.text.split(maxsplit=1)[1]
     user = message.from_user
+    
+    # --- INSIDE FEATURE: REQUEST PLACEMENT ---
+    if settings.get("inside_enabled", False) and settings.get("inside_placement", "request") == "request":
+        user_data = await db.get_user_settings(user.id)
+        if time.time() > user_data.get("inside_pass_expires", 0):
+            from plugins.inside_verifier import get_target_post
+            target_url = await get_target_post(client, settings)
+            if target_url:
+                return await message.reply_text(
+                    f"🔒 **Security Verification Required!**\n\n"
+                    f"To prove you are human and submit requests, please click the button below, find the post with our secret words, and **forward it to me here**.",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Go to Channel Post", url=target_url)]])
+                )
+    # ----------------------------------------
     
     req_text = (
         f"🔔 **NEW MOVIE REQUEST**\n\n"
@@ -46,6 +61,21 @@ async def request_button_callback(client: Client, callback: CallbackQuery):
         
     movie_name = callback.data.split("req_", 1)[1]
     user = callback.from_user
+    
+    # --- INSIDE FEATURE: REQUEST PLACEMENT ---
+    if settings.get("inside_enabled", False) and settings.get("inside_placement", "request") == "request":
+        user_data = await db.get_user_settings(user.id)
+        if time.time() > user_data.get("inside_pass_expires", 0):
+            from plugins.inside_verifier import get_target_post
+            target_url = await get_target_post(client, settings)
+            if target_url:
+                await callback.message.edit_text(
+                    f"🔒 **Security Verification Required!**\n\n"
+                    f"To prove you are human and submit requests, please click the button below, find the post with our secret words, and **forward it to me here**.",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Go to Channel Post", url=target_url)]])
+                )
+                return await callback.answer("Verification required!", show_alert=True)
+    # ----------------------------------------
     
     req_text = (
         f"🔔 **NEW MOVIE REQUEST**\n\n"
