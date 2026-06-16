@@ -202,9 +202,8 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
             ]
         ]
         
-        # If interactive is active, show the button to access the new filter settings!
         if m == "interactive":
-            buttons.append([InlineKeyboardButton(text="⚙️ Configure Quality & Language", callback_data="uset_interactive_menu")])
+            buttons.append([InlineKeyboardButton(text="⚙️ Configure File Size & Language", callback_data="uset_interactive_menu")])
             
         buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="tier_root_fallback")])
         
@@ -217,40 +216,42 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
 
     if data == "uset_mode_interactive":
         await db.update_user_setting(user_id, "search_mode", "interactive")
-        # Automatically jump to the new filter menu when they select Interactive!
         query.data = "uset_interactive_menu"
         return await menus_callback_handler(client, query)
 
-    # THE NEW PERSONAL INTERACTIVE FILTER MENU
+    # THE NEW PERSONAL SIZE/LANGUAGE FILTER MENU
     if data == "uset_interactive_menu":
         u_sett = await db.get_user_settings(user_id)
-        q = u_sett.get("quality", "all")
+        s = u_sett.get("size", "all")
         l = u_sett.get("language", "all")
         
         buttons = [
             [
-                InlineKeyboardButton(f"{'✅ ' if q=='1080p' else ''}1080p", callback_data="uset_q_1080p"),
-                InlineKeyboardButton(f"{'✅ ' if q=='720p' else ''}720p", callback_data="uset_q_720p"),
-                InlineKeyboardButton(f"{'✅ ' if q=='480p' else ''}480p", callback_data="uset_q_480p"),
-                InlineKeyboardButton(f"{'✅ ' if q=='all' else ''}All Qualities", callback_data="uset_q_all")
+                InlineKeyboardButton(f"{'✅ ' if s=='small' else ''}< 500 MB", callback_data="uset_s_small"),
+                InlineKeyboardButton(f"{'✅ ' if s=='medium' else ''}500 MB - 1 GB", callback_data="uset_s_medium")
             ],
+            [
+                InlineKeyboardButton(f"{'✅ ' if s=='large' else ''}1 GB - 2 GB", callback_data="uset_s_large"),
+                InlineKeyboardButton(f"{'✅ ' if s=='xlarge' else ''}> 2 GB", callback_data="uset_s_xlarge")
+            ],
+            [InlineKeyboardButton(f"{'✅ ' if s=='all' else ''}Any File Size", callback_data="uset_s_all")],
             [
                 InlineKeyboardButton(f"{'✅ ' if l=='tamil' else ''}Tamil", callback_data="uset_l_tamil"),
                 InlineKeyboardButton(f"{'✅ ' if l=='telugu' else ''}Telugu", callback_data="uset_l_telugu"),
-                InlineKeyboardButton(f"{'✅ ' if l=='hindi' else ''}Hindi", callback_data="uset_l_hindi"),
-                InlineKeyboardButton(f"{'✅ ' if l=='all' else ''}All Languages", callback_data="uset_l_all")
+                InlineKeyboardButton(f"{'✅ ' if l=='hindi' else ''}Hindi", callback_data="uset_l_hindi")
             ],
+            [InlineKeyboardButton(f"{'✅ ' if l=='all' else ''}Any Language", callback_data="uset_l_all")],
             [InlineKeyboardButton("🔙 Save & Return", callback_data="tier_user_home")]
         ]
         return await query.message.edit_text(
             "✨ **Interactive Mode Filter Settings**\n"
-            "Select your preferred language and quality. These will be automatically applied whenever you search!", 
+            "Select your preferred language and file size threshold. These will be automatically applied whenever you search!", 
             reply_markup=InlineKeyboardMarkup(buttons)
         )
 
-    if data.startswith("uset_q_"):
-        new_q = data.replace("uset_q_", "")
-        await db.update_user_setting(user_id, "quality", new_q)
+    if data.startswith("uset_s_"):
+        new_s = data.replace("uset_s_", "")
+        await db.update_user_setting(user_id, "size", new_s)
         query.data = "uset_interactive_menu"
         return await menus_callback_handler(client, query)
 
@@ -293,9 +294,8 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
             [InlineKeyboardButton(text=f"{'✅' if mode=='let_members_choose' else '❌'} Let Members Choose", callback_data=f"gset_mode_let_members_choose_{c_id}")]
         ]
         
-        # If interactive is active for group, show config button
         if mode == "force_interactive":
-            buttons.append([InlineKeyboardButton(text="⚙️ Configure Group Quality & Language", callback_data=f"gset_interactive_menu_{c_id}")])
+            buttons.append([InlineKeyboardButton(text="⚙️ Configure Group Size & Language", callback_data=f"gset_interactive_menu_{c_id}")])
             
         buttons.append([InlineKeyboardButton(text="🔙 Back to List", callback_data="tier_group_list")])
         
@@ -313,7 +313,6 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         await db.update_group_setting(chat_id, "search_mode", target_mode)
         await query.answer("Group layout policy updated successfully.")
         
-        # If they selected interactive, launch the menu instantly
         if target_mode == "force_interactive":
             query.data = f"gset_interactive_menu_{chat_id}"
         else:
@@ -321,26 +320,29 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
             
         return await menus_callback_handler(client, query)
 
-    # THE NEW GROUP INTERACTIVE FILTER MENU
+    # THE NEW GROUP SIZE/LANGUAGE FILTER MENU
     if data.startswith("gset_interactive_menu_"):
         c_id = int(data.split("_")[3])
         g_sett = await db.get_group_settings(c_id)
-        q = g_sett.get("quality_lock", "all")
+        s = g_sett.get("size_lock", "all")
         l = g_sett.get("language_lock", "all")
         
         buttons = [
             [
-                InlineKeyboardButton(f"{'✅ ' if q=='1080p' else ''}1080p", callback_data=f"gset_q_1080p_{c_id}"),
-                InlineKeyboardButton(f"{'✅ ' if q=='720p' else ''}720p", callback_data=f"gset_q_720p_{c_id}"),
-                InlineKeyboardButton(f"{'✅ ' if q=='480p' else ''}480p", callback_data=f"gset_q_480p_{c_id}"),
-                InlineKeyboardButton(f"{'✅ ' if q=='all' else ''}All Qualities", callback_data=f"gset_q_all_{c_id}")
+                InlineKeyboardButton(f"{'✅ ' if s=='small' else ''}< 500 MB", callback_data=f"gset_s_small_{c_id}"),
+                InlineKeyboardButton(f"{'✅ ' if s=='medium' else ''}500 MB - 1 GB", callback_data=f"gset_s_medium_{c_id}")
             ],
+            [
+                InlineKeyboardButton(f"{'✅ ' if s=='large' else ''}1 GB - 2 GB", callback_data=f"gset_s_large_{c_id}"),
+                InlineKeyboardButton(f"{'✅ ' if s=='xlarge' else ''}> 2 GB", callback_data=f"gset_s_xlarge_{c_id}")
+            ],
+            [InlineKeyboardButton(f"{'✅ ' if s=='all' else ''}Any File Size", callback_data=f"gset_s_all_{c_id}")],
             [
                 InlineKeyboardButton(f"{'✅ ' if l=='tamil' else ''}Tamil", callback_data=f"gset_l_tamil_{c_id}"),
                 InlineKeyboardButton(f"{'✅ ' if l=='telugu' else ''}Telugu", callback_data=f"gset_l_telugu_{c_id}"),
-                InlineKeyboardButton(f"{'✅ ' if l=='hindi' else ''}Hindi", callback_data=f"gset_l_hindi_{c_id}"),
-                InlineKeyboardButton(f"{'✅ ' if l=='all' else ''}All Languages", callback_data=f"gset_l_all_{c_id}")
+                InlineKeyboardButton(f"{'✅ ' if l=='hindi' else ''}Hindi", callback_data=f"gset_l_hindi_{c_id}")
             ],
+            [InlineKeyboardButton(f"{'✅ ' if l=='all' else ''}Any Language", callback_data=f"gset_l_all_{c_id}")],
             [InlineKeyboardButton("🔙 Save & Return", callback_data=f"tier_gmanage_{c_id}")]
         ]
         return await query.message.edit_text(
@@ -349,11 +351,11 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
             reply_markup=InlineKeyboardMarkup(buttons)
         )
 
-    if data.startswith("gset_q_"):
+    if data.startswith("gset_s_"):
         parts = data.split("_")
-        new_q = parts[2]
+        new_s = parts[2]
         c_id = int(parts[3])
-        await db.update_group_setting(c_id, "quality_lock", new_q)
+        await db.update_group_setting(c_id, "size_lock", new_s)
         query.data = f"gset_interactive_menu_{c_id}"
         return await menus_callback_handler(client, query)
 
