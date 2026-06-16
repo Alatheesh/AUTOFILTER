@@ -70,60 +70,86 @@ async def monetization_start_handler(client: Client, message: Message):
 
     # --- THE NEW FORMAT (Short Safe IDs) ---
     elif payload.startswith("getfile_"):
-        db_id = payload.split("getfile_")[1]
-        file_data = await db.get_file(db_id)
-        if not file_data:
-            return await message.reply_text("❌ **Error:** File not found in database.")
+        try:
+            db_id = payload.split("getfile_")[1]
             
-        file_id = file_data.get("file_id")
-        settings = await db.get_settings()
-        
-        if user_id in VIP_USERS or not settings.get("shortener_enabled", False):
-            try: await message.reply_document(document=file_id, caption="✨ Here is your requested file.")
-            except Exception: await message.reply_text("❌ **Error:** I cannot access this file. It may have been deleted.")
-            return
+            # Diagnostic Check: Did multi_db update correctly?
+            if not hasattr(db, "get_file"):
+                return await message.reply_text("❌ **Developer Error:** The database file is missing the `get_file` tool. Please ensure you fully updated `database/multi_db.py`!")
 
-        original_url = f"https://t.me/{client.me.username}?start=verify_{db_id}"
-        shortened_url = await get_shortened_url(original_url)
-        await message.reply_text(
-            f"📥 **Your File Download Link is Ready:**\n\n🔗 **Download Link:** {shortened_url}",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(text="⚡ Click to Unlock", url=shortened_url)]])
-        )
+            file_data = await db.get_file(db_id)
+            if not file_data:
+                return await message.reply_text("❌ **Error:** File not found in database. It may have been deleted.")
+                
+            file_id = file_data.get("file_id")
+            settings = await db.get_settings()
+            
+            if user_id in VIP_USERS or not settings.get("shortener_enabled", False):
+                try: 
+                    # Universal Media Sender - fixes "Document vs Video" crashes
+                    await client.send_cached_media(chat_id=message.chat.id, file_id=file_id, caption="✨ Here is your requested file.")
+                except Exception as send_err: 
+                    logger.error(f"Send cached media failed: {send_err}")
+                    await message.reply_text(f"❌ **Delivery Error:** Telegram rejected the file.\n`{str(send_err)}`")
+                return
+
+            original_url = f"https://t.me/{client.me.username}?start=verify_{db_id}"
+            shortened_url = await get_shortened_url(original_url)
+            await message.reply_text(
+                f"📥 **Your File Download Link is Ready:**\n\n🔗 **Download Link:** {shortened_url}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(text="⚡ Click to Unlock", url=shortened_url)]])
+            )
+        except Exception as e:
+            logger.error(f"Critical crash in getfile_: {e}")
+            await message.reply_text(f"❌ **System Crash:** Code broke before sending.\n`{str(e)}`")
         return
 
     elif payload.startswith("verify_"):
-        db_id = payload.split("verify_")[1]
-        file_data = await db.get_file(db_id)
-        if not file_data:
-            return await message.reply_text("❌ **Error:** File not found in database.")
-            
-        file_id = file_data.get("file_id")
-        try: await message.reply_document(document=file_id, caption="✨ Premium delivery complete! Here is your requested file.")
-        except Exception: await message.reply_text("❌ **Error:** I cannot access this file. It may have been deleted.")
+        try:
+            db_id = payload.split("verify_")[1]
+            file_data = await db.get_file(db_id)
+            if not file_data:
+                return await message.reply_text("❌ **Error:** File not found in database.")
+                
+            file_id = file_data.get("file_id")
+            try: 
+                await client.send_cached_media(chat_id=message.chat.id, file_id=file_id, caption="✨ Premium delivery complete! Here is your requested file.")
+            except Exception as send_err: 
+                await message.reply_text(f"❌ **Delivery Error:** Telegram rejected the file.\n`{str(send_err)}`")
+        except Exception as e:
+            await message.reply_text(f"❌ **System Crash:**\n`{str(e)}`")
         return
 
     # --- THE FALLBACK FOR OLD BROKEN BUTTONS ---
     elif payload.startswith("file_"):
-        file_id = payload.split("file_")[1]
-        settings = await db.get_settings()
-        
-        if user_id in VIP_USERS or not settings.get("shortener_enabled", False):
-            try: await message.reply_document(document=file_id, caption="✨ Here is your requested file.")
-            except Exception: await message.reply_text("❌ **Error:** Telegram ID limit reached. Please search for the movie again to generate a new link.")
-            return
+        try:
+            file_id = payload.split("file_")[1]
+            settings = await db.get_settings()
+            
+            if user_id in VIP_USERS or not settings.get("shortener_enabled", False):
+                try: 
+                    await client.send_cached_media(chat_id=message.chat.id, file_id=file_id, caption="✨ Here is your requested file.")
+                except Exception: 
+                    await message.reply_text("❌ **Error:** Telegram 64-Character ID limit reached. Please search for the movie again to generate a new button.")
+                return
 
-        original_url = f"https://t.me/{client.me.username}?start=verifyold_{file_id}"
-        shortened_url = await get_shortened_url(original_url)
-        await message.reply_text(
-            f"📥 **Your File Download Link is Ready:**\n\n🔗 **Download Link:** {shortened_url}",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(text="⚡ Click to Unlock", url=shortened_url)]])
-        )
+            original_url = f"https://t.me/{client.me.username}?start=verifyold_{file_id}"
+            shortened_url = await get_shortened_url(original_url)
+            await message.reply_text(
+                f"📥 **Your File Download Link is Ready:**\n\n🔗 **Download Link:** {shortened_url}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(text="⚡ Click to Unlock", url=shortened_url)]])
+            )
+        except Exception: pass
         return
 
     elif payload.startswith("verifyold_"):
-        file_id = payload.split("verifyold_")[1]
-        try: await message.reply_document(document=file_id, caption="✨ Premium delivery complete! Here is your requested file.")
-        except Exception: await message.reply_text("❌ **Error:** Telegram ID limit reached. Please search for the movie again to generate a new link.")
+        try:
+            file_id = payload.split("verifyold_")[1]
+            try: 
+                await client.send_cached_media(chat_id=message.chat.id, file_id=file_id, caption="✨ Premium delivery complete! Here is your requested file.")
+            except Exception: 
+                await message.reply_text("❌ **Error:** Telegram 64-Character ID limit reached. Please search for the movie again to generate a new button.")
+        except Exception: pass
         return
 
 @Client.on_callback_query(filters.regex(r"^(referral_menu|upgrade_premium|activate_premium_demo|check_membership_retry)$"))
