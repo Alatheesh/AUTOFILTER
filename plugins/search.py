@@ -28,8 +28,11 @@ SIZE_MAP = {
 }
 
 def levenshtein_distance(s1: str, s2: str) -> int:
-    if len(s1) < len(s2): return levenshtein_distance(s2, s1)
-    if len(s2) == 0: return len(s1)
+    if len(s1) < len(s2):
+        return levenshtein_distance(s2, s1)
+    if len(s2) == 0:
+        return len(s1)
+        
     previous_row = range(len(s2) + 1)
     for i, c1 in enumerate(s1):
         current_row = [i + 1]
@@ -39,16 +42,20 @@ def levenshtein_distance(s1: str, s2: str) -> int:
             substitutions = previous_row[j] + (c1 != c2)
             current_row.append(min(insertions, deletions, substitutions))
         previous_row = current_row
+        
     return previous_row[-1]
 
 async def fetch_imdb_tmdb(query: str) -> dict:
-    tmdb_api_key = os.environ.get("TMDB_API_KEY", "e262bd07ebfb205acaed257bb4227ea6")
+    tmdb_api_key = os.environ.get("TMDB_API_KEY", "")
     if not tmdb_api_key:
         return {
-            "title": query.title(), "rating": "8.2/10", 
+            "title": query.title(), 
+            "rating": "8.2/10", 
             "poster": "https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=600", 
-            "genre": "Sci-Fi, Adventure", "plot": "Connect TMDB_API_KEY to unlock actual live movie details."
+            "genre": "Sci-Fi, Adventure", 
+            "plot": "Connect TMDB_API_KEY to unlock actual live movie details."
         }
+        
     url = f"https://api.themoviedb.org/3/search/movie?api_key={tmdb_api_key}&query={query}"
     try:
         async with aiohttp.ClientSession() as session:
@@ -59,41 +66,24 @@ async def fetch_imdb_tmdb(query: str) -> dict:
                         movie = data["results"][0]
                         poster_url = f"https://image.tmdb.org/t/p/w500{movie.get('poster_path')}" if movie.get("poster_path") else "https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=600"
                         return {
-                            "title": movie.get("title", query), "rating": f"{movie.get('vote_average', 'N/A')}/10", 
-                            "poster": poster_url, "genre": "Drama", "plot": movie.get("overview", "No overview available.")
+                            "title": movie.get("title", query), 
+                            "rating": f"{movie.get('vote_average', 'N/A')}/10", 
+                            "poster": poster_url, 
+                            "genre": "Drama", 
+                            "plot": movie.get("overview", "No overview available.")
                         }
-    except Exception as e: logger.error(f"TMDB Fetch Error: {e}")
+    except Exception as e:
+        logger.error(f"TMDB Fetch Error: {e}")
+        
     return {
-        "title": query.title(), "rating": "N/A", 
+        "title": query.title(), 
+        "rating": "N/A", 
         "poster": "https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=600", 
-        "genre": "Uncategorized", "plot": f"A query search matching: {query}"
+        "genre": "Uncategorized", 
+        "plot": f"A query search matching: {query}"
     }
 
-async def get_tmdb_suggestions(query: str) -> list:
-    """Uses TMDB API to find the perfectly spelled movie title for typos."""
-    tmdb_api_key = os.environ.get("TMDB_API_KEY", "")
-    if not tmdb_api_key: return []
-        
-    url = f"https://api.themoviedb.org/3/search/movie?api_key={tmdb_api_key}&query={query}"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    results = data.get("results", [])
-                    titles = []
-                    for m in results:
-                        t = m.get("title")
-                        if t and t not in titles:
-                            titles.append(t)
-                        if len(titles) >= 3: # Grab top 3 perfect matches
-                            break
-                    return titles
-    except Exception as e: logger.error(f"TMDB Suggestion Error: {e}")
-    return []
-
 async def get_fuzzy_suggestions(query: str) -> list:
-    """Fallback: Searches local DB if TMDB API is offline."""
     titles = await db.search_files("", skip=0, limit=100, exact=False)
     suggestions = []
     for item in titles:
@@ -106,8 +96,11 @@ async def get_filter_settings(user_id: int, chat_id: int, chat_type):
     if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         g_sett = await db.get_group_settings(chat_id)
         g_mode = g_sett.get("search_mode", "let_members_choose")
-        if g_mode == "force_default": return "default", "all", "all"
-        elif g_mode == "force_interactive": return "interactive", g_sett.get("language_lock", "all"), g_sett.get("size_lock", "all")
+        if g_mode == "force_default":
+            return "default", "all", "all"
+        elif g_mode == "force_interactive":
+            return "interactive", g_sett.get("language_lock", "all"), g_sett.get("size_lock", "all")
+            
     u_sett = await db.get_user_settings(user_id)
     return u_sett.get("search_mode", "default"), u_sett.get("language", "all"), u_sett.get("size", "all")
 
@@ -119,6 +112,7 @@ def format_size(size_bytes):
     s = round(size_bytes / p, 2)
     return f"{s} {size_name[i]}"
 
+# THE FIX 3: Added 'index', 'batch', and 'migrate_db' to the exclusion list!
 @Client.on_message((filters.group | filters.private) & filters.text & ~filters.command(["start", "help", "about", "source", "settings", "request", "plot", "history", "clear_history", "broadcast", "stats", "backup", "admin", "index", "batch", "migrate_db"]))
 async def auto_filter(client: Client, message: Message):
     query = message.text.strip()
@@ -140,30 +134,15 @@ async def auto_filter(client: Client, message: Message):
 
     results = filtered_results[:10]
     
-    # ==========================================
-    # --- TMDB SMART BUTTON GENERATOR ---
-    # ==========================================
     if not results:
-        # 1. Try TMDB first for perfect spelling, fallback to local DB if no API key
-        suggestions = await get_tmdb_suggestions(query)
-        if not suggestions:
-            suggestions = await get_fuzzy_suggestions(query)
-            
-        btn_list = []
+        suggestions = await get_fuzzy_suggestions(query)
+        req_buttons = InlineKeyboardMarkup([[InlineKeyboardButton("🔔 Request this Movie", callback_data=f"req_{query[:40]}")]])
         if suggestions:
-            for s in suggestions:
-                # 2. Build the clickable auto-correct buttons
-                btn_list.append([InlineKeyboardButton(f"🔍 Search: {s}", callback_data=f"fuz_{s[:50]}")])
-                
-        # 3. Always keep the Request button at the bottom
-        btn_list.append([InlineKeyboardButton("🔔 Request this Movie", callback_data=f"req_{query[:40]}")])
-        
-        if suggestions:
-            await message.reply_text("😔 **No exact matches found.**\n\nDid you mean one of these?", reply_markup=InlineKeyboardMarkup(btn_list))
+            s_text = ", ".join([f"`{s}`" for s in suggestions])
+            await message.reply_text(f"😔 No files matching your size/language criteria.\n\n**Did you mean:** {s_text}?", reply_markup=req_buttons)
         else:
-            await message.reply_text("😔 **No files found matching your criteria.**", reply_markup=InlineKeyboardMarkup(btn_list))
+            await message.reply_text("😔 No files found matching your criteria.", reply_markup=req_buttons)
         return
-    # ==========================================
         
     metadata = await fetch_imdb_tmdb(query)
     buttons = []
