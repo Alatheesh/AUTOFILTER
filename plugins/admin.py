@@ -37,15 +37,14 @@ async def admin_input_catcher(client: Client, message: Message):
         del ADMIN_STATE[user_id]
         await message.reply_text("✅ **Success!** Shortener Link updated in the database.\nType `/settings` to view.")
 
-@Client.on_message(filters.command("settings") & filters.user(Config.ADMINS))
-async def settings_command(client: Client, message: Message):
-    await send_settings_home(message)
+# (Removed the local /settings command so it doesn't clash with ui_menus.py)
 
 async def send_settings_home(message_or_query):
-    text = "⚙️ **Admin Control Panel**\n\nSelect a module to configure:"
+    text = "👑 **Bot Creator Control Panel**\n\nSelect a master module to configure:"
     buttons = [
         [InlineKeyboardButton("🔗 Shortener Settings", callback_data="set_shortener")],
-        [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests")]
+        [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests")],
+        [InlineKeyboardButton("🔙 Back to Main Hub", callback_data="tier_root_fallback")] # Links back to 3-Tier Menu
     ]
     
     if isinstance(message_or_query, Message):
@@ -86,7 +85,6 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         settings = await db.get_settings()
         current_state = settings.get("shortener_enabled", False)
         await db.update_settings({"shortener_enabled": not current_state})
-        # THE FIX: Directly update the string instead of using the broken _replace method
         callback.data = "set_shortener"
         await settings_callbacks(client, callback)
 
@@ -123,7 +121,6 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         settings = await db.get_settings()
         current_state = settings.get("requests_enabled", True)
         await db.update_settings({"requests_enabled": not current_state})
-        # THE FIX: Directly update the string instead of using the broken _replace method
         callback.data = "set_requests"
         await settings_callbacks(client, callback)
 
