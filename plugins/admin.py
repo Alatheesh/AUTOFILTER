@@ -167,67 +167,159 @@ def format_eta(seconds):
         
     return " ".join(eta_strings) if eta_strings else "< 1 minute"
 
-@Client.on_message(filters.command("stats") & filters.user(Config.ADMINS))
-async def bot_stats_dashboard(client: Client, message: Message):
-    status_msg = await message.reply_text("📊 **Aggregating multi-shard metadata & queue stats...**")
+# ==========================================================
+# 📊 MAIN STATS DASHBOARD GENERATORS
+# ==========================================================
+
+async def get_stats_home_text_and_buttons():
     db_stats = await db.global_stats()
     
     used_space = format_bytes(db_stats.get("total_size_bytes", 0))
     left_space = format_bytes(db_stats.get("space_left_bytes", 0))
-    shards_text = "".join([f"• **Shard {idx + 1}**: `{count}` files\n" for idx, count in enumerate(db_stats.get("shard_distribution", []))])
+    shards_text = "".join([f"• **Shard {idx + 1}**: `{count:,}` files\n" for idx, count in enumerate(db_stats.get("shard_distribution", []))])
+    total_files = db_stats.get('total_files', 0)
     
+    text = (
+        f"📊 **Advanced System Status Dashboard**\n\n"
+        f"🗂️ **Total Indexed Files:** `{total_files:,}`\n\n"
+        f"💾 **Storage Analytics:**\n"
+        f"• **Space Used:** `{used_space}`\n"
+        f"• **Space Remaining:** `{left_space}`\n"
+        f"• **Estimated Capacity Left:** `~{db_stats.get('estimated_files_left', 0):,} files`\n\n"
+        f"🖲️ **Shard Distribution:**\n{shards_text}"
+    )
+    
+    buttons = [
+        [
+            InlineKeyboardButton("⚙️ Worker 1: Indexing", callback_data="stats_worker1"),
+            InlineKeyboardButton("⚙️ Worker 2: Metadata", callback_data="stats_worker2")
+        ],
+        [InlineKeyboardButton("🔄 Refresh Data", callback_data="stats_refresh_home")]
+    ]
+    return text, InlineKeyboardMarkup(buttons)
+
+async def get_worker1_text_and_buttons():
+    active_job = await db.get_active_job()
+    
+    if active_job:
+        target = active_job.get("chat_name", "Unknown Channel")
+        scanned = active_job.get("scanned", 0)
+        
+        # Calculate how many messages are left based on current_id
+        current = active_job.get("current_id", 0)
+        left = max(0, current)
+        
+        total_msgs = active_job.get("start_id", 0) or (scanned + left)
+        
+        # Breakdown details from the index feature execution
+        saved = active_job.get("saved", 0)
+        duplicates = active_job.get("duplicates", 0) or active_job.get("duplicates_skipped", 0)
+        non_media = active_job.get("non_media", 0) or active_job.get("text_skipped", 0)
+        
+        idx_pct = (scanned / total_msgs * 100) if total_msgs > 0 else 0
+        
+        # Math calculation: 6 seconds per batch of 200 messages
+        idx_eta_seconds = (left / 200) * 6.0
+        idx_eta_string = format_eta(idx_eta_seconds)
+        
+        text = (
+            f"⚙️ **WORKER 1: Mass Channel Indexing**\n"
+            f"🔄 **Status:** `Active (Deep Scan in Progress...)`\n\n"
+            f"• **Target Channel:** `{target}`\n"
+            f"• **Scanned:** `{scanned:,}` | **Left:** `{left:,}`\n"
+            f"• **Total Progress:** `{scanned:,}` / `{total_msgs:,}` (`{idx_pct:.1f}%`)\n"
+            f"• **Estimated Time Left:** `{idx_eta_string}`\n\n"
+            f"📂 **Content Deep-Breakdown:**\n"
+            f"• **New Media Saved:** `{saved:,}`\n"
+            f"• **Duplicates Skipped:** `{duplicates:,}`\n"
+            f"• **Text / Non-Media Skipped:** `{non_media:,}`"
+        )
+    else:
+        text = (
+            f"⚙️ **WORKER 1: Mass Channel Indexing**\n"
+            f"💤 **Status:** `Idle (Queue Empty)`\n\n"
+            f"No active mass channel indexing tasks are currently running in the background queue."
+        )
+        
+    buttons = [
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="stats_home"),
+            InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w1")
+        ]
+    ]
+    return text, InlineKeyboardMarkup(buttons)
+
+async def get_worker2_text_and_buttons():
+    db_stats = await db.global_stats()
     total_files = db_stats.get('total_files', 0)
     indexed_meta = db_stats.get('indexed_metadata', 0)
     pending_meta = total_files - indexed_meta
     
-    # ==========================================
-    # WORKER 1: MASS INDEXING QUEUE ETA
-    # ==========================================
-    active_job = await db.get_active_job()
-    if active_job:
-        target = active_job.get("chat_name", "Unknown")
-        total_msgs = active_job.get("start_id", 0)
-        left_msgs = max(0, active_job.get("current_id", 0))
-        scanned = active_job.get("scanned", 0)
-        saved = active_job.get("saved", 0)
-        
-        idx_pct = (scanned / total_msgs * 100) if total_msgs > 0 else 0
-        
-        # Math: 6 seconds per batch of 200 messages (5s sleep + 1s API)
-        idx_eta_seconds = (left_msgs / 200) * 6.0
-        idx_eta_string = format_eta(idx_eta_seconds)
-        
-        indexing_text = (
-            f"🔄 **Status:** `Active`\n"
-            f"• **Channel:** `{target}`\n"
-            f"• **Progress:** `{scanned:,}` / `{total_msgs:,}` (`{idx_pct:.1f}%`)\n"
-            f"• **Files Saved:** `{saved:,}`\n"
-            f"• **ETA:** `{idx_eta_string}`"
-        )
-    else:
-        indexing_text = "💤 **Status:** `Idle (Queue Empty)`\n• No active `/index` jobs."
-
-    # ==========================================
-    # WORKER 2: METADATA EXTRACTION ETA
-    # ==========================================
-    # Math: 4 seconds sleep + 1.5 seconds metadata overhead
+    # Math calculation: 4 seconds sleep delay + approx 1.5 seconds metadata overhead
     meta_eta_seconds = pending_meta * 5.5 
     meta_eta_string = format_eta(meta_eta_seconds)
     meta_pct = (indexed_meta / total_files * 100) if total_files > 0 else 100
-
-    dashboard_text = (
-        f"📊 **Advanced System Status Dashboard**\n\n"
-        f"🗂️ **Total Indexed Files:** `{total_files:,}`\n"
-        f"💾 **Space Used:** `{used_space}` | **Remaining:** `{left_space}`\n\n"
-        f"⚙️ **WORKER 1: Mass Channel Indexing**\n"
-        f"{indexing_text}\n\n"
-        f"⚙️ **WORKER 2: Metadata Extraction**\n"
-        f"• **Extracted:** `{indexed_meta:,}` / `{total_files:,}` (`{meta_pct:.1f}%`)\n"
-        f"• **Pending:** `{pending_meta:,}` files\n"
-        f"• **ETA:** `{meta_eta_string}`\n\n"
-        f"🖲️ **Shard Distribution:**\n{shards_text}"
+    
+    text = (
+        f"⚙️ **WORKER 2: Language & Metadata Extraction**\n"
+        f"🔄 **Status:** `Processing Database Shards...`\n\n"
+        f"• **Extracted Files:** `{indexed_meta:,}` / `{total_files:,}`\n"
+        f"• **Current Progress:** `{meta_pct:.1f}%` complete\n"
+        f"• **Pending Migration Queue:** `{pending_meta:,}` files left\n"
+        f"• **Estimated Completion Time (ETA):** `{meta_eta_string}`\n\n"
+        f"💡 *Note: This background process routes with a safety buffer delay to avoid hitting Telegram flood limits.*"
     )
-    await status_msg.edit_text(dashboard_text)
+    
+    buttons = [
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="stats_home"),
+            InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w2")
+        ]
+    ]
+    return text, InlineKeyboardMarkup(buttons)
+
+# ==========================================================
+# 🔌 PYROGRAM ROUTERS & EVENT HANDLERS
+# ==========================================================
+
+@Client.on_message(filters.command("stats") & filters.user(Config.ADMINS))
+async def bot_stats_dashboard(client: Client, message: Message):
+    status_msg = await message.reply_text("📊 **Querying core analytics engine...**")
+    text, markup = await get_stats_home_text_and_buttons()
+    await status_msg.edit_text(text, reply_markup=markup)
+
+@Client.on_callback_query(filters.regex(r"^stats_"))
+async def stats_callback_handler(client: Client, callback: CallbackQuery):
+    action = callback.data
+    
+    try:
+        if action == "stats_home":
+            text, markup = await get_stats_home_text_and_buttons()
+            await callback.message.edit_text(text, reply_markup=markup)
+            
+        elif action == "stats_worker1":
+            text, markup = await get_worker1_text_and_buttons()
+            await callback.message.edit_text(text, reply_markup=markup)
+            
+        elif action == "stats_worker2":
+            text, markup = await get_worker2_text_and_buttons()
+            await callback.message.edit_text(text, reply_markup=markup)
+            
+        elif action in ["stats_refresh_home", "stats_refresh_w1", "stats_refresh_w2"]:
+            await callback.answer("🔄 Metrics synchronized successfully!", show_alert=False)
+            
+            if action == "stats_refresh_home":
+                text, markup = await get_stats_home_text_and_buttons()
+            elif action == "stats_refresh_w1":
+                text, markup = await get_worker1_text_and_buttons()
+            else:
+                text, markup = await get_worker2_text_and_buttons()
+                
+            await callback.message.edit_text(text, reply_markup=markup)
+            
+    except Exception as e:
+        logger.error(f"Error handling stats inline navigation: {e}")
+        await callback.answer("⚠️ Processing sync issue. Try running /stats again.", show_alert=True)
 
 @Client.on_message(filters.command("broadcast") & filters.user(Config.ADMINS))
 async def queue_broadcast_init(client: Client, message: Message):
@@ -261,9 +353,7 @@ async def migrate_old_database(client: Client, message: Message):
     
     total_updated = 0
     try:
-        # Loop through all your Shards
         for coll in db.collections:
-            # Find files that DO NOT have a language field, and set them to "pending"
             result = await coll.update_many(
                 {"language": {"$exists": False}},
                 {"$set": {"language": "pending"}}
