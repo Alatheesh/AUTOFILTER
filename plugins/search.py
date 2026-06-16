@@ -70,7 +70,6 @@ async def fetch_imdb_tmdb(query: str) -> dict:
     }
 
 async def get_tmdb_suggestions(query: str) -> list:
-    """Uses TMDB API to find the perfectly spelled movie title for typos."""
     tmdb_api_key = os.environ.get("TMDB_API_KEY", "")
     if not tmdb_api_key: return []
         
@@ -86,20 +85,31 @@ async def get_tmdb_suggestions(query: str) -> list:
                         t = m.get("title")
                         if t and t not in titles:
                             titles.append(t)
-                        if len(titles) >= 3: # Grab top 3 perfect matches
+                        if len(titles) >= 3:
                             break
                     return titles
     except Exception as e: logger.error(f"TMDB Suggestion Error: {e}")
     return []
 
 async def get_fuzzy_suggestions(query: str) -> list:
-    """Fallback: Searches local DB if TMDB API is offline."""
-    titles = await db.search_files("", skip=0, limit=100, exact=False)
+    """THE FIX: Uses the first 3 letters to grab relevant files from the ENTIRE database, not just the first 100."""
+    pool_query = query[:3] if len(query) >= 3 else query
+    titles = await db.search_files(pool_query, skip=0, limit=300, exact=False)
+    
     suggestions = []
     for item in titles:
         title = item.get("title", "")
-        if title and levenshtein_distance(query.lower(), title.lower()) <= 5:
+        if title and levenshtein_distance(query.lower(), title.lower()) <= 6:
             suggestions.append(title)
+            
+    # If still empty, try an even broader search using the first 2 letters
+    if not suggestions and len(query) >= 2:
+        titles = await db.search_files(query[:2], skip=0, limit=300, exact=False)
+        for item in titles:
+            title = item.get("title", "")
+            if title and levenshtein_distance(query.lower(), title.lower()) <= 5:
+                suggestions.append(title)
+                
     return list(set(suggestions))[:3]
 
 async def get_filter_settings(user_id: int, chat_id: int, chat_type):
@@ -133,18 +143,23 @@ async def auto_filter(client: Client, message: Message):
     if resolved_mode == "interactive" and resolved_lang not in ["all", "none"]:
         raw_query += f" {resolved_lang}"
 
+    # First Pass Search
     raw_results = await db.search_files(raw_query, skip=0, limit=150, exact=False)
+    
+    # === THE FIX: DOUBLE-SEARCH BYPASS ===
+    # If the database has "Spiderman" but the user typed "Spider Man"
+    if not raw_results and " " in query:
+        fallback_query = query.replace(" ", "")
+        if resolved_mode == "interactive" and resolved_lang not in ["all", "none"]:
+            fallback_query += f" {resolved_lang}"
+        raw_results = await db.search_files(fallback_query, skip=0, limit=150, exact=False)
     
     min_bytes, max_bytes = SIZE_MAP.get(resolved_size, (0, float('inf')))
     filtered_results = [f for f in raw_results if min_bytes <= f.get("size", 0) <= max_bytes]
 
     results = filtered_results[:10]
     
-    # ==========================================
-    # --- TMDB SMART BUTTON GENERATOR ---
-    # ==========================================
     if not results:
-        # 1. Try TMDB first for perfect spelling, fallback to local DB if no API key
         suggestions = await get_tmdb_suggestions(query)
         if not suggestions:
             suggestions = await get_fuzzy_suggestions(query)
@@ -152,10 +167,8 @@ async def auto_filter(client: Client, message: Message):
         btn_list = []
         if suggestions:
             for s in suggestions:
-                # 2. Build the clickable auto-correct buttons
                 btn_list.append([InlineKeyboardButton(f"🔍 Search: {s}", callback_data=f"fuz_{s[:50]}")])
                 
-        # 3. Always keep the Request button at the bottom
         btn_list.append([InlineKeyboardButton("🔔 Request this Movie", callback_data=f"req_{query[:40]}")])
         
         if suggestions:
@@ -163,7 +176,6 @@ async def auto_filter(client: Client, message: Message):
         else:
             await message.reply_text("😔 **No files found matching your criteria.**", reply_markup=InlineKeyboardMarkup(btn_list))
         return
-    # ==========================================
         
     metadata = await fetch_imdb_tmdb(query)
     buttons = []
@@ -215,7 +227,13 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     if resolved_mode == "interactive" and resolved_lang not in ["all", "none"]:
         raw_query += f" {resolved_lang}"
         
+    # Same Double-Search logic applied to pagination pages!
     raw_results = await db.search_files(raw_query, skip=0, limit=150, exact=False)
+    if not raw_results and " " in base_query:
+        fallback_query = base_query.replace(" ", "")
+        if resolved_mode == "interactive" and resolved_lang not in ["all", "none"]:
+            fallback_query += f" {resolved_lang}"
+        raw_results = await db.search_files(fallback_query, skip=0, limit=150, exact=False)
     
     min_bytes, max_bytes = SIZE_MAP.get(resolved_size, (0, float('inf')))
     filtered_results = [f for f in raw_results if min_bytes <= f.get("size", 0) <= max_bytes]
@@ -255,6 +273,8 @@ async def inline_search(client: Client, query: InlineQuery):
     if len(search_query) < 3: return await query.answer([])
         
     results = await db.search_files(search_query, skip=0, limit=Config.MAX_RESULTS, exact=False)
+    if not results and " " in search_query:
+        results = await db.search_files(search_query.replace(" ", ""), skip=0, limit=Config.MAX_RESULTS, exact=False)
     
     articles = []
     for idx, file in enumerate(results):
