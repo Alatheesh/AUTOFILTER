@@ -74,17 +74,22 @@ async def monetization_start_handler(client: Client, message: Message):
                 USER_REFERRER[user_id] = referrer_id
                 REFERRAL_POINTS[referrer_id] = REFERRAL_POINTS.get(referrer_id, 0) + 10
                 await message.reply_text(f"🎉 Welcome! Registered via `{referrer_id}`.")
+                try: await client.send_message(referrer_id, f"👤 **New Referral! You received +10 Points!**")
+                except: pass
         except Exception: pass
 
     elif payload.startswith("file_"):
         file_id = payload.split("file_")[1]
+
         settings = await db.get_settings()
         is_shortener_on = settings.get("shortener_enabled", False)
 
         if user_id in VIP_USERS or not is_shortener_on:
             try:
                 await message.reply_document(document=file_id, caption="✨ Here is your requested file.")
-            except Exception: await message.reply_text("❌ **Error:** I cannot access this file. It may have been deleted.")
+            except Exception as e:
+                logger.error(f"Failed to send file: {e}")
+                await message.reply_text("❌ **Error:** I cannot access this file. It may have been deleted.")
             return
 
         original_url = f"https://t.me/{client.me.username}?start=verify_{file_id}"
@@ -99,7 +104,9 @@ async def monetization_start_handler(client: Client, message: Message):
         file_id = payload.split("verify_")[1]
         try:
             await message.reply_document(document=file_id, caption="✨ Premium delivery complete! Here is your requested file.")
-        except Exception: await message.reply_text("❌ **Error:** I cannot access this file. It may have been deleted.")
+        except Exception as e:
+            logger.error(f"Failed to send file: {e}")
+            await message.reply_text("❌ **Error:** I cannot access this file. It may have been deleted.")
         return
 
 @Client.on_callback_query(filters.regex(r"^(referral_menu|upgrade_premium|activate_premium_demo|check_membership_retry)$"))
@@ -109,8 +116,10 @@ async def monetization_callbacks(client: Client, callback: CallbackQuery):
 
     if target == "check_membership_retry":
         is_joined = await check_double_fsub(client, user_id)
-        if is_joined: await callback.message.edit_text("✅ Verification successful! You can now request your files again.")
-        else: await callback.answer("❌ You haven't joined all channels yet!", show_alert=True)
+        if is_joined:
+            await callback.message.edit_text("✅ Verification successful! You can now request your files again.")
+        else:
+            await callback.answer("❌ You haven't joined all channels yet!", show_alert=True)
         return
 
     if target == "activate_premium_demo":
