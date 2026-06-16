@@ -30,9 +30,6 @@ class MultiDB:
             self.groups = self.clients[0][db_name]["groups"]
             self.jobs = self.clients[0][db_name]["indexing_jobs"]
 
-    # ==========================================
-    # --- NEW JOB QUEUE SYSTEM ---
-    # ==========================================
     async def add_index_job(self, chat_id: int, chat_name: str, start_msg_id: int):
         if not self.clients: return False
         job_id = f"job_{chat_id}"
@@ -60,9 +57,6 @@ class MultiDB:
         if not self.clients: return
         await self.jobs.update_one({"_id": job_id}, {"$set": updates})
 
-    # ==========================================
-    # --- TIER 1 & 2 SETTINGS ---
-    # ==========================================
     async def get_user_settings(self, user_id: int):
         if not self.clients: return {}
         user = await self.users.find_one({"user_id": user_id})
@@ -98,13 +92,25 @@ class MultiDB:
         return await cursor.to_list(length=50)
 
     # ===================================================
-    # --- TIER 3 & GLOBAL SETTINGS ---
+    # --- TIER 3 & GLOBAL SETTINGS (PHASE 1 UPGRADE) ---
     # ===================================================
     async def get_settings(self) -> Dict[str, Any]:
         if not self.clients: return {}
         settings = await self.settings.find_one({"_id": "bot_settings"})
         if not settings:
-            default = {"_id": "bot_settings", "shortener_enabled": Config.USE_SHORTENERS, "shortener_api": "", "shortener_url": "https://gplinks.in/api", "requests_enabled": True}
+            default = {
+                "_id": "bot_settings", 
+                "shortener_enabled": Config.USE_SHORTENERS, 
+                "shortener_api": "", 
+                "shortener_url": "https://gplinks.in/api", 
+                "requests_enabled": True,
+                # 🚀 THE NEW INSIDE FEATURE VARIABLES
+                "inside_enabled": False,
+                "inside_words": [],
+                "inside_times": 5,
+                "inside_channels": [],
+                "inside_placement": "movie"
+            }
             await self.settings.insert_one(default)
             return default
         return settings
@@ -162,7 +168,7 @@ class MultiDB:
             "shards_active": len(self.collections), 
             "total_files": 0, 
             "total_size_bytes": 0, 
-            "indexed_metadata": 0,  # THE FIX: Added tracker for worker progress
+            "indexed_metadata": 0,
             "shard_distribution": []
         }
         
@@ -175,15 +181,12 @@ class MultiDB:
                 stats["total_files"] += count
                 stats["total_size_bytes"] += coll_stats.get("storageSize", 0)
                 
-                # THE FIX: Count files successfully processed by the worker
                 processed = await coll.count_documents({"language": {"$exists": True, "$ne": "pending"}})
                 stats["indexed_metadata"] += processed
-                
             except Exception:
                 count = await coll.count_documents({})
                 stats["shard_distribution"].append(count)
                 stats["total_files"] += count
-                
                 processed = await coll.count_documents({"language": {"$exists": True, "$ne": "pending"}})
                 stats["indexed_metadata"] += processed
                 
