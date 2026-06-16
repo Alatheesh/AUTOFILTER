@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 
 BROADCAST_QUEUE = asyncio.Queue()
 BROADCAST_STATUS = {"total": 0, "processed": 0, "success": 0, "failed": 0, "is_running": False}
-CURRENT_WRITE_SHARD = 0
 
 ADMIN_STATE = {}
 
@@ -30,21 +29,23 @@ async def admin_input_catcher(client: Client, message: Message):
     if state == "waiting_for_api":
         await db.update_settings({"shortener_api": user_input})
         del ADMIN_STATE[user_id]
-        await message.reply_text("✅ **Success!** API Key updated in the database.\nType `/settings` to view.")
+        await message.reply_text("✅ **Success!** API Key updated in the database.\nType `/admin` to view.")
     
     elif state == "waiting_for_url":
         await db.update_settings({"shortener_url": user_input})
         del ADMIN_STATE[user_id]
-        await message.reply_text("✅ **Success!** Shortener Link updated in the database.\nType `/settings` to view.")
+        await message.reply_text("✅ **Success!** Shortener Link updated in the database.\nType `/admin` to view.")
 
-# (Removed the local /settings command so it doesn't clash with ui_menus.py)
+# THE FIX: Added your dedicated classic admin command back!
+@Client.on_message(filters.command("admin") & filters.user(Config.ADMINS))
+async def admin_direct_command(client: Client, message: Message):
+    await send_settings_home(message)
 
 async def send_settings_home(message_or_query):
     text = "👑 **Bot Creator Control Panel**\n\nSelect a master module to configure:"
     buttons = [
         [InlineKeyboardButton("🔗 Shortener Settings", callback_data="set_shortener")],
-        [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests")],
-        [InlineKeyboardButton("🔙 Back to Main Hub", callback_data="tier_root_fallback")] # Links back to 3-Tier Menu
+        [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests")]
     ]
     
     if isinstance(message_or_query, Message):
