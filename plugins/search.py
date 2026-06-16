@@ -72,45 +72,46 @@ async def fetch_imdb_tmdb(query: str) -> dict:
 async def get_tmdb_suggestions(query: str) -> list:
     tmdb_api_key = os.environ.get("TMDB_API_KEY", "")
     if not tmdb_api_key: return []
-        
     url = f"https://api.themoviedb.org/3/search/movie?api_key={tmdb_api_key}&query={query}"
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    results = data.get("results", [])
                     titles = []
-                    for m in results:
-                        t = m.get("title")
-                        if t and t not in titles:
-                            titles.append(t)
-                        if len(titles) >= 3:
-                            break
+                    for m in data.get("results", []):
+                        if m.get("title") and m.get("title") not in titles:
+                            titles.append(m.get("title"))
+                        if len(titles) >= 3: break
                     return titles
     except Exception as e: logger.error(f"TMDB Suggestion Error: {e}")
     return []
 
 async def get_fuzzy_suggestions(query: str) -> list:
-    """THE FIX: Uses the first 3 letters to grab relevant files from the ENTIRE database, not just the first 100."""
-    pool_query = query[:3] if len(query) >= 3 else query
-    titles = await db.search_files(pool_query, skip=0, limit=300, exact=False)
+    """Smarter Local DB Check: Uses words out of order to find the exact DB file."""
+    first_word = query.split()[0] if query else query
+    pool_query = first_word[:4] if len(first_word) >= 4 else first_word
     
+    titles = await db.search_files(pool_query, skip=0, limit=300, exact=False)
     suggestions = []
+    query_lower = query.lower()
+    
     for item in titles:
         title = item.get("title", "")
-        if title and levenshtein_distance(query.lower(), title.lower()) <= 6:
+        if not title: continue
+        title_lower = title.lower()
+        
+        # 1. Word Match (e.g., "Ganesha Gam" finds "Gam Gam Ganesha")
+        if all(word in title_lower for word in query_lower.split()):
+            suggestions.append(title)
+            continue
+            
+        # 2. Distance Match (Allow 1 typo per 4 letters)
+        dist = levenshtein_distance(query_lower, title_lower)
+        if dist <= max(2, len(query_lower) // 4):
             suggestions.append(title)
             
-    # If still empty, try an even broader search using the first 2 letters
-    if not suggestions and len(query) >= 2:
-        titles = await db.search_files(query[:2], skip=0, limit=300, exact=False)
-        for item in titles:
-            title = item.get("title", "")
-            if title and levenshtein_distance(query.lower(), title.lower()) <= 5:
-                suggestions.append(title)
-                
-    return list(set(suggestions))[:3]
+    return list(dict.fromkeys(suggestions))[:3]
 
 async def get_filter_settings(user_id: int, chat_id: int, chat_type):
     if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
@@ -136,45 +137,59 @@ async def auto_filter(client: Client, message: Message):
         
     user_id = message.from_user.id
     chat_id = message.chat.id
-    
-    resolved_mode, resolved_lang, resolved_size = await get_filter_settings(user_id, chat_id, message.chat.type)
+    resolved_mode, resolved_lang, resolved_size = await get_filter_settings(user_id, chat_id, getattr(message.chat, "type", ChatType.PRIVATE))
 
-    raw_query = query
-    if resolved_mode == "interactive" and resolved_lang not in ["all", "none"]:
-        raw_query += f" {resolved_lang}"
-
-    # First Pass Search
-    raw_results = await db.search_files(raw_query, skip=0, limit=150, exact=False)
+    # Phase 1: Pure Title Search
+    raw_results = await db.search_files(query, skip=0, limit=200, exact=False)
     
-    # === THE FIX: DOUBLE-SEARCH BYPASS ===
-    # If the database has "Spiderman" but the user typed "Spider Man"
+    # Phase 2: No-Spaces Bypass
     if not raw_results and " " in query:
-        fallback_query = query.replace(" ", "")
-        if resolved_mode == "interactive" and resolved_lang not in ["all", "none"]:
-            fallback_query += f" {resolved_lang}"
-        raw_results = await db.search_files(fallback_query, skip=0, limit=150, exact=False)
-    
+        raw_results = await db.search_files(query.replace(" ", ""), skip=0, limit=200, exact=False)
+
+    # Phase 3: Smart Python Filtering (Fixes the Language Bug)
     min_bytes, max_bytes = SIZE_MAP.get(resolved_size, (0, float('inf')))
-    filtered_results = [f for f in raw_results if min_bytes <= f.get("size", 0) <= max_bytes]
+    filtered_results = []
+    
+    for f in raw_results:
+        # Check Size
+        if not (min_bytes <= f.get("size", 0) <= max_bytes):
+            continue
+            
+        # Check Language (safely in Python, without breaking Regex)
+        if resolved_mode == "interactive" and resolved_lang not in ["all", "none"]:
+            db_lang = f.get("language", "unknown").lower()
+            db_title = f.get("title", "").lower()
+            if resolved_lang.lower() not in db_lang and resolved_lang.lower() not in db_title:
+                continue
+                
+        filtered_results.append(f)
 
     results = filtered_results[:10]
     
     if not results:
-        suggestions = await get_tmdb_suggestions(query)
+        # Prioritize the exact database filename first to prevent TMDB spelling mismatches!
+        suggestions = await get_fuzzy_suggestions(query)
         if not suggestions:
-            suggestions = await get_fuzzy_suggestions(query)
+            suggestions = await get_tmdb_suggestions(query)
             
         btn_list = []
-        if suggestions:
-            for s in suggestions:
-                btn_list.append([InlineKeyboardButton(f"🔍 Search: {s}", callback_data=f"fuz_{s[:50]}")])
+        for s in suggestions:
+            btn_list.append([InlineKeyboardButton(f"🔍 Search: {s}", callback_data=f"fuz_{s[:50]}")])
                 
         btn_list.append([InlineKeyboardButton("🔔 Request this Movie", callback_data=f"req_{query[:40]}")])
         
-        if suggestions:
-            await message.reply_text("😔 **No exact matches found.**\n\nDid you mean one of these?", reply_markup=InlineKeyboardMarkup(btn_list))
-        else:
-            await message.reply_text("😔 **No files found matching your criteria.**", reply_markup=InlineKeyboardMarkup(btn_list))
+        # Ensure we don't reply to a message if it's acting as a callback bridge
+        try:
+            if suggestions:
+                await message.reply_text("😔 **No exact matches found.**\n\nDid you mean one of these?", reply_markup=InlineKeyboardMarkup(btn_list), quote=True)
+            else:
+                await message.reply_text("😔 **No files found matching your criteria.**", reply_markup=InlineKeyboardMarkup(btn_list), quote=True)
+        except Exception:
+            # Fallback if the original message was deleted
+            if suggestions:
+                await client.send_message(chat_id, "😔 **No exact matches found.**\n\nDid you mean one of these?", reply_markup=InlineKeyboardMarkup(btn_list))
+            else:
+                await client.send_message(chat_id, "😔 **No files found matching your criteria.**", reply_markup=InlineKeyboardMarkup(btn_list))
         return
         
     metadata = await fetch_imdb_tmdb(query)
@@ -208,9 +223,10 @@ async def auto_filter(client: Client, message: Message):
     )
     
     try:
-        await message.reply_photo(photo=metadata["poster"], caption=caption, reply_markup=InlineKeyboardMarkup(buttons))
+        await message.reply_photo(photo=metadata["poster"], caption=caption, reply_markup=InlineKeyboardMarkup(buttons), quote=True)
     except Exception:
-        await message.reply_text(caption, reply_markup=InlineKeyboardMarkup(buttons))
+        # Fallback to pure message sending if quote fails
+        await client.send_message(chat_id, caption, reply_markup=InlineKeyboardMarkup(buttons))
 
 @Client.on_callback_query(filters.regex(r"^(next|prev)_(\d+)_(.+)$"))
 async def handle_pagination(client: Client, callback: CallbackQuery):
@@ -220,23 +236,20 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     user_id = callback.from_user.id
     chat_id = callback.message.chat.id
     chat_type = callback.message.chat.type
-    
     resolved_mode, resolved_lang, resolved_size = await get_filter_settings(user_id, chat_id, chat_type)
 
-    raw_query = base_query
-    if resolved_mode == "interactive" and resolved_lang not in ["all", "none"]:
-        raw_query += f" {resolved_lang}"
-        
-    # Same Double-Search logic applied to pagination pages!
-    raw_results = await db.search_files(raw_query, skip=0, limit=150, exact=False)
+    raw_results = await db.search_files(base_query, skip=0, limit=200, exact=False)
     if not raw_results and " " in base_query:
-        fallback_query = base_query.replace(" ", "")
-        if resolved_mode == "interactive" and resolved_lang not in ["all", "none"]:
-            fallback_query += f" {resolved_lang}"
-        raw_results = await db.search_files(fallback_query, skip=0, limit=150, exact=False)
+        raw_results = await db.search_files(base_query.replace(" ", ""), skip=0, limit=200, exact=False)
     
     min_bytes, max_bytes = SIZE_MAP.get(resolved_size, (0, float('inf')))
-    filtered_results = [f for f in raw_results if min_bytes <= f.get("size", 0) <= max_bytes]
+    filtered_results = []
+    for f in raw_results:
+        if not (min_bytes <= f.get("size", 0) <= max_bytes): continue
+        if resolved_mode == "interactive" and resolved_lang not in ["all", "none"]:
+            if resolved_lang.lower() not in f.get("language", "unknown").lower() and resolved_lang.lower() not in f.get("title", "").lower():
+                continue
+        filtered_results.append(f)
     
     results = filtered_results[page * 10 : (page + 1) * 10]
     
@@ -252,16 +265,10 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     buttons.append([InlineKeyboardButton(text=AD_SLOT_TEXT, url=AD_SLOT_URL)])
     
     total_pages = math.ceil(len(filtered_results) / 10)
-    
     nav_buttons = []
-    if page > 0:
-        nav_buttons.append(InlineKeyboardButton(text="◀️ Prev", callback_data=f"prev_{page - 1}_{base_query}"))
-        
+    if page > 0: nav_buttons.append(InlineKeyboardButton(text="◀️ Prev", callback_data=f"prev_{page - 1}_{base_query}"))
     nav_buttons.append(InlineKeyboardButton(text=f"Page {page + 1} of {total_pages}", callback_data="pages_info"))
-    
-    if len(filtered_results) > (page + 1) * 10:
-        nav_buttons.append(InlineKeyboardButton(text="Next ▶️", callback_data=f"next_{page + 1}_{base_query}"))
-        
+    if len(filtered_results) > (page + 1) * 10: nav_buttons.append(InlineKeyboardButton(text="Next ▶️", callback_data=f"next_{page + 1}_{base_query}"))
     buttons.append(nav_buttons)
     
     await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
