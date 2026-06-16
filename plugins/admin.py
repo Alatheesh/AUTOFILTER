@@ -148,9 +148,28 @@ def format_bytes(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}"
 
+def format_eta(seconds):
+    """Converts raw seconds into a human-readable Days, Hours, Minutes format."""
+    if seconds <= 0:
+        return "🎉 Fully Processed!"
+    
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
+    minutes = (seconds % 3600) // 60
+    
+    eta_strings = []
+    if days > 0:
+        eta_strings.append(f"{int(days)}d")
+    if hours > 0:
+        eta_strings.append(f"{int(hours)}h")
+    if minutes > 0:
+        eta_strings.append(f"{int(minutes)}m")
+        
+    return " ".join(eta_strings) if eta_strings else "< 1 minute"
+
 @Client.on_message(filters.command("stats") & filters.user(Config.ADMINS))
 async def bot_stats_dashboard(client: Client, message: Message):
-    status_msg = await message.reply_text("📊 **Aggregating multi-shard metadata...**")
+    status_msg = await message.reply_text("📊 **Aggregating multi-shard metadata & queue stats...**")
     db_stats = await db.global_stats()
     
     used_space = format_bytes(db_stats.get("total_size_bytes", 0))
@@ -161,16 +180,51 @@ async def bot_stats_dashboard(client: Client, message: Message):
     indexed_meta = db_stats.get('indexed_metadata', 0)
     pending_meta = total_files - indexed_meta
     
-    # THE FIX: Added the Metadata Background Worker tracker here!
+    # ==========================================
+    # WORKER 1: MASS INDEXING QUEUE ETA
+    # ==========================================
+    active_job = await db.get_active_job()
+    if active_job:
+        target = active_job.get("chat_name", "Unknown")
+        total_msgs = active_job.get("start_id", 0)
+        left_msgs = max(0, active_job.get("current_id", 0))
+        scanned = active_job.get("scanned", 0)
+        saved = active_job.get("saved", 0)
+        
+        idx_pct = (scanned / total_msgs * 100) if total_msgs > 0 else 0
+        
+        # Math: 6 seconds per batch of 200 messages (5s sleep + 1s API)
+        idx_eta_seconds = (left_msgs / 200) * 6.0
+        idx_eta_string = format_eta(idx_eta_seconds)
+        
+        indexing_text = (
+            f"🔄 **Status:** `Active`\n"
+            f"• **Channel:** `{target}`\n"
+            f"• **Progress:** `{scanned:,}` / `{total_msgs:,}` (`{idx_pct:.1f}%`)\n"
+            f"• **Files Saved:** `{saved:,}`\n"
+            f"• **ETA:** `{idx_eta_string}`"
+        )
+    else:
+        indexing_text = "💤 **Status:** `Idle (Queue Empty)`\n• No active `/index` jobs."
+
+    # ==========================================
+    # WORKER 2: METADATA EXTRACTION ETA
+    # ==========================================
+    # Math: 4 seconds sleep + 1.5 seconds metadata overhead
+    meta_eta_seconds = pending_meta * 5.5 
+    meta_eta_string = format_eta(meta_eta_seconds)
+    meta_pct = (indexed_meta / total_files * 100) if total_files > 0 else 100
+
     dashboard_text = (
         f"📊 **Advanced System Status Dashboard**\n\n"
         f"🗂️ **Total Indexed Files:** `{total_files:,}`\n"
-        f"🔍 **Metadata Extracted:** `{indexed_meta:,}` files\n"
-        f"⏳ **Metadata Pending:** `{pending_meta:,}` files\n\n"
-        f"💾 **Storage Analytics:**\n"
-        f"• **Space Used:** `{used_space}`\n"
-        f"• **Space Remaining:** `{left_space}`\n"
-        f"• **Estimated Capacity Left:** `~{db_stats.get('estimated_files_left', 0):,} files`\n\n"
+        f"💾 **Space Used:** `{used_space}` | **Remaining:** `{left_space}`\n\n"
+        f"⚙️ **WORKER 1: Mass Channel Indexing**\n"
+        f"{indexing_text}\n\n"
+        f"⚙️ **WORKER 2: Metadata Extraction**\n"
+        f"• **Extracted:** `{indexed_meta:,}` / `{total_files:,}` (`{meta_pct:.1f}%`)\n"
+        f"• **Pending:** `{pending_meta:,}` files\n"
+        f"• **ETA:** `{meta_eta_string}`\n\n"
         f"🖲️ **Shard Distribution:**\n{shards_text}"
     )
     await status_msg.edit_text(dashboard_text)
