@@ -26,7 +26,19 @@ async def admin_input_catcher(client: Client, message: Message):
     state = ADMIN_STATE[user_id]
     user_input = message.text.strip()
 
-    if state == "waiting_for_api":
+    # --- THE NEW SETUP WIZARD STATES ---
+    if state == "setup_shortener_url":
+        await db.update_settings({"shortener_url": user_input})
+        ADMIN_STATE[user_id] = "setup_shortener_api"
+        await message.reply_text("✅ **URL Saved!**\n\nNow, please send me your secret **API Key** for this shortener.")
+        
+    elif state == "setup_shortener_api":
+        await db.update_settings({"shortener_api": user_input, "shortener_enabled": True})
+        del ADMIN_STATE[user_id]
+        await message.reply_text("✅ **Success!** API Key saved and Shortener is now **🟢 ON**.\nType `/admin` to view.")
+
+    # --- THE EXISTING EDIT STATES ---
+    elif state == "waiting_for_api":
         await db.update_settings({"shortener_api": user_input})
         del ADMIN_STATE[user_id]
         await message.reply_text("✅ **Success!** API Key updated in the database.\nType `/admin` to view.")
@@ -85,9 +97,20 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
     elif action == "set_toggle":
         settings = await db.get_settings()
         current_state = settings.get("shortener_enabled", False)
-        await db.update_settings({"shortener_enabled": not current_state})
-        callback.data = "set_shortener"
-        await settings_callbacks(client, callback)
+        
+        # THE FIX: If ON, turn it off. If OFF, start the Setup Wizard!
+        if current_state:
+            await db.update_settings({"shortener_enabled": False})
+            callback.data = "set_shortener"
+            await settings_callbacks(client, callback)
+        else:
+            ADMIN_STATE[user_id] = "setup_shortener_url"
+            await callback.message.edit_text(
+                "🛠 **Shortener Setup Wizard**\n\n"
+                "To enable the shortener, please send me the **Shortener URL** in the chat now.\n"
+                "(Example: `https://gplinks.in/api`)",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_home")]])
+            )
 
     elif action == "set_api":
         ADMIN_STATE[user_id] = "waiting_for_api"
@@ -149,22 +172,14 @@ def format_bytes(size):
     return f"{size:.2f} {power_labels[n]}"
 
 def format_eta(seconds):
-    """Converts raw seconds into a human-readable Days, Hours, Minutes format."""
-    if seconds <= 0:
-        return "🎉 Fully Processed!"
-    
+    if seconds <= 0: return "🎉 Fully Processed!"
     days = seconds // 86400
     hours = (seconds % 86400) // 3600
     minutes = (seconds % 3600) // 60
-    
     eta_strings = []
-    if days > 0:
-        eta_strings.append(f"{int(days)}d")
-    if hours > 0:
-        eta_strings.append(f"{int(hours)}h")
-    if minutes > 0:
-        eta_strings.append(f"{int(minutes)}m")
-        
+    if days > 0: eta_strings.append(f"{int(days)}d")
+    if hours > 0: eta_strings.append(f"{int(hours)}h")
+    if minutes > 0: eta_strings.append(f"{int(minutes)}m")
     return " ".join(eta_strings) if eta_strings else "< 1 minute"
 
 # ==========================================================
@@ -204,21 +219,15 @@ async def get_worker1_text_and_buttons():
     if active_job:
         target = active_job.get("chat_name", "Unknown Channel")
         scanned = active_job.get("scanned", 0)
-        
-        # Calculate how many messages are left based on current_id
         current = active_job.get("current_id", 0)
         left = max(0, current)
-        
         total_msgs = active_job.get("start_id", 0) or (scanned + left)
         
-        # Breakdown details from the index feature execution
         saved = active_job.get("saved", 0)
         duplicates = active_job.get("duplicates", 0) or active_job.get("duplicates_skipped", 0)
         non_media = active_job.get("non_media", 0) or active_job.get("text_skipped", 0)
         
         idx_pct = (scanned / total_msgs * 100) if total_msgs > 0 else 0
-        
-        # Math calculation: 6 seconds per batch of 200 messages
         idx_eta_seconds = (left / 200) * 6.0
         idx_eta_string = format_eta(idx_eta_seconds)
         
@@ -255,7 +264,6 @@ async def get_worker2_text_and_buttons():
     indexed_meta = db_stats.get('indexed_metadata', 0)
     pending_meta = total_files - indexed_meta
     
-    # Math calculation: 4 seconds sleep delay + approx 1.5 seconds metadata overhead
     meta_eta_seconds = pending_meta * 5.5 
     meta_eta_string = format_eta(meta_eta_seconds)
     meta_pct = (indexed_meta / total_files * 100) if total_files > 0 else 100
@@ -291,32 +299,25 @@ async def bot_stats_dashboard(client: Client, message: Message):
 @Client.on_callback_query(filters.regex(r"^stats_"))
 async def stats_callback_handler(client: Client, callback: CallbackQuery):
     action = callback.data
-    
     try:
         if action == "stats_home":
             text, markup = await get_stats_home_text_and_buttons()
             await callback.message.edit_text(text, reply_markup=markup)
-            
         elif action == "stats_worker1":
             text, markup = await get_worker1_text_and_buttons()
             await callback.message.edit_text(text, reply_markup=markup)
-            
         elif action == "stats_worker2":
             text, markup = await get_worker2_text_and_buttons()
             await callback.message.edit_text(text, reply_markup=markup)
-            
         elif action in ["stats_refresh_home", "stats_refresh_w1", "stats_refresh_w2"]:
             await callback.answer("🔄 Metrics synchronized successfully!", show_alert=False)
-            
             if action == "stats_refresh_home":
                 text, markup = await get_stats_home_text_and_buttons()
             elif action == "stats_refresh_w1":
                 text, markup = await get_worker1_text_and_buttons()
             else:
                 text, markup = await get_worker2_text_and_buttons()
-                
             await callback.message.edit_text(text, reply_markup=markup)
-            
     except Exception as e:
         logger.error(f"Error handling stats inline navigation: {e}")
         await callback.answer("⚠️ Processing sync issue. Try running /stats again.", show_alert=True)
@@ -344,13 +345,9 @@ async def multi_shard_json_backup(client: Client, message: Message):
         await progress.delete()
     except Exception as e: await progress.edit_text(f"❌ **Schema Export Failed:** `{str(e)}`")
 
-# ==========================================================
-# THE ONE-TIME DATABASE MIGRATION TOOL
-# ==========================================================
 @Client.on_message(filters.command("migrate_db") & filters.user(Config.ADMINS))
 async def migrate_old_database(client: Client, message: Message):
     status = await message.reply_text("🔄 **Starting Database Migration...**\nTagging old files for the background worker.")
-    
     total_updated = 0
     try:
         for coll in db.collections:
@@ -359,7 +356,6 @@ async def migrate_old_database(client: Client, message: Message):
                 {"$set": {"language": "pending"}}
             )
             total_updated += result.modified_count
-            
         await status.edit_text(f"✅ **Migration Complete!**\n\nSuccessfully tagged `{total_updated:,}` old files.\nThe Background Worker will now begin processing them silently!")
     except Exception as e:
         await status.edit_text(f"❌ **Migration Failed:** `{str(e)}`")
