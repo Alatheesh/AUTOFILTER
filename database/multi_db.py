@@ -12,7 +12,6 @@ class MultiDB:
         self.clients: List[AsyncIOMotorClient] = []
         self.collections = []
         
-        # Connect to all MongoDB Shards for massive file storage
         for uri in uris:
             try:
                 client = AsyncIOMotorClient(uri)
@@ -25,20 +24,50 @@ class MultiDB:
         if not self.collections:
             logger.warning("No database collections active. Bot features will fail.")
             
-        # Store configurations and settings strictly on Shard 0 to prevent fragmentation
         if self.clients:
             self.settings = self.clients[0][db_name]["settings"]
             self.users = self.clients[0][db_name]["users"]
             self.groups = self.clients[0][db_name]["groups"]
+            self.jobs = self.clients[0][db_name]["indexing_jobs"]
 
     # ==========================================
-    # --- TIER 1: USER SETTINGS (ON SHARD 0) ---
+    # --- NEW JOB QUEUE SYSTEM ---
+    # ==========================================
+    async def add_index_job(self, chat_id: int, chat_name: str, start_msg_id: int):
+        if not self.clients: return False
+        job_id = f"job_{chat_id}"
+        existing = await self.jobs.find_one({"_id": job_id, "status": {"$in": ["pending", "processing"]}})
+        if existing: return False
+        
+        await self.jobs.insert_one({
+            "_id": job_id,
+            "chat_id": chat_id,
+            "chat_name": chat_name,
+            "start_id": start_msg_id,
+            "current_id": start_msg_id,
+            "status": "pending",
+            "scanned": 0,
+            "saved": 0,
+            "duplicates": 0
+        })
+        return True
+
+    async def get_active_job(self):
+        if not self.clients: return None
+        return await self.jobs.find_one({"status": {"$in": ["pending", "processing"]}})
+
+    async def update_job(self, job_id: str, updates: dict):
+        if not self.clients: return
+        await self.jobs.update_one({"_id": job_id}, {"$set": updates})
+
+    # ==========================================
+    # --- TIER 1 & 2 SETTINGS ---
     # ==========================================
     async def get_user_settings(self, user_id: int):
         if not self.clients: return {}
         user = await self.users.find_one({"user_id": user_id})
         if not user:
-            default = {"user_id": user_id, "search_mode": "default", "quality": "all", "language": "all"}
+            default = {"user_id": user_id, "search_mode": "default", "quality": "all", "language": "all", "size": "all"}
             await self.users.insert_one(default)
             return default
         return user
@@ -47,19 +76,13 @@ class MultiDB:
         if not self.clients: return
         await self.users.update_one({"user_id": user_id}, {"$set": {key: value}}, upsert=True)
 
-    # ===============================================
-    # --- TIER 2: GROUP ADMIN SETTINGS (ON SHARD 0) ---
-    # ===============================================
     async def get_group_settings(self, chat_id: int):
         if not self.clients: return {}
         group = await self.groups.find_one({"chat_id": chat_id})
         if not group:
             default = {
-                "chat_id": chat_id,
-                "search_mode": "let_members_choose",
-                "quality_lock": "none",
-                "language_lock": "none",
-                "admins": []
+                "chat_id": chat_id, "search_mode": "let_members_choose",
+                "quality_lock": "none", "language_lock": "none", "size_lock": "none", "admins": []
             }
             await self.groups.insert_one(default)
             return default
@@ -75,13 +98,13 @@ class MultiDB:
         return await cursor.to_list(length=50)
 
     # ===================================================
-    # --- TIER 3 & GLOBAL SETTINGS (ON SHARD 0)       ---
+    # --- TIER 3 & GLOBAL SETTINGS ---
     # ===================================================
     async def get_settings(self) -> Dict[str, Any]:
         if not self.clients: return {}
         settings = await self.settings.find_one({"_id": "bot_settings"})
         if not settings:
-            default = {"_id": "bot_settings", "shortener_enabled": Config.USE_SHORTENERS, "shortener_api": "5b8f729da248937bc38d15ff16ea49", "shortener_url": "https://gplinks.in/api", "requests_enabled": True}
+            default = {"_id": "bot_settings", "shortener_enabled": Config.USE_SHORTENERS, "shortener_api": "", "shortener_url": "https://gplinks.in/api", "requests_enabled": True}
             await self.settings.insert_one(default)
             return default
         return settings
@@ -92,7 +115,7 @@ class MultiDB:
         return True
 
     # ===================================================
-    # --- ORIGINAL MULTI-SHARD FILE SYSTEM (ALL SHARDS) ---
+    # --- MULTI-SHARD FILE SYSTEM ---
     # ===================================================
     async def insert_file(self, file_data: Dict[str, Any], shard_index: Optional[int] = None) -> bool:
         if not self.collections: return False
@@ -147,7 +170,6 @@ class MultiDB:
                 count = await coll.count_documents({})
                 stats["shard_distribution"].append(count)
                 stats["total_files"] += count
-
         total_capacity_bytes = len(self.collections) * 512 * 1024 * 1024
         stats["space_left_bytes"] = max(0, total_capacity_bytes - stats["total_size_bytes"])
         avg_obj_size = stats["total_size_bytes"] / stats["total_files"] if stats["total_files"] > 0 else 300
