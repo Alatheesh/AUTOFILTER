@@ -12,7 +12,7 @@ VIP_USERS = set()
 REFERRAL_POINTS = {}
 USER_REFERRER = {}
 
-# THE FIX: Memory Tracker for the Returning User History wipe warning
+# Memory Tracker for the Returning User History wipe warning
 WARNED_USERS = set()
 
 async def check_double_fsub(client: Client, user_id: int) -> bool:
@@ -65,7 +65,9 @@ async def monetization_start_handler(client: Client, message: Message):
             await message.reply_text(warning_text)
     # ---------------------------------------
 
-    if len(message.command) <= 1: return
+    # THE FIX: Tell Pyrogram to pass normal /start messages to ui_menus.py
+    if len(message.command) <= 1: 
+        raise ContinuePropagation
 
     is_joined = await check_double_fsub(client, user_id)
     if not is_joined:
@@ -104,7 +106,6 @@ async def monetization_start_handler(client: Client, message: Message):
             file_id = file_data.get("file_id")
             settings = await db.get_settings()
             
-            # Send file directly if VIP or shortener is OFF
             if user_id in VIP_USERS or not settings.get("shortener_enabled", False):
                 try: 
                     await client.send_cached_media(chat_id=message.chat.id, file_id=file_id, caption="✨ Here is your requested file.")
@@ -112,12 +113,10 @@ async def monetization_start_handler(client: Client, message: Message):
                     await message.reply_text(f"❌ **Delivery Error:** Telegram rejected the file.\n`{str(send_err)}`")
                 return
 
-            # Shortener logic with safety fallback
             me = await client.get_me()
             original_url = f"https://t.me/{me.username}?start=verify_{db_id}"
             shortened_url = await get_shortened_url(original_url)
             
-            # Secondary safety check to prevent BUTTON_URL_INVALID
             if not shortened_url or not shortened_url.startswith("http"):
                 shortened_url = original_url
 
