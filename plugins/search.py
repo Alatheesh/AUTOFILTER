@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 AD_SLOT_TEXT = "📢 Join Our VIP Channel [Ads Free]!"
 AD_SLOT_URL = "https://t.me/premium_channel"
 
-# Memory constants for size filtering
 MB = 1024 * 1024
 GB = 1024 * MB
 
@@ -150,13 +149,11 @@ async def auto_filter(client: Client, message: Message):
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
-        # THE FIX: File size is now strictly positioned at the start!
         buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
     
     buttons.append([InlineKeyboardButton(text=AD_SLOT_TEXT, url=AD_SLOT_URL)])
     
     if len(filtered_results) > 10:
-        # THE FIX: Dynamically calculate total pages based on matched results
         total_pages = math.ceil(len(filtered_results) / 10)
         buttons.append([
             InlineKeyboardButton(text="◀️ Prev", callback_data=f"prev_0_{query}"),
@@ -210,19 +207,16 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
-        # THE FIX: Maintained the new UI format across pagination pages
         buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
     
     buttons.append([InlineKeyboardButton(text=AD_SLOT_TEXT, url=AD_SLOT_URL)])
     
-    # THE FIX: Calculate total pages for the navigation bar
     total_pages = math.ceil(len(filtered_results) / 10)
     
     nav_buttons = []
     if page > 0:
         nav_buttons.append(InlineKeyboardButton(text="◀️ Prev", callback_data=f"prev_{page - 1}_{base_query}"))
         
-    # Injecting the new page format into the center button
     nav_buttons.append(InlineKeyboardButton(text=f"Page {page + 1} of {total_pages}", callback_data="pages_info"))
     
     if len(filtered_results) > (page + 1) * 10:
