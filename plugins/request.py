@@ -6,7 +6,6 @@ from config import Config
 
 logger = logging.getLogger(__name__)
 
-# Sends requests to the first Admin in your Config list
 TARGET_ADMIN = Config.ADMINS[0] if Config.ADMINS else None
 
 @Client.on_message(filters.command("request") & filters.private)
@@ -57,10 +56,8 @@ async def request_button_callback(client: Client, callback: CallbackQuery):
     if TARGET_ADMIN:
         try:
             await client.send_message(TARGET_ADMIN, req_text)
-            await callback.answer("✅ Request successfully delivered to the admin team!", show_alert=True)
-            
-            # Update the original message so they know they clicked it
             await callback.message.edit_text(f"✅ **You successfully requested:** `{movie_name}`\n\nThe admins have been notified and will upload it soon!")
+            await callback.answer("✅ Request successfully delivered to the admin team!", show_alert=True)
         except Exception as e:
             logger.error(f"Failed to send request to admin: {e}")
             await callback.answer("❌ Error delivering request.", show_alert=True)
