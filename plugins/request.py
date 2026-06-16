@@ -12,58 +12,53 @@ TARGET_ADMIN = Config.ADMINS[0] if Config.ADMINS else None
 @Client.on_message(filters.command("request") & filters.private)
 async def request_command(client: Client, message: Message):
     settings = await db.get_settings()
-    
-    if not settings.get("requests_enabled", True):
-        return await message.reply_text("❌ **Requests are currently disabled by the admins.**")
-    
-    if len(message.command) < 2:
-        return await message.reply_text("❌ **Usage:** `/request <Movie Name>`\nExample: `/request Avengers Endgame`")
+    if not settings.get("requests_enabled", True): return await message.reply_text("❌ **Requests are currently disabled by the admins.**")
+    if len(message.command) < 2: return await message.reply_text("❌ **Usage:** `/request <Movie Name>`\nExample: `/request Avengers Endgame`")
         
-    movie_name = message.text.split(maxsplit=1)[1]
     user = message.from_user
     
-    # --- INSIDE FEATURE: REQUEST PLACEMENT ---
-    if settings.get("inside_enabled", False) and settings.get("inside_placement", "request") == "request":
+    if settings.get("inside_enabled", False) and settings.get("inside_placement", "movie").lower() == "request":
         user_data = await db.get_user_settings(user.id)
         if time.time() > user_data.get("inside_pass_expires", 0):
             from plugins.inside_verifier import get_target_post
             target_url = await get_target_post(client, settings)
             if target_url:
+                inside_times = settings.get("inside_times", 5) or 1
+                hours_per_pass = 24 / inside_times
                 return await message.reply_text(
                     f"🔒 **Security Verification Required!**\n\n"
-                    f"To prove you are human and submit requests, please click the button below, find the post with our secret words, and **forward it to me here**.",
+                    f"To prevent spam and unlock requests for the next **{hours_per_pass:.1f} Hours**, please complete this task:\n\n"
+                    f"1️⃣ Click the button below to go to our channel.\n"
+                    f"2️⃣ Find the latest post containing our secret words.\n"
+                    f"3️⃣ **Forward that exact message directly to me here!**",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Go to Channel Post", url=target_url)]])
                 )
-    # ----------------------------------------
+            else:
+                # 🚨 THE FIX: Completely block execution if the link isn't ready!
+                if user.id in Config.ADMINS:
+                    await message.reply_text("⚠️ **ADMIN DEBUG:** Inside Feature is ON, but no target URL is cached in MongoDB. Please post a new message in your channel with the trigger word!")
+                else:
+                    await message.reply_text("⏳ Verification system is starting up. Please try again later.")
+                return 
     
-    req_text = (
-        f"🔔 **NEW MOVIE REQUEST**\n\n"
-        f"👤 **User:** {user.first_name} (`{user.id}`)\n"
-        f"🎬 **Requested:** `{movie_name}`"
-    )
+    movie_name = message.text.split(maxsplit=1)[1]
+    req_text = f"🔔 **NEW MOVIE REQUEST**\n\n👤 **User:** {user.first_name} (`{user.id}`)\n🎬 **Requested:** `{movie_name}`"
     
     if TARGET_ADMIN:
         try:
             await client.send_message(TARGET_ADMIN, req_text)
             await message.reply_text(f"✅ **Success!** Your request for `{movie_name}` has been delivered to the admin team.")
-        except Exception as e:
-            logger.error(f"Failed to send request to admin: {e}")
-            await message.reply_text("❌ **Error:** Could not deliver request to the admin team.")
-    else:
-         await message.reply_text("❌ **Error:** No admin configured to receive requests.")
+        except Exception as e: await message.reply_text("❌ **Error:** Could not deliver request to the admin team.")
+    else: await message.reply_text("❌ **Error:** No admin configured to receive requests.")
 
 @Client.on_callback_query(filters.regex(r"^req_(.+)"))
 async def request_button_callback(client: Client, callback: CallbackQuery):
     settings = await db.get_settings()
-    
-    if not settings.get("requests_enabled", True):
-        return await callback.answer("❌ Requests are currently disabled by the admins.", show_alert=True)
+    if not settings.get("requests_enabled", True): return await callback.answer("❌ Requests are currently disabled.", show_alert=True)
         
-    movie_name = callback.data.split("req_", 1)[1]
     user = callback.from_user
     
-    # --- INSIDE FEATURE: REQUEST PLACEMENT ---
-    if settings.get("inside_enabled", False) and settings.get("inside_placement", "request") == "request":
+    if settings.get("inside_enabled", False) and settings.get("inside_placement", "movie").lower() == "request":
         user_data = await db.get_user_settings(user.id)
         if time.time() > user_data.get("inside_pass_expires", 0):
             from plugins.inside_verifier import get_target_post
@@ -71,25 +66,22 @@ async def request_button_callback(client: Client, callback: CallbackQuery):
             if target_url:
                 await callback.message.edit_text(
                     f"🔒 **Security Verification Required!**\n\n"
-                    f"To prove you are human and submit requests, please click the button below, find the post with our secret words, and **forward it to me here**.",
+                    f"To prevent spam and unlock requests, please click the button below, find the post with our secret words, and **forward it to me here**.",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Go to Channel Post", url=target_url)]])
                 )
                 return await callback.answer("Verification required!", show_alert=True)
-    # ----------------------------------------
+            else:
+                if user.id in Config.ADMINS:
+                    await client.send_message(user.id, "⚠️ **ADMIN DEBUG:** Inside Feature is ON, but no link is cached in MongoDB. Please post an ad in your channel first!")
+                return await callback.answer("⏳ System starting up. Please try again later.", show_alert=True)
     
-    req_text = (
-        f"🔔 **NEW MOVIE REQUEST**\n\n"
-        f"👤 **User:** {user.first_name} (`{user.id}`)\n"
-        f"🎬 **Requested:** `{movie_name}`"
-    )
+    movie_name = callback.data.split("req_", 1)[1]
+    req_text = f"🔔 **NEW MOVIE REQUEST**\n\n👤 **User:** {user.first_name} (`{user.id}`)\n🎬 **Requested:** `{movie_name}`"
     
     if TARGET_ADMIN:
         try:
             await client.send_message(TARGET_ADMIN, req_text)
-            await callback.message.edit_text(f"✅ **You successfully requested:** `{movie_name}`\n\nThe admins have been notified and will upload it soon!")
-            await callback.answer("✅ Request successfully delivered to the admin team!", show_alert=True)
-        except Exception as e:
-            logger.error(f"Failed to send request to admin: {e}")
-            await callback.answer("❌ Error delivering request.", show_alert=True)
-    else:
-        await callback.answer("❌ No admin configured to receive requests.", show_alert=True)
+            await callback.message.edit_text(f"✅ **You successfully requested:** `{movie_name}`\n\nThe admins have been notified!")
+            await callback.answer("✅ Request successfully delivered!", show_alert=True)
+        except Exception as e: await callback.answer("❌ Error delivering request.", show_alert=True)
+    else: await callback.answer("❌ No admin configured.", show_alert=True)
