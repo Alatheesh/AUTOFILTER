@@ -45,7 +45,8 @@ async def send_settings_home(message_or_query):
     text = "👑 **Bot Creator Control Panel**\n\nSelect a master module to configure:"
     buttons = [
         [InlineKeyboardButton("🔗 Shortener Settings", callback_data="set_shortener")],
-        [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests")]
+        [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests")
+        [InlineKeyboardButton("🔙 Back", callback_data="set_home")]
     ]
     
     if isinstance(message_or_query, Message):
