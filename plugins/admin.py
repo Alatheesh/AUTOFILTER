@@ -36,7 +36,6 @@ async def admin_input_catcher(client: Client, message: Message):
         del ADMIN_STATE[user_id]
         await message.reply_text("✅ **Success!** Shortener Link updated in the database.\nType `/admin` to view.")
 
-# THE FIX: Added your dedicated classic admin command back!
 @Client.on_message(filters.command("admin") & filters.user(Config.ADMINS))
 async def admin_direct_command(client: Client, message: Message):
     await send_settings_home(message)
