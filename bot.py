@@ -5,6 +5,10 @@ from pyrogram import Client, idle
 from pyrogram.errors import ApiIdInvalid, ApiIdPublishedFlood, AccessTokenInvalid
 from config import Config
 
+# IMPORT THE INVISIBLE WORKERS
+from plugins.indexer import process_indexing_queue
+from plugins.background_worker import start_background_language_indexer
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -51,12 +55,16 @@ async def main():
         logger.info(f"🔗 Username: @{me.username}")
         logger.info("==================================================")
 
+        # 🔥 START THE QUEUE AND METADATA WORKERS HERE 🔥
+        asyncio.create_task(process_indexing_queue(app))
+        asyncio.create_task(start_background_language_indexer(app))
+
         if Config.ADMINS:
             for admin in Config.ADMINS:
                 try:
                     await app.send_message(
                         chat_id=admin,
-                        text=f"🚀 **System Alert:**\n\n{me.first_name} (`@{me.username}`) has successfully started on Hugging Face!"
+                        text=f"🚀 **System Alert:**\n\n{me.first_name} (`@{me.username}`) has successfully started on Hugging Face!\n⚙️ Background Workers Active."
                     )
                 except Exception as e:
                     logger.warning(f"⚠️ Could not send startup ping to Admin {admin}. Error: {e}")
