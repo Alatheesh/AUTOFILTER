@@ -8,8 +8,6 @@ class Config(object):
     API_HASH: str = os.environ.get("API_HASH", "")
 
     # Multi-Database Configuration 
-    # Provide multiple MongoDB URIs separated by commas to scale storage limit.
-    # Example: "mongodb+srv://usr1:pass@cluster1.net,mongodb+srv://usr2:pass@cluster2.net"
     DB_URIS: List[str] = [uri.strip() for uri in os.environ.get("DB_URIS", "").split(",") if uri.strip()]
     DB_NAME: str = os.environ.get("DB_NAME", "AutoFilter")
     
