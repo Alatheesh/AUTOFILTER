@@ -158,18 +158,35 @@ class MultiDB:
         except Exception: return []
 
     async def global_stats(self) -> Dict[str, Any]:
-        stats = {"shards_active": len(self.collections), "total_files": 0, "total_size_bytes": 0, "shard_distribution": []}
+        stats = {
+            "shards_active": len(self.collections), 
+            "total_files": 0, 
+            "total_size_bytes": 0, 
+            "indexed_metadata": 0,  # THE FIX: Added tracker for worker progress
+            "shard_distribution": []
+        }
+        
         for client, coll in zip(self.clients, self.collections):
             try:
                 db_obj = client[Config.DB_NAME]
                 coll_stats = await db_obj.command("collStats", "files")
-                stats["shard_distribution"].append(coll_stats.get("count", 0))
-                stats["total_files"] += coll_stats.get("count", 0)
+                count = coll_stats.get("count", 0)
+                stats["shard_distribution"].append(count)
+                stats["total_files"] += count
                 stats["total_size_bytes"] += coll_stats.get("storageSize", 0)
+                
+                # THE FIX: Count files successfully processed by the worker
+                processed = await coll.count_documents({"language": {"$exists": True, "$ne": "pending"}})
+                stats["indexed_metadata"] += processed
+                
             except Exception:
                 count = await coll.count_documents({})
                 stats["shard_distribution"].append(count)
                 stats["total_files"] += count
+                
+                processed = await coll.count_documents({"language": {"$exists": True, "$ne": "pending"}})
+                stats["indexed_metadata"] += processed
+                
         total_capacity_bytes = len(self.collections) * 512 * 1024 * 1024
         stats["space_left_bytes"] = max(0, total_capacity_bytes - stats["total_size_bytes"])
         avg_obj_size = stats["total_size_bytes"] / stats["total_files"] if stats["total_files"] > 0 else 300
