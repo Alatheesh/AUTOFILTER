@@ -12,6 +12,9 @@ VIP_USERS = set()
 REFERRAL_POINTS = {}
 USER_REFERRER = {}
 
+# THE FIX: Memory Tracker for the Returning User History wipe warning
+WARNED_USERS = set()
+
 async def check_double_fsub(client: Client, user_id: int) -> bool:
     if user_id in VIP_USERS: return True
     if not Config.FSUB_CHANNELS: return True
@@ -37,7 +40,6 @@ async def get_shortened_url(long_url: str) -> str:
             async with session.get(f"{api_endpoint}?api={api_token}&url={long_url}") as response:
                 if response.status == 200:
                     data = await response.json()
-                    # THE FIX: Ensure it is a valid string that starts with http
                     short_url = data.get("shortenedUrl", "")
                     if short_url and isinstance(short_url, str) and short_url.startswith("http"):
                         return short_url
@@ -48,9 +50,23 @@ async def get_shortened_url(long_url: str) -> str:
 
 @Client.on_message(filters.command("start") & filters.private, group=1)
 async def monetization_start_handler(client: Client, message: Message):
+    user_id = message.from_user.id
+
+    # --- LATHU'S RETURNING USER DETECTOR ---
+    if user_id not in WARNED_USERS:
+        WARNED_USERS.add(user_id)
+        if message.id > 15:
+            warning_text = (
+                "⚠️ **Notice for Returning Users:**\n\n"
+                "We have completely upgraded our bot engine to a faster, safer database! "
+                "Because of this, any old download buttons currently visible in this chat will no longer work.\n\n"
+                "🧹 **To get the best experience, please clear this chat history and search for your movies again!**"
+            )
+            await message.reply_text(warning_text)
+    # ---------------------------------------
+
     if len(message.command) <= 1: return
 
-    user_id = message.from_user.id
     is_joined = await check_double_fsub(client, user_id)
     if not is_joined:
         buttons = []
