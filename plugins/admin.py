@@ -26,8 +26,29 @@ async def admin_input_catcher(client: Client, message: Message):
     state = ADMIN_STATE[user_id]
     user_input = message.text.strip()
 
-    # --- THE NEW SETUP WIZARD STATES ---
-    if state == "setup_shortener_url":
+    # --- THE INSIDE SETUP WIZARDS ---
+    if state == "setup_inside_words":
+        words = [w.strip() for w in user_input.split() if w.strip()]
+        await db.update_settings({"inside_words": words})
+        del ADMIN_STATE[user_id]
+        await message.reply_text(f"✅ **Words Saved!**\n`{words}`\nType `/admin` to view dashboard.")
+
+    elif state == "setup_inside_times":
+        if user_input.isdigit():
+            await db.update_settings({"inside_times": int(user_input)})
+            del ADMIN_STATE[user_id]
+            await message.reply_text(f"✅ **Times Saved:** `{user_input}` per day.\nType `/admin` to view dashboard.")
+        else:
+            await message.reply_text("❌ **Invalid Input!** Please send only a number (e.g., `4`).")
+
+    elif state == "setup_inside_channels":
+        channels = [c.strip() for c in user_input.split() if c.strip()]
+        await db.update_settings({"inside_channels": channels})
+        del ADMIN_STATE[user_id]
+        await message.reply_text(f"✅ **Channels Saved!**\n`{channels}`\nType `/admin` to view dashboard.")
+
+    # --- THE SHORTENER WIZARDS ---
+    elif state == "setup_shortener_url":
         await db.update_settings({"shortener_url": user_input})
         ADMIN_STATE[user_id] = "setup_shortener_api"
         await message.reply_text("✅ **URL Saved!**\n\nNow, please send me your secret **API Key** for this shortener.")
@@ -37,7 +58,6 @@ async def admin_input_catcher(client: Client, message: Message):
         del ADMIN_STATE[user_id]
         await message.reply_text("✅ **Success!** API Key saved and Shortener is now **🟢 ON**.\nType `/admin` to view.")
 
-    # --- THE EXISTING EDIT STATES ---
     elif state == "waiting_for_api":
         await db.update_settings({"shortener_api": user_input})
         del ADMIN_STATE[user_id]
@@ -48,6 +68,7 @@ async def admin_input_catcher(client: Client, message: Message):
         del ADMIN_STATE[user_id]
         await message.reply_text("✅ **Success!** Shortener Link updated in the database.\nType `/admin` to view.")
 
+
 @Client.on_message(filters.command("admin") & filters.user(Config.ADMINS))
 async def admin_direct_command(client: Client, message: Message):
     await send_settings_home(message)
@@ -57,7 +78,8 @@ async def send_settings_home(message_or_query):
     buttons = [
         [InlineKeyboardButton("🔗 Shortener Settings", callback_data="set_shortener")],
         [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests")],
-        [InlineKeyboardButton("🔙 Back", callback_data="tier_root_fallback")]
+        [InlineKeyboardButton("🕵️‍♂️ Inside Settings", callback_data="set_inside")], # THE NEW MENU
+        [InlineKeyboardButton("🔙 Exit", callback_data="tier_root_fallback")]
     ]
     
     if isinstance(message_or_query, Message):
@@ -65,15 +87,96 @@ async def send_settings_home(message_or_query):
     else:
         await message_or_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
-@Client.on_callback_query(filters.regex(r"^(set_|toggle_requests)"))
+@Client.on_callback_query(filters.regex(r"^(set_|toggle_|inside_)"))
 async def settings_callbacks(client: Client, callback: CallbackQuery):
     action = callback.data
     user_id = callback.from_user.id
 
+    # Clear any typing state if they click a menu button
+    if action in ["set_home", "set_inside", "set_shortener", "set_requests"]:
+        if user_id in ADMIN_STATE:
+            del ADMIN_STATE[user_id]
+
     if action == "set_home":
-        if user_id in ADMIN_STATE: del ADMIN_STATE[user_id]
         await send_settings_home(callback)
 
+    # ==========================================
+    # --- 🚀 THE NEW INSIDE DASHBOARD ---
+    # ==========================================
+    elif action == "set_inside":
+        settings = await db.get_settings()
+        status = "🟢 ON" if settings.get("inside_enabled", False) else "🔴 OFF"
+        words = settings.get("inside_words", [])
+        times = settings.get("inside_times", 5)
+        channels = settings.get("inside_channels", [])
+        placement = settings.get("inside_placement", "movie").capitalize()
+
+        text = (
+            f"🕵️‍♂️ **Inside Task Settings**\n\n"
+            f"**Status:** {status}\n"
+            f"**Trigger Words:** `{', '.join(words) if words else 'None Set'}`\n"
+            f"**Pass Limit:** `{times} times/day`\n"
+            f"**Target Channels:** `{', '.join(channels) if channels else 'None Set'}`\n"
+            f"**Placement Module:** `{placement}`\n\n"
+            f"Use the buttons below to modify the task verification flow:"
+        )
+        buttons = [
+            [InlineKeyboardButton(f"Toggle Feature {'OFF' if 'ON' in status else 'ON'}", callback_data="inside_toggle")],
+            [InlineKeyboardButton("📝 Edit Words", callback_data="inside_words"), InlineKeyboardButton("⏱ Edit Times", callback_data="inside_times")],
+            [InlineKeyboardButton("📢 Edit Channels", callback_data="inside_channels")],
+            [InlineKeyboardButton(f"🔄 Placement: {placement}", callback_data="inside_placement")],
+            [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="set_home")]
+        ]
+        await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+    elif action == "inside_toggle":
+        settings = await db.get_settings()
+        current = settings.get("inside_enabled", False)
+        await db.update_settings({"inside_enabled": not current})
+        callback.data = "set_inside"
+        await settings_callbacks(client, callback)
+
+    elif action == "inside_words":
+        ADMIN_STATE[user_id] = "setup_inside_words"
+        await callback.message.edit_text(
+            "✏️ **Send the trigger words in the chat.**\nSeparate them with spaces (e.g., `#example1 #sponsor2`).",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_inside")]])
+        )
+
+    elif action == "inside_times":
+        ADMIN_STATE[user_id] = "setup_inside_times"
+        await callback.message.edit_text(
+            "✏️ **Send the number of verifications per day.**\n(Example: Send `4` to require verification every 6 hours).",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_inside")]])
+        )
+
+    elif action == "inside_channels":
+        ADMIN_STATE[user_id] = "setup_inside_channels"
+        await callback.message.edit_text(
+            "✏️ **Send the Target Channel Usernames or IDs.**\nSeparate multiple with spaces (e.g., `-10012345 @MyChannel`).",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_inside")]])
+        )
+
+    elif action == "inside_placement":
+        settings = await db.get_settings()
+        current_placement = settings.get("inside_placement", "movie")
+        
+        # Cycle through placement options dynamically
+        if current_placement == "movie":
+            nxt = "request"
+        elif current_placement == "request":
+            nxt = "welcome"
+        else:
+            nxt = "movie"
+            
+        await db.update_settings({"inside_placement": nxt})
+        callback.data = "set_inside"
+        await settings_callbacks(client, callback)
+
+
+    # ==========================================
+    # --- EXISTING SHORTENER / REQUESTS DASHBOARD ---
+    # ==========================================
     elif action == "set_shortener":
         settings = await db.get_settings()
         status = "🟢 ON" if settings.get("shortener_enabled", False) else "🔴 OFF"
@@ -98,7 +201,6 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         settings = await db.get_settings()
         current_state = settings.get("shortener_enabled", False)
         
-        # THE FIX: If ON, turn it off. If OFF, start the Setup Wizard!
         if current_state:
             await db.update_settings({"shortener_enabled": False})
             callback.data = "set_shortener"
@@ -148,6 +250,7 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         callback.data = "set_requests"
         await settings_callbacks(client, callback)
 
+# [Broadcast & Stats methods remain identical below...]
 async def process_broadcast_queue(client: Client):
     global BROADCAST_STATUS
     while not BROADCAST_QUEUE.empty():
@@ -181,10 +284,6 @@ def format_eta(seconds):
     if hours > 0: eta_strings.append(f"{int(hours)}h")
     if minutes > 0: eta_strings.append(f"{int(minutes)}m")
     return " ".join(eta_strings) if eta_strings else "< 1 minute"
-
-# ==========================================================
-# 📊 MAIN STATS DASHBOARD GENERATORS
-# ==========================================================
 
 async def get_stats_home_text_and_buttons():
     db_stats = await db.global_stats()
@@ -285,10 +384,6 @@ async def get_worker2_text_and_buttons():
         ]
     ]
     return text, InlineKeyboardMarkup(buttons)
-
-# ==========================================================
-# 🔌 PYROGRAM ROUTERS & EVENT HANDLERS
-# ==========================================================
 
 @Client.on_message(filters.command("stats") & filters.user(Config.ADMINS))
 async def bot_stats_dashboard(client: Client, message: Message):
