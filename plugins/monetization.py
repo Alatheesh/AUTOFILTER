@@ -52,7 +52,6 @@ async def get_shortened_url(long_url: str) -> str:
 async def monetization_start_handler(client: Client, message: Message):
     user_id = message.from_user.id
 
-    # --- LATHU'S RETURNING USER DETECTOR ---
     if user_id not in WARNED_USERS:
         WARNED_USERS.add(user_id)
         if message.id > 15:
@@ -63,9 +62,7 @@ async def monetization_start_handler(client: Client, message: Message):
                 "🧹 **To get the best experience, please clear this chat history and search for your movies again!**"
             )
             await message.reply_text(warning_text)
-    # ---------------------------------------
 
-    # THE FIX: Tell Pyrogram to pass normal /start messages to ui_menus.py
     if len(message.command) <= 1: 
         raise ContinuePropagation
 
@@ -94,7 +91,6 @@ async def monetization_start_handler(client: Client, message: Message):
                 await message.reply_text(f"🎉 Welcome! Registered via `{referrer_id}`.")
         except Exception: pass
 
-    # --- MAIN DOWNLOAD PAYLOAD ---
     elif payload.startswith("getfile_"):
         try:
             db_id = payload.split("getfile_")[1]
@@ -128,7 +124,6 @@ async def monetization_start_handler(client: Client, message: Message):
             await message.reply_text(f"❌ **System Crash:** Code broke before sending.\n`{str(e)}`")
         return
 
-    # --- VERIFICATION AFTER SHORTLINK PAYLOAD ---
     elif payload.startswith("verify_"):
         try:
             db_id = payload.split("verify_")[1]
