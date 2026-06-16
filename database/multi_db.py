@@ -11,6 +11,8 @@ class MultiDB:
     def __init__(self, uris: List[str], db_name: str):
         self.clients: List[AsyncIOMotorClient] = []
         self.collections = []
+        
+        # Connect to all MongoDB Shards for massive file storage
         for uri in uris:
             try:
                 client = AsyncIOMotorClient(uri)
@@ -22,23 +24,76 @@ class MultiDB:
 
         if not self.collections:
             logger.warning("No database collections active. Bot features will fail.")
+            
+        # Store configurations and settings strictly on Shard 0 to prevent fragmentation
+        if self.clients:
+            self.settings = self.clients[0][db_name]["settings"]
+            self.users = self.clients[0][db_name]["users"]
+            self.groups = self.clients[0][db_name]["groups"]
 
+    # ==========================================
+    # --- TIER 1: USER SETTINGS (ON SHARD 0) ---
+    # ==========================================
+    async def get_user_settings(self, user_id: int):
+        if not self.clients: return {}
+        user = await self.users.find_one({"user_id": user_id})
+        if not user:
+            default = {"user_id": user_id, "search_mode": "default", "quality": "all", "language": "all"}
+            await self.users.insert_one(default)
+            return default
+        return user
+
+    async def update_user_setting(self, user_id: int, key: str, value: Any):
+        if not self.clients: return
+        await self.users.update_one({"user_id": user_id}, {"$set": {key: value}}, upsert=True)
+
+    # ===============================================
+    # --- TIER 2: GROUP ADMIN SETTINGS (ON SHARD 0) ---
+    # ===============================================
+    async def get_group_settings(self, chat_id: int):
+        if not self.clients: return {}
+        group = await self.groups.find_one({"chat_id": chat_id})
+        if not group:
+            default = {
+                "chat_id": chat_id,
+                "search_mode": "let_members_choose",
+                "quality_lock": "none",
+                "language_lock": "none",
+                "admins": []
+            }
+            await self.groups.insert_one(default)
+            return default
+        return group
+
+    async def update_group_setting(self, chat_id: int, key: str, value: Any):
+        if not self.clients: return
+        await self.groups.update_one({"chat_id": chat_id}, {"$set": {key: value}}, upsert=True)
+
+    async def get_admin_groups(self, user_id: int):
+        if not self.clients: return []
+        cursor = self.groups.find({"admins": user_id})
+        return await cursor.to_list(length=50)
+
+    # ===================================================
+    # --- TIER 3 & GLOBAL SETTINGS (ON SHARD 0)       ---
+    # ===================================================
     async def get_settings(self) -> Dict[str, Any]:
         if not self.clients: return {}
-        db_obj = self.clients[0][Config.DB_NAME]
-        settings = await db_obj["settings"].find_one({"_id": "bot_settings"})
+        settings = await self.settings.find_one({"_id": "bot_settings"})
         if not settings:
             default = {"_id": "bot_settings", "shortener_enabled": Config.USE_SHORTENERS, "shortener_api": "5b8f729da248937bc38d15ff16ea49", "shortener_url": "https://gplinks.in/api", "requests_enabled": True}
-            await db_obj["settings"].insert_one(default)
+            await self.settings.insert_one(default)
             return default
         return settings
 
     async def update_settings(self, updates: Dict[str, Any]) -> bool:
         if not self.clients: return False
-        db_obj = self.clients[0][Config.DB_NAME]
-        await db_obj["settings"].update_one({"_id": "bot_settings"}, {"$set": updates}, upsert=True)
+        await self.settings.update_one({"_id": "bot_settings"}, {"$set": updates}, upsert=True)
         return True
 
+    # ===================================================
+    # --- ORIGINAL MULTI-SHARD FILE SYSTEM (ALL SHARDS) ---
+    # ===================================================
     async def insert_file(self, file_data: Dict[str, Any], shard_index: Optional[int] = None) -> bool:
         if not self.collections: return False
         target_shard = shard_index % len(self.collections) if shard_index is not None else 0
@@ -53,7 +108,6 @@ class MultiDB:
         results = await asyncio.gather(*tasks)
         return any(res is not None for res in results)
 
-    # --- THE NEW SHORT ID LOOKUP ---
     async def get_file(self, db_id: str) -> Optional[Dict[str, Any]]:
         if not self.collections: return None
         try: obj_id = ObjectId(db_id)
@@ -63,7 +117,6 @@ class MultiDB:
         for res in results:
             if res: return res
         return None
-    # -------------------------------
 
     async def _safe_search(self, collection, query_filter: dict, skip: int, limit: int) -> List[Dict[str, Any]]:
         cursor = collection.find(query_filter).skip(skip).limit(limit)
