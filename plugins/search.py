@@ -91,7 +91,7 @@ async def get_fuzzy_suggestions(query: str) -> list:
             
     return list(set(suggestions))[:3]
 
-@Client.on_message((filters.group | filters.private) & filters.text & ~filters.command(["start", "help", "about", "source"]))
+@Client.on_message((filters.group | filters.private) & filters.text & ~filters.command(["start", "help", "about", "source", "settings", "request"]))
 async def auto_filter(client: Client, message: Message):
     query = message.text.strip()
     if len(query) < 3:
@@ -101,11 +101,15 @@ async def auto_filter(client: Client, message: Message):
     
     if not results:
         suggestions = await get_fuzzy_suggestions(query)
+        
+        # The new Request button!
+        req_buttons = InlineKeyboardMarkup([[InlineKeyboardButton("🔔 Request this Movie", callback_data=f"req_{query[:40]}")]])
+        
         if suggestions:
             s_text = ", ".join([f"`{s}`" for s in suggestions])
-            await message.reply_text(f"😔 No files found matching your query.\n\n**Did you mean:** {s_text}?")
+            await message.reply_text(f"😔 No files found matching your query.\n\n**Did you mean:** {s_text}?", reply_markup=req_buttons)
         else:
-            await message.reply_text("😔 No files found matching your query across our live shards.")
+            await message.reply_text("😔 No files found matching your query across our live shards.", reply_markup=req_buttons)
         return
         
     metadata = await fetch_imdb_tmdb(query)
