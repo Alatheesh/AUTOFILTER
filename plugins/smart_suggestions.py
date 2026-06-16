@@ -28,4 +28,5 @@ async def handle_fuzzy_click(client: Client, callback: CallbackQuery):
     try:
         await callback.message.delete()
     except Exception:
+        
         pass
