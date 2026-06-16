@@ -43,7 +43,8 @@ async def auto_indexer(client: Client, message: Message):
         "raw_title": raw_title,
         "size": file_size,
         "message_id": message.id,
-        "chat_id": message.chat.id
+        "chat_id": message.chat.id,
+        "language": "pending"
     }
     await db.insert_file(file_data)
 
@@ -64,53 +65,73 @@ async def mass_indexer_command(client: Client, message: Message):
     if not target_chat or not last_msg_id:
         return await message.reply_text("❌ **Usage:** Forward the **NEWEST** file from your channel, reply to it, and type `/index`")
 
-    progress_msg = await message.reply_text("⏳ **Initializing Full Deep Scan Indexer...**")
-
     try:
         chat_info = await client.get_chat(target_chat)
         target_chat_name = chat_info.title or str(target_chat)
     except Exception as e:
-        return await progress_msg.edit_text(f"❌ **Error Accessing Chat:**\n`{e}`\nEnsure bot is Admin!")
+        return await message.reply_text(f"❌ **Error Accessing Chat:** Ensure bot is an Admin there!\n`{e}`")
 
-    total_found = 0
-    total_duplicates = 0
-    scanned_count = 0
-    non_media_count = 0
+    success = await db.add_index_job(target_chat, target_chat_name, last_msg_id)
+    
+    if success:
+        await message.reply_text(f"✅ **Job Queued Successfully!**\n\nChannel: `{target_chat_name}`\nThe bot will safely process this in the background to prevent bans and survive restarts.")
+    else:
+        await message.reply_text(f"⚠️ **Job Already Exists!**\n\nThe bot is already scheduled to process `{target_chat_name}`.")
 
-    try:
-        for i in range(last_msg_id, 0, -200):
-            start_id = max(1, i - 199)
-            batch_ids = list(range(start_id, i + 1))
+async def process_indexing_queue(client: Client):
+    """Runs 24/7. Survives crashes. Safely parses queued channels."""
+    logger.info("🟢 Safe Indexing Job Queue Started!")
+    
+    while True:
+        try:
+            job = await db.get_active_job()
+            if not job:
+                await asyncio.sleep(60) 
+                continue
+                
+            job_id = job["_id"]
+            chat_id = job["chat_id"]
+            chat_name = job["chat_name"]
+            current_id = job["current_id"]
             
-            # Catching Telegram's invisible rate limits
+            await db.update_job(job_id, {"status": "processing"})
+            
+            if current_id <= 0:
+                await db.update_job(job_id, {"status": "completed"})
+                logger.info(f"✅ Indexing completed for {chat_name}")
+                continue
+
+            start_id = max(1, current_id - 199)
+            batch_ids = list(range(start_id, current_id + 1))
+            
             try:
-                messages = await client.get_messages(target_chat, message_ids=batch_ids)
+                messages = await client.get_messages(chat_id, message_ids=batch_ids)
             except FloodWait as fw:
-                await progress_msg.edit_text(f"⚠️ **Telegram Rate Limit!**\nSleeping for {fw.value} seconds to prevent ban...")
+                logger.warning(f"⚠️ Indexer Rate Limit! Sleeping {fw.value}s")
                 await asyncio.sleep(fw.value)
-                messages = await client.get_messages(target_chat, message_ids=batch_ids)
+                continue
             except Exception as e:
-                logger.error(f"Batch fetch error: {e}")
+                logger.error(f"Failed to fetch batch for {chat_name}: {e}")
+                await db.update_job(job_id, {"current_id": start_id - 1})
                 continue
             
+            saved = 0
+            dupes = 0
+            scanned = 0
+            
             for msg in messages:
-                scanned_count += 1
-                if msg.empty: 
-                    non_media_count += 1
-                    continue
+                scanned += 1
+                if msg.empty: continue
                 
                 media = msg.document or msg.video or msg.audio
-                if not media: 
-                    non_media_count += 1
-                    continue
+                if not media: continue
 
                 raw_title = getattr(media, "file_name", "") or getattr(msg, "caption", "") or "Unknown"
                 file_size = getattr(media, "file_size", 0)
                 crypto_hash = generate_file_hash(raw_title, file_size)
 
-                # Standard duplicate check (ignores file, moves to next)
                 if await db.check_exists(crypto_hash):
-                    total_duplicates += 1
+                    dupes += 1
                 else:
                     file_data = {
                         "file_id": media.file_id,
@@ -120,41 +141,23 @@ async def mass_indexer_command(client: Client, message: Message):
                         "raw_title": raw_title,
                         "size": file_size,
                         "message_id": msg.id,
-                        "chat_id": msg.chat.id
+                        "chat_id": msg.chat.id,
+                        "language": "pending"
                     }
                     await db.insert_file(file_data)
-                    total_found += 1
-
-            messages_left = max(0, last_msg_id - scanned_count)
-
-            if scanned_count % 200 == 0:
-                try:
-                    await progress_msg.edit_text(
-                        f"🔄 **Deep Scan in Progress...**\n"
-                        f"• Target: `{target_chat_name}`\n"
-                        f"• Scanned: `{scanned_count}` | Left: `{messages_left}`\n\n"
-                        f"📂 **Breakdown:**\n"
-                        f"• New Media Saved: `{total_found}`\n"
-                        f"• Duplicates Skipped: `{total_duplicates}`\n"
-                        f"• Text/Non-Media: `{non_media_count}`"
-                    )
-                except FloodWait as fw:
-                    await asyncio.sleep(fw.value)
-                except Exception:
-                    pass 
+                    saved += 1
             
-            # Standard Anti-Flood Sleep
-            await asyncio.sleep(2.5)
+            await db.update_job(job_id, {
+                "current_id": start_id - 1,
+                "scanned": job["scanned"] + scanned,
+                "saved": job["saved"] + saved,
+                "duplicates": job["duplicates"] + dupes
+            })
+            
+            logger.info(f"🔄 Queue Indexing: {chat_name} - Saved {saved} new files. Surviving.")
+            
+            await asyncio.sleep(5.0)
 
-        await progress_msg.edit_text(
-            f"✅ **Full Deep Scan Completed Successfully!**\n\n"
-            f"• Source: `{target_chat_name}`\n"
-            f"• Scanned Total: `{scanned_count}`\n"
-            f"• Saved Media: `{total_found}`\n"
-            f"• Duplicates Ignored: `{total_duplicates}`\n"
-            f"• Text/Spam Ignored: `{non_media_count}`"
-        )
-
-    except Exception as e:
-        logger.error(f"Error during mass indexing: {e}")
-        await progress_msg.edit_text(f"❌ **Failed:** `{str(e)}`")
+        except Exception as e:
+            logger.error(f"Indexer Queue error: {e}")
+            await asyncio.sleep(10)
