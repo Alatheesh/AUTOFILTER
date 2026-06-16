@@ -1,312 +1,353 @@
+import math
+import os
 import logging
+import aiohttp
 from pyrogram import Client, filters
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from pyrogram.errors import UserNotParticipant
-from config import Config
+from pyrogram.types import (
+    InlineKeyboardMarkup, InlineKeyboardButton, Message, 
+    InlineQuery, InlineQueryResultArticle, InputTextMessageContent, CallbackQuery
+)
 from database.multi_db import db
+from config import Config
 
 logger = logging.getLogger(__name__)
 
-# ==========================================
-# --- ORIGINAL WELCOME & HELP MENUS ---
-# ==========================================
+AD_SLOT_TEXT = "📢 Join Our VIP Channel [Ads Free]!"
+AD_SLOT_URL = "https://t.me/premium_channel"
 
-def get_start_markup() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🛠 Help", callback_data="ui_help"),
-            InlineKeyboardButton("ℹ️ About", callback_data="ui_about")
-        ],
-        [
-            InlineKeyboardButton("👨‍💻 Source", callback_data="ui_source"),
-            InlineKeyboardButton("✨ Features", callback_data="ui_features")
-        ]
-    ])
+FILTER_SESSION_CACHE = {}
 
-@Client.on_message(filters.command("start") & filters.private, group=2)
-async def start_menu_handler(client: Client, message: Message):
-    # Ignore payload starts (getfile_, ref_) because monetization.py handles them
-    if len(message.command) > 1:
+def levenshtein_distance(s1: str, s2: str) -> int:
+    if len(s1) < len(s2):
+        return levenshtein_distance(s2, s1)
+    if len(s2) == 0:
+        return len(s1)
+        
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+        
+    return previous_row[-1]
+
+async def fetch_imdb_tmdb(query: str) -> dict:
+    tmdb_api_key = os.environ.get("TMDB_API_KEY", "")
+    if not tmdb_api_key:
+        return {
+            "title": query.title(), 
+            "rating": "8.2/10", 
+            "poster": "https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=600", 
+            "genre": "Sci-Fi, Adventure, Mystique", 
+            "plot": "Connect TMDB_API_KEY to unlock actual live movie details."
+        }
+        
+    url = f"https://api.themoviedb.org/3/search/movie?api_key={tmdb_api_key}&query={query}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get("results"):
+                        movie = data["results"][0]
+                        if movie.get("poster_path"):
+                            poster_url = f"https://image.tmdb.org/t/p/w500{movie.get('poster_path')}"
+                        else:
+                            poster_url = "https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=600"
+                            
+                        return {
+                            "title": movie.get("title", query), 
+                            "rating": f"{movie.get('vote_average', 'N/A')}/10", 
+                            "poster": poster_url, 
+                            "genre": "Drama", 
+                            "plot": movie.get("overview", "No overview available.")
+                        }
+    except Exception as e:
+        logger.error(f"TMDB Fetch Error: {e}")
+        
+    return {
+        "title": query.title(), 
+        "rating": "N/A", 
+        "poster": "https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=600", 
+        "genre": "Uncategorized", 
+        "plot": f"A query search matching: {query}"
+    }
+
+async def get_fuzzy_suggestions(query: str) -> list:
+    titles = await db.search_files("", skip=0, limit=100, exact=False)
+    suggestions = []
+    
+    for item in titles:
+        title = item.get("title", "")
+        if title and levenshtein_distance(query.lower(), title.lower()) <= 5:
+            suggestions.append(title)
+            
+    return list(set(suggestions))[:3]
+
+@Client.on_message((filters.group | filters.private) & filters.text & ~filters.command(["start", "help", "about", "source", "settings", "request", "plot", "history", "clear_history", "broadcast", "stats", "backup"]))
+async def auto_filter(client: Client, message: Message):
+    query = message.text.strip()
+    if len(query) < 3:
         return
         
-    username = message.from_user.username or message.from_user.first_name or "User"
-    welcome_text = (
-        f"👋 **Welcome to the Cloud Auto-Filter Bot, {username}!**\n\n"
-        f"✨ **Use the interactive buttons below to explore my built-in commands:**"
-    )
-    await message.reply_text(text=welcome_text, reply_markup=get_start_markup())
-
-@Client.on_message(filters.command("help") & filters.private)
-async def help_command_handler(client: Client, message: Message):
-    help_text = (
-        "🛠 **How to Use the Auto-Filter Bot:**\n\n"
-        "• **In Groups:** Just drop the title of any movie or document and I will automatically look it up.\n"
-        "• **In DMs:** Send any text keyword (directly to my PM) to trigger the multi-DB file search instantly.\n"
-        "• `/plot <movie>`: Generates a beautiful AI-powered movie plot summary.\n"
-        "• `/history`: Displays your 10 most recent searches.\n"
-        "• `/clear_history`: Wipes your query history records clean.\n"
-        "• `/settings`: Open the configuration dashboard."
-    )
-    await message.reply_text(text=help_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back")]]))
-
-@Client.on_message(filters.command("about") & filters.private)
-async def about_command_handler(client: Client, message: Message):
-    about_text = (
-        "ℹ️ **About This Bot:**\n\n"
-        "• **Engine:** Advanced Asynchronous Pyrogram V2\n"
-        "• **Core Framework:** Python 3.10 with `asyncio` parallel multi-shard pooling\n"
-        "• **Database Backend:** Scalable multi-cluster MongoDB connection routing\n"
-        "• **Primary Deployment:** Ready for Hugging Face Spaces free-tier hosting with aiohttp daemon\n"
-    )
-    await message.reply_text(text=about_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back")]]))
-
-@Client.on_message(filters.command("source") & filters.private)
-async def source_command_handler(client: Client, message: Message):
-    source_text = (
-        "👨‍💻 **Open Source Repository Details:**\n\n"
-        "This application is modularly crafted to separate route dispatchers, active sharding layers, and smart monetization tasks.\n\n"
-        "• **Developer:** Google AI Studio Build Architect\n"
-        "• **License:** Open Source MIT\n"
-        "• **Credits:** Pyrogram & MongoDB Motor Driver"
-    )
-    await message.reply_text(text=source_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back")]]))
-
-@Client.on_callback_query(filters.regex(r"^ui_(help|about|source|features|back)$"))
-async def callback_ui_router(client: Client, callback: CallbackQuery):
-    target = callback.data.split("_")[1]
-    
-    if target == "back":
-        username = callback.from_user.username or callback.from_user.first_name or "User"
-        welcome_text = (
-            f"👋 **Welcome to the Cloud Auto-Filter Bot, {username}!**\n\n"
-            f"I am a highly-optimized, multi-sharded Telegram repository search system. "
-            f"Send me any movie or file query and I'll find it instantly across our high-performing MongoDB clusters.\n\n"
-            f"✨ **Use the interactive buttons below to explore my built-in commands/specifications:**"
-        )
-        await callback.message.edit_text(text=welcome_text, reply_markup=get_start_markup())
-        return await callback.answer()
-
-    if target == "help":
-        help_text = (
-            "🛠 **How to Use the Auto-Filter Bot:**\n\n"
-            "• **In Groups:** Just drop the title of any movie or document and I will automatically look it up.\n"
-            "• **In DMs:** Send any text keyword (directly to my PM) to trigger the multi-DB file search instantly.\n"
-            "• `/plot <movie>`: Generates a beautiful AI-powered movie plot summary.\n"
-            "• `/history`: Displays your 10 most recent searches.\n"
-            "• `/settings`: Open the configuration dashboard."
-        )
-        await callback.message.edit_text(text=help_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ui_back")]]))
-
-    elif target == "about":
-        about_text = (
-            "ℹ️ **About This Bot:**\n\n"
-            "• **Engine:** Advanced Asynchronous Pyrogram V2\n"
-            "• **Core Framework:** Python 3.10 with `asyncio` parallel multi-shard pooling\n"
-            "• **Database Backend:** Scalable multi-cluster MongoDB connection routing\n"
-        )
-        await callback.message.edit_text(text=about_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ui_back")]]))
-
-    elif target == "source":
-        source_text = (
-            "👨‍💻 **Open Source Repository Details:**\n\n"
-            "This application is modularly crafted to separate route dispatchers, active sharding layers, and smart monetization tasks.\n\n"
-            "• **Developer:** Google AI Studio Build Architect\n"
-            "• **Credits:** Pyrogram & MongoDB Motor Driver"
-        )
-        await callback.message.edit_text(text=source_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ui_back")]]))
-
-    elif target == "features":
-        features_text = (
-            "✨ **Bot Feature Profile:**\n\n"
-            "• **Asynchronous Scaling:** Motor-driven multi-DB load array.\n"
-            "• **Search Enhancers:** Levenshtein-distance spelling suggestions.\n"
-            "• **Dynamic UI:** 3-Tier Default vs Interactive Search Engine.\n"
-            "• **Monetization Engine:** GPLinks shortener + force sub lock.\n"
-            "• **Admin Dashboard:** Mass system-wide broadcasting."
-        )
-        await callback.message.edit_text(text=features_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ui_back")]]))
-
-    await callback.answer()
-
-
-# ==========================================
-# --- 3-TIER SETTINGS DASHBOARD ---
-# ==========================================
-
-def is_creator(user_id: int) -> bool:
-    return user_id == Config.ADMINS[0] if isinstance(Config.ADMINS, list) else user_id == Config.ADMINS
-
-@Client.on_message(filters.command("settings"))
-async def settings_router(client: Client, message: Message):
     user_id = message.from_user.id
+    chat_id = message.chat.id
     
-    # CASE A: SETTINGS CALLED INSIDE A GROUP CHAT
+    # RESOLVE THE 3-TIER SETTINGS LAYOUT
+    resolved_mode = "default"
     if message.chat.type in ["group", "supergroup"]:
-        # 1. Check Bot's own Admin rights
-        bot_member = await client.get_chat_member(message.chat.id, "me")
-        if not bot_member.privileges or not bot_member.privileges.can_delete_messages:
-            return await message.reply_text(
-                "❌ **Permission Error:** I need administrative rights with `Delete Messages` privileges to configure layouts securely."
+        g_sett = await db.get_group_settings(chat_id)
+        g_mode = g_sett.get("search_mode", "let_members_choose")
+        
+        if g_mode == "force_default":
+            resolved_mode = "default"
+        elif g_mode == "force_interactive":
+            resolved_mode = "interactive"
+        else: 
+            u_sett = await db.get_user_settings(user_id)
+            resolved_mode = u_sett.get("search_mode", "default")
+    else:
+        u_sett = await db.get_user_settings(user_id)
+        resolved_mode = u_sett.get("search_mode", "default")
+
+    results = await db.search_files(query, skip=0, limit=10, exact=False)
+    
+    if not results:
+        suggestions = await get_fuzzy_suggestions(query)
+        req_buttons = InlineKeyboardMarkup([[InlineKeyboardButton("🔔 Request this Movie", callback_data=f"req_{query[:40]}")]])
+        
+        if suggestions:
+            s_text = ", ".join([f"`{s}`" for s in suggestions])
+            await message.reply_text(
+                f"😔 No files found matching your query.\n\n**Did you mean:** {s_text}?", 
+                reply_markup=req_buttons
             )
-            
-        # 2. Check triggering user's Group Admin status
+        else:
+            await message.reply_text(
+                "😔 No files found matching your query across our live shards.", 
+                reply_markup=req_buttons
+            )
+        return
+        
+    # MODE A: CLASSIC DEFAULT LAYOUT (Instantly shows files + Pagination)
+    if resolved_mode == "default":
+        metadata = await fetch_imdb_tmdb(query)
+        buttons = []
+        
+        for file in results:
+            db_id = str(file.get("_id", ""))
+            buttons.append([InlineKeyboardButton(text=f"📂 {file.get('title', 'Unknown Title')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
+        
+        buttons.append([InlineKeyboardButton(text=AD_SLOT_TEXT, url=AD_SLOT_URL)])
+        buttons.append([
+            InlineKeyboardButton(text="◀️ Prev", callback_data=f"prev_0_{query}"),
+            InlineKeyboardButton(text="Page 1", callback_data="pages_info"),
+            InlineKeyboardButton(text="Next ▶️", callback_data=f"next_1_{query}")
+        ])
+        
+        caption = (
+            f"🎬 **{metadata['title']}**\n"
+            f"⭐️ Rating: `{metadata['rating']}`\n"
+            f"🎭 Genre: `{metadata['genre']}`\n\n"
+            f"📝 **Plot:** {metadata['plot']}\n\n"
+            f"🔍 Found files matching your request."
+        )
+        
         try:
-            user_member = await client.get_chat_member(message.chat.id, user_id)
-            if user_member.status not in ["administrator", "creator"]:
-                return await message.reply_text("🛑 This configuration dashboard is restricted to group administrators.")
+            await message.reply_photo(
+                photo=metadata["poster"], 
+                caption=caption, 
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
         except Exception:
-            return await message.reply_text("❌ Failed to verify your group administrative permissions.")
+            await message.reply_text(
+                caption, 
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
 
-        # Sync current group admins list to DB for remote management later
-        group_admins = []
-        async for admin in client.get_chat_members(message.chat.id, filter="administrators"):
-            if not admin.user.is_bot:
-                group_admins.append(admin.user.id)
-        await db.update_group_setting(message.chat.id, "admins", group_admins)
-        await db.update_group_setting(message.chat.id, "title", message.chat.title)
-
-        # Build Group Config layout
-        g_sett = await db.get_group_settings(message.chat.id)
-        mode = g_sett.get("search_mode", "let_members_choose")
+    # MODE B: INTERACTIVE UI LAYOUT
+    else:
+        # We fetch up to 100 files for the interactive filter menu so it has enough data to sort
+        extended_results = await db.search_files(query, skip=0, limit=100, exact=False)
+        session_id = f"{user_id}_{chat_id}_{message.id}"
+        FILTER_SESSION_CACHE[session_id] = {"query": query, "files": extended_results}
         
         buttons = [
             [
-                InlineKeyboardButton(text=f"{'✅' if mode=='force_default' else '❌'} Force Default", callback_data=f"gset_mode_force_default_{message.chat.id}"),
-                InlineKeyboardButton(text=f"{'✅' if mode=='force_interactive' else '❌'} Force Interactive", callback_data=f"gset_mode_force_interactive_{message.chat.id}")
+                InlineKeyboardButton(text="🎥 Filter Quality", callback_data=f"fui_qual_{session_id}"),
+                InlineKeyboardButton(text="🗣️ Filter Language", callback_data=f"fui_lang_{session_id}")
             ],
-            [
-                InlineKeyboardButton(text=f"{'✅' if mode=='let_members_choose' else '❌'} Let Members Choose", callback_data=f"gset_mode_let_members_choose_{message.chat.id}")
-            ]
+            [InlineKeyboardButton(text="📜 Show All Files Directly", callback_data=f"fui_all_{session_id}")]
         ]
-        return await message.reply_text(
-            f"🛠️ **Group Settings Menu:** `{message.chat.title}`\nConfigure search visualization structures for all active participants:",
+        await message.reply_text(
+            f"✨ **Search Filter Panel:** `{query}`\nRefine file distribution lists dynamically:", 
             reply_markup=InlineKeyboardMarkup(buttons)
         )
 
-    # CASE B: SETTINGS CALLED IN PRIVATE DM (DYNAMICS ACCORDING TO HIERARCHY ID)
-    u_sett = await db.get_user_settings(user_id)
-    u_mode = u_sett.get("search_mode", "default")
+# ==========================================
+# --- ORIGINAL PAGINATION HANDLER ---
+# ==========================================
+@Client.on_callback_query(filters.regex(r"^(next|prev)_(\d+)_(.+)$"))
+async def handle_pagination(client: Client, callback: CallbackQuery):
+    action, page_str, query = callback.data.split("_", 2)
+    page = int(page_str)
+    limit = 10
     
-    keyboard = [
-        [InlineKeyboardButton(text="👤 Personal Search Settings", callback_data="tier_user_home")]
-    ]
+    results = await db.search_files(query, skip=page * limit, limit=limit, exact=False)
     
-    # If Group Admin, append structural portal
-    managed_groups = await db.get_admin_groups(user_id)
-    if managed_groups:
-        keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list")])
+    if not results:
+        return await callback.answer("⚠️ No more pages available!", show_alert=True)
         
-    # If Creator, append master platform keys
-    if is_creator(user_id):
-        keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="tier_creator_home")])
-        
-    await message.reply_text(
-        "🎛️ **Central Command Settings Hub:**\nSelect the access layer tier you wish to inspect or modify:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    buttons = []
+    for file in results:
+        db_id = str(file.get("_id", ""))
+        buttons.append([InlineKeyboardButton(text=f"📂 {file.get('title', 'Unknown Title')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
+    
+    buttons.append([InlineKeyboardButton(text=AD_SLOT_TEXT, url=AD_SLOT_URL)])
+    buttons.append([
+        InlineKeyboardButton(text="◀️ Prev", callback_data=f"prev_{max(0, page - 1)}_{query}"),
+        InlineKeyboardButton(text=f"Page {page + 1}", callback_data="pages_info"),
+        InlineKeyboardButton(text="Next ▶️", callback_data=f"next_{page + 1}_{query}")
+    ])
+    
+    await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+    await callback.answer()
 
-@Client.on_callback_query(filters.regex(r"^(tier_|gset_|uset_)"))
-async def menus_callback_handler(client: Client, query: CallbackQuery):
-    user_id = query.from_user.id
+# ==========================================
+# --- ORIGINAL INLINE SEARCH HANDLER ---
+# ==========================================
+@Client.on_inline_query()
+async def inline_search(client: Client, query: InlineQuery):
+    search_query = query.query.strip()
+    if len(search_query) < 3:
+        return await query.answer([])
+        
+    results = await db.search_files(search_query, skip=0, limit=Config.MAX_RESULTS, exact=False)
+    
+    articles = []
+    for idx, file in enumerate(results):
+        db_id = str(file.get("_id", ""))
+        articles.append(
+            InlineQueryResultArticle(
+                title=file.get("title", "Unknown File"),
+                description=f"Format / Size: {file.get('size', 'N/A')}",
+                input_message_content=InputTextMessageContent(
+                    message_text=f"**{file.get('title')}**\n\n📥 [Download File Here](https://t.me/{client.me.username}?start=getfile_{db_id})"
+                ),
+                thumb_url="https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=150",
+                id=str(idx)
+            )
+        )
+    
+    await query.answer(articles, cache_time=3600, is_personal=True)
+
+# ==========================================
+# --- NEW INTERACTIVE FILTER HANDLERS ---
+# ==========================================
+@Client.on_callback_query(filters.regex(r"^fui_"))
+async def filter_ui_callback_handler(client: Client, query: CallbackQuery):
     data = query.data
+    parts = data.split("_")
+    action = parts[1]
+    session_id = f"{parts[2]}_{parts[3]}_{parts[4]}"
+    
+    session = FILTER_SESSION_CACHE.get(session_id)
+    if not session:
+        return await query.answer("Search validation cache expired. Please execute a fresh query.", show_alert=True)
+        
+    files_pool = session["files"]
 
-    # --- TIER 1 HANDLERS (USER PERSONAL PM) ---
-    if data == "tier_user_home":
-        u_sett = await db.get_user_settings(user_id)
-        m = u_sett.get("search_mode", "default")
-        buttons = [
-            [
-                InlineKeyboardButton(text=f"{'✅' if m=='default' else '❌'} Default Mode", callback_data="uset_mode_default"),
-                InlineKeyboardButton(text=f"{'✅' if m=='interactive' else '❌'} Interactive Mode", callback_data="uset_mode_interactive")
-            ],
-            [InlineKeyboardButton(text="🔙 Back", callback_data="tier_root_fallback")]
-        ]
-        return await query.message.edit_text("👤 **Personal Display Preferences:**\nChoose how output records populate on your workspace screen:", reply_markup=InlineKeyboardMarkup(buttons))
-
-    if data.startswith("uset_mode_"):
-        new_mode = data.replace("uset_mode_", "")
-        await db.update_user_setting(user_id, "search_mode", new_mode)
-        await query.answer(f"UI Layout updated to: {new_mode.upper()}")
-        return await menus_callback_handler(client, query.create(data="tier_user_home"))
-
-    # --- TIER 2 HANDLERS (GROUP CONTROLS OVERRIDES) ---
-    if data == "tier_group_list":
-        managed = await db.get_admin_groups(user_id)
-        if not managed: return await query.answer("No linked administration nodes found.", show_alert=True)
+    if action == "all":
         buttons = []
-        for g in managed:
-            title = g.get("title", f"Chat ID: {g['chat_id']}")
-            buttons.append([InlineKeyboardButton(text=f"⚙️ {title}", callback_data=f"tier_gmanage_{g['chat_id']}")])
-        buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="tier_root_fallback")])
-        return await query.message.edit_text("🛡️ **Administered Groups Portal:**\nSelect a community cluster node below to tweak layout policies remotely:", reply_markup=InlineKeyboardMarkup(buttons))
+        for f in files_pool[:20]:
+            db_id = str(f.get("_id", ""))
+            title = f.get("title", "Unknown Title")
+            buttons.append([InlineKeyboardButton(text=f"🎬 {title}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
+            
+        return await query.message.edit_text(
+            "🍿 **Displaying comprehensive file list:**", 
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
 
-    if data.startswith("tier_gmanage_"):
-        c_id = int(data.split("_")[2])
-        g_sett = await db.get_group_settings(c_id)
-        if user_id not in g_sett.get("admins", []):
-            return await query.answer("Access Denied. You are not a synchronized manager for this node.", show_alert=True)
-        mode = g_sett.get("search_mode", "let_members_choose")
+    elif action == "qual":
         buttons = [
             [
-                InlineKeyboardButton(text=f"{'✅' if mode=='force_default' else '❌'} Force Default", callback_data=f"gset_mode_force_default_{c_id}"),
-                InlineKeyboardButton(text=f"{'✅' if mode=='force_interactive' else '❌'} Force Interactive", callback_data=f"gset_mode_force_interactive_{c_id}")
+                InlineKeyboardButton(text="1080p Only", callback_data=f"fsub_run_{session_id}_1080p"),
+                InlineKeyboardButton(text="720p Only", callback_data=f"fsub_run_{session_id}_720p")
             ],
-            [InlineKeyboardButton(text=f"{'✅' if mode=='let_members_choose' else '❌'} Let Members Choose", callback_data=f"gset_mode_let_members_choose_{c_id}")],
-            [InlineKeyboardButton(text="🔙 Back to List", callback_data="tier_group_list")]
-        ]
-        return await query.message.edit_text(f"🛠️ **Remote Group Matrix Interface**\nModifying rule sets for channel group `{g_sett.get('title', c_id)}`:", reply_markup=InlineKeyboardMarkup(buttons))
-
-    if data.startswith("gset_mode_"):
-        parts = data.split("_")
-        target_mode = f"{parts[2]}_{parts[3]}" if parts[3] == "default" or parts[3] == "interactive" else f"{parts[2]}_{parts[3]}_{parts[4]}"
-        chat_id = int(parts[-1])
-        g_sett = await db.get_group_settings(chat_id)
-        
-        # Verify access rules locally or via server query match
-        if user_id not in g_sett.get("admins", []) and not is_creator(user_id):
-            return await query.answer("Unauthorized action layer clearance.", show_alert=True)
-            
-        await db.update_group_setting(chat_id, "search_mode", target_mode)
-        await query.answer("Group layout policy updated successfully.")
-        
-        # Determine fallback window route base path
-        if query.message.chat.type in ["group", "supergroup"]:
-            # Rerender group view inline directly
-            buttons = [
-                [
-                    InlineKeyboardButton(text=f"{'✅' if target_mode=='force_default' else '❌'} Force Default", callback_data=f"gset_mode_force_default_{chat_id}"),
-                    InlineKeyboardButton(text=f"{'✅' if target_mode=='force_interactive' else '❌'} Force Interactive", callback_data=f"gset_mode_force_interactive_{chat_id}")
-                ],
-                [InlineKeyboardButton(text=f"{'✅' if target_mode=='let_members_choose' else '❌'} Let Members Choose", callback_data=f"gset_mode_let_members_choose_{chat_id}")]
+            [
+                InlineKeyboardButton(text="480p Only", callback_data=f"fsub_run_{session_id}_480p"),
+                InlineKeyboardButton(text="🔙 Back", callback_data=f"fsub_back_{session_id}")
             ]
-            return await query.message.edit_text(f"🛠️ **Group Settings Menu:**\nConfigure search visualization structures for all active participants:", reply_markup=InlineKeyboardMarkup(buttons))
-        else:
-            return await menus_callback_handler(client, query.create(data=f"tier_gmanage_{chat_id}"))
-
-    # --- TIER 3 HANDLERS (BOT CREATOR CONTROL PANEL) ---
-    if data == "tier_creator_home":
-        if not is_creator(user_id): return await query.answer("Clearance validation failure.", show_alert=True)
-        g_settings = await db.get_settings()
-        sh_status = "ACTIVE" if g_settings.get("shortener_enabled", False) else "DISABLED"
-        buttons = [
-            [InlineKeyboardButton(text=f"🌐 Global Shortener: {sh_status}", callback_data="tier_toggle_shortener")],
-            [InlineKeyboardButton(text="🔙 Back", callback_data="tier_root_fallback")]
         ]
-        return await query.message.edit_text("👑 **Master Creator Engine Dashboard**\nGlobal engine controls override matrix settings directly:", reply_markup=InlineKeyboardMarkup(buttons))
+        return await query.message.edit_text(
+            "🎥 **Select the maximum parsing resolution:**", 
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
 
-    if data == "tier_toggle_shortener":
-        if not is_creator(user_id): return await query.answer("Access Violation.")
-        g_settings = await db.get_settings()
-        curr = g_settings.get("shortener_enabled", False)
-        await db.settings.update_one({"id": "global"}, {"$set": {"shortener_enabled": not curr}}, upsert=True)
-        await query.answer("Global system shortener state flipped.")
-        return await menus_callback_handler(client, query.create(data="tier_creator_home"))
+    elif action == "lang":
+        buttons = [
+            [
+                InlineKeyboardButton(text="Tamil Audio", callback_data=f"fsub_run_{session_id}_tamil"),
+                InlineKeyboardButton(text="Telugu Audio", callback_data=f"fsub_run_{session_id}_telugu")
+            ],
+            [
+                InlineKeyboardButton(text="Hindi Audio", callback_data=f"fsub_run_{session_id}_hindi"),
+                InlineKeyboardButton(text="🔙 Back", callback_data=f"fsub_back_{session_id}")
+            ]
+        ]
+        return await query.message.edit_text(
+            "🗣️ **Select targeted translation language:**", 
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
 
-    if data == "tier_root_fallback":
-        # Remount layout index home page
-        keyboard = [[InlineKeyboardButton(text="👤 Personal Search Settings", callback_data="tier_user_home")]]
-        if await db.get_admin_groups(user_id):
-            keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list")])
-        if is_creator(user_id):
-            keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="tier_creator_home")])
-        return await query.message.edit_text("🎛️ **Central Command Settings Hub:**\nSelect the access layer tier you wish to inspect or modify:", reply_markup=InlineKeyboardMarkup(keyboard))
+@Client.on_callback_query(filters.regex(r"^fsub_"))
+async def sub_filter_processing_execution_handler(client: Client, query: CallbackQuery):
+    data = query.data
+    parts = data.split("_")
+    action = parts[1]
+    session_id = f"{parts[2]}_{parts[3]}_{parts[4]}"
+    
+    session = FILTER_SESSION_CACHE.get(session_id)
+    if not session:
+        return await query.answer("Query cache expired.", show_alert=True)
+    
+    if action == "back":
+        buttons = [
+            [
+                InlineKeyboardButton(text="🎥 Filter Quality", callback_data=f"fui_qual_{session_id}"),
+                InlineKeyboardButton(text="🗣️ Filter Language", callback_data=f"fui_lang_{session_id}")
+            ],
+            [InlineKeyboardButton(text="📜 Show All Files Directly", callback_data=f"fui_all_{session_id}")]
+        ]
+        return await query.message.edit_text(
+            f"✨ **Search Filter Panel:** `{session['query']}`\nRefine file distribution lists dynamically using filters:", 
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        
+    tag = parts[5].lower()
+    filtered_results = [f for f in session["files"] if tag in f.get("title", "").lower()]
+    
+    if not filtered_results:
+        buttons = [[InlineKeyboardButton(text="🔙 Change Filter Settings", callback_data=f"fsub_back_{session_id}")]]
+        return await query.message.edit_text(
+            f"❌ No matching criteria parameters isolated for: `{tag.upper()}`", 
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        
+    buttons = []
+    for f in filtered_results[:20]:
+        db_id = str(f.get("_id", ""))
+        title = f.get("title", "Unknown Title")
+        buttons.append([InlineKeyboardButton(text=f"🎬 {title}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
+        
+    buttons.append([InlineKeyboardButton(text="🔄 Adjust Filter Selection Rules", callback_data=f"fsub_back_{session_id}")])
+    
+    await query.message.edit_text(
+        f"🎯 **Filtered Index Results [Tag: {tag.upper()}]:**", 
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
