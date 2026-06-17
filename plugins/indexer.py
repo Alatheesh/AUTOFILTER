@@ -7,6 +7,7 @@ from pyrogram.types import Message
 from pyrogram.errors import FloodWait
 from database.multi_db import db
 from config import Config
+from pyrogram.errors import FloodWait, PeerIdInvalid, ChannelInvalid
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,11 @@ async def process_indexing_queue(client: Client):
             except FloodWait as fw:
                 logger.warning(f"⚠️ Indexer Rate Limit! Sleeping {fw.value}s")
                 await asyncio.sleep(fw.value)
+                continue
+            except (PeerIdInvalid, ChannelInvalid): # <--- ADD THIS BLOCK
+                logger.error(f"❌ Channel {chat_name} ({chat_id}) is INVALID. Cancelling job.")
+                await db.update_job(job_id, {"status": "failed"})
+                await asyncio.sleep(5)
                 continue
             except Exception as e:
                 logger.error(f"Failed to fetch batch for {chat_name}: {e}")
