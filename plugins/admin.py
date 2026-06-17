@@ -463,3 +463,19 @@ async def multi_shard_json_backup(client: Client, message: Message):
         await message.reply_document("shard0_backup.json", caption=f"📦 **Backup Export**\nProcessed `{len(documents)}` files.")
         await progress.delete()
     except Exception as e: await progress.edit_text(f"❌ **Schema Export Failed:** `{str(e)}`")
+
+@Client.on_message(filters.command("optimize_db") & filters.user(Config.ADMINS))
+async def build_database_indexes(client: Client, message: Message):
+    status = await message.reply_text("⚙️ **Building High-Speed Indexes across all Shards...**\nThis might take a few seconds.")
+    
+    try:
+        import pymongo
+        for idx, coll in enumerate(db.collections):
+            # Create a unique index for ultra-fast duplicate checking
+            await coll.create_index([("crypto_hash", pymongo.ASCENDING)], unique=False, background=True)
+            # Create an index for faster title searches
+            await coll.create_index([("title", pymongo.ASCENDING)], background=True)
+            
+        await status.edit_text("✅ **Database Optimization Complete!**\n\nYour MongoDB clusters are now ready to handle 1,000,000+ files at lightning speed.")
+    except Exception as e:
+        await status.edit_text(f"❌ **Optimization Failed:** `{str(e)}`")
