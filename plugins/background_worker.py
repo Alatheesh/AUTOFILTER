@@ -9,12 +9,38 @@ from database.multi_db import db
 
 logger = logging.getLogger(__name__)
 
-async def extract_language_micro_chunk(client: Client, file_id: str, unique_id: str) -> str:
-    """Streams only the first 2MB of a video to read internal audio tracks."""
-    chunk_limit = 2 * 1024 * 1024  # 2 Megabytes
+# A clean, scalable dictionary of languages and their MKV abbreviations
+LANGUAGE_MAP = {
+    "tamil": ["tamil", "'ta'", "'tam'"],
+    "telugu": ["telugu", "'te'", "'tel'"],
+    "hindi": ["hindi", "'hi'", "'hin'"],
+    "english": ["english", "'en'", "'eng'"],
+    "malayalam": ["malayalam", "'ml'", "'mal'"],
+    "kannada": ["kannada", "'kn'", "'kan'"],
+    "bengali": ["bengali", "'bn'", "'ben'"],
+    "marathi": ["marathi", "'mr'", "'mar'"],
+    "gujarati": ["gujarati", "'gu'", "'guj'"],
+    "punjabi": ["punjabi", "'pa'", "'pan'"],
+    "urdu": ["urdu", "'ur'", "'urd'"],
+    "odia": ["odia", "oriya", "'or'", "'ori'"],
+    "japanese": ["japanese", "'ja'", "'jpn'"],
+    "korean": ["korean", "'ko'", "'kor'"],
+    "chinese": ["chinese", "mandarin", "cantonese", "'zh'", "'chi'", "'zho'"],
+    "french": ["french", "'fr'", "'fre'", "'fra'"],
+    "spanish": ["spanish", "'es'", "'spa'"],
+    "german": ["german", "'de'", "'ger'", "'deu'"],
+    "russian": ["russian", "'ru'", "'rus'"],
+    "arabic": ["arabic", "'ar'", "'ara'"]
+}
+
+async def extract_language_micro_chunk(client: Client, file_id: str, unique_id: str) -> tuple[str, str]:
+    """Streams a 5MB chunk and extracts both Audio and Subtitle tracks."""
+    chunk_limit = 5 * 1024 * 1024  # 5MB 
     temp_path = f"temp_{unique_id}.mkv"
     downloaded = 0
-    languages_found = set()
+    
+    audio_found = set()
+    subs_found = set()
 
     try:
         async with aiofiles.open(temp_path, 'wb') as f:
@@ -24,24 +50,32 @@ async def extract_language_micro_chunk(client: Client, file_id: str, unique_id: 
                 if downloaded >= chunk_limit:
                     break 
 
+        # Generate the raw metadata
         media_info = MediaInfo.parse(temp_path)
+        
         for track in media_info.tracks:
-            if track.track_type == "Audio" and track.language:
-                lang = track.language.lower()
-                if "tam" in lang: languages_found.add("tamil")
-                elif "tel" in lang: languages_found.add("telugu")
-                elif "hin" in lang: languages_found.add("hindi")
-                elif "eng" in lang: languages_found.add("english")
-                elif "mal" in lang: languages_found.add("malayalam")
-                elif "kan" in lang: languages_found.add("kannada")
+            # Check for AUDIO tracks
+            if track.track_type == "Audio":
+                track_data = str(track.to_data()).lower()
+                for lang, keywords in LANGUAGE_MAP.items():
+                    if any(keyword in track_data for keyword in keywords):
+                        audio_found.add(lang)
+                        
+            # Check for SUBTITLE (Text) tracks
+            elif track.track_type == "Text":
+                track_data = str(track.to_data()).lower()
+                for lang, keywords in LANGUAGE_MAP.items():
+                    if any(keyword in track_data for keyword in keywords):
+                        subs_found.add(lang)
 
-        if languages_found:
-            return " ".join(list(languages_found))
-        return "unknown"
+        final_audio = " ".join(list(audio_found)) if audio_found else "unknown"
+        final_subs = " ".join(list(subs_found)) if subs_found else "none"
+        
+        return final_audio, final_subs
 
     except Exception as e:
         logger.error(f"Worker extraction error on {unique_id}: {e}")
-        return "unknown"
+        return "unknown", "none"
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
@@ -69,11 +103,16 @@ async def start_background_language_indexer(client: Client):
             file_id = target_file.get("file_id")
             unique_id = target_file.get("file_unique_id")
             
-            extracted_langs = await extract_language_micro_chunk(client, file_id, unique_id)
+            # Send it to the raw dump scanner (Now returns two variables!)
+            audio_langs, sub_langs = await extract_language_micro_chunk(client, file_id, unique_id)
             
+            # Save both Audio and Subtitle data directly to MongoDB
             await target_collection.update_one(
                 {"_id": target_file["_id"]},
-                {"$set": {"language": extracted_langs}}
+                {"$set": {
+                    "language": audio_langs,
+                    "subtitle": sub_langs
+                }}
             )
             
             # SAFE API LIMIT SLEEP
