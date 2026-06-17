@@ -344,7 +344,13 @@ async def get_worker1_text_and_buttons():
         non_media = active_job.get("non_media", 0) or active_job.get("text_skipped", 0)
 
         idx_pct = (scanned / total_msgs * 100) if total_msgs > 0 else 0
-        idx_eta_seconds = (left / 200) * 6.0
+        
+        # -----------------------------------------------------
+        # TWEAK: THE NEW ETA MATH 
+        # Assumes ~0.4 seconds per message to account for Telegram API 
+        # fetching and MongoDB write latency.
+        # -----------------------------------------------------
+        idx_eta_seconds = left * 0.4
         idx_eta_string = format_eta(idx_eta_seconds)
 
         text = (
@@ -373,6 +379,7 @@ async def get_worker1_text_and_buttons():
         ]
     ]
     return text, InlineKeyboardMarkup(buttons)
+
 
 async def get_worker2_text_and_buttons():
     db_stats = await db.global_stats()
