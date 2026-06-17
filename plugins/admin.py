@@ -1,12 +1,15 @@
 import asyncio
 import json
 import logging
+import time
 from pyrogram import Client, filters, ContinuePropagation
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from database.multi_db import db
 from config import Config
 
 logger = logging.getLogger(__name__)
+
+START_TIME = time.time()
 
 BROADCAST_QUEUE = asyncio.Queue()
 BROADCAST_STATUS = {"total": 0, "processed": 0, "success": 0, "failed": 0, "is_running": False}
@@ -52,7 +55,7 @@ async def admin_input_catcher(client: Client, message: Message):
         await db.update_settings({"shortener_url": user_input})
         ADMIN_STATE[user_id] = "setup_shortener_api"
         await message.reply_text("✅ **URL Saved!**\n\nNow, please send me your secret **API Key** for this shortener.")
-        
+
     elif state == "setup_shortener_api":
         await db.update_settings({"shortener_api": user_input, "shortener_enabled": True})
         del ADMIN_STATE[user_id]
@@ -62,7 +65,7 @@ async def admin_input_catcher(client: Client, message: Message):
         await db.update_settings({"shortener_api": user_input})
         del ADMIN_STATE[user_id]
         await message.reply_text("✅ **Success!** API Key updated in the database.\nType `/admin` to view.")
-    
+
     elif state == "waiting_for_url":
         await db.update_settings({"shortener_url": user_input})
         del ADMIN_STATE[user_id]
@@ -78,10 +81,10 @@ async def send_settings_home(message_or_query):
     buttons = [
         [InlineKeyboardButton("🔗 Shortener Settings", callback_data="set_shortener")],
         [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests")],
-        [InlineKeyboardButton("🕵️‍♂️ Inside Settings", callback_data="set_inside")], # THE NEW MENU
+        [InlineKeyboardButton("🕵️‍♂️ Inside Settings", callback_data="set_inside")], 
         [InlineKeyboardButton("🔙 Exit", callback_data="tier_root_fallback")]
     ]
-    
+
     if isinstance(message_or_query, Message):
         await message_or_query.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
     else:
@@ -92,7 +95,6 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
     action = callback.data
     user_id = callback.from_user.id
 
-    # Clear any typing state if they click a menu button
     if action in ["set_home", "set_inside", "set_shortener", "set_requests"]:
         if user_id in ADMIN_STATE:
             del ADMIN_STATE[user_id]
@@ -160,19 +162,17 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
     elif action == "inside_placement":
         settings = await db.get_settings()
         current_placement = settings.get("inside_placement", "movie")
-        
-        # Cycle through placement options dynamically
+
         if current_placement == "movie":
             nxt = "request"
         elif current_placement == "request":
             nxt = "welcome"
         else:
             nxt = "movie"
-            
+
         await db.update_settings({"inside_placement": nxt})
         callback.data = "set_inside"
         await settings_callbacks(client, callback)
-
 
     # ==========================================
     # --- EXISTING SHORTENER / REQUESTS DASHBOARD ---
@@ -200,7 +200,7 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
     elif action == "set_toggle":
         settings = await db.get_settings()
         current_state = settings.get("shortener_enabled", False)
-        
+
         if current_state:
             await db.update_settings({"shortener_enabled": False})
             callback.data = "set_shortener"
@@ -250,7 +250,6 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         callback.data = "set_requests"
         await settings_callbacks(client, callback)
 
-# [Broadcast & Stats methods remain identical below...]
 async def process_broadcast_queue(client: Client):
     global BROADCAST_STATUS
     while not BROADCAST_QUEUE.empty():
@@ -285,16 +284,31 @@ def format_eta(seconds):
     if minutes > 0: eta_strings.append(f"{int(minutes)}m")
     return " ".join(eta_strings) if eta_strings else "< 1 minute"
 
+def format_uptime(seconds):
+    days, remainder = divmod(seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, sec = divmod(remainder, 60)
+    parts = []
+    if days: parts.append(f"{int(days)}d")
+    if hours: parts.append(f"{int(hours)}h")
+    if minutes: parts.append(f"{int(minutes)}m")
+    parts.append(f"{int(sec)}s")
+    return " ".join(parts) if parts else "Just started"
+
 async def get_stats_home_text_and_buttons():
     db_stats = await db.global_stats()
-    
+
     used_space = format_bytes(db_stats.get("total_size_bytes", 0))
     left_space = format_bytes(db_stats.get("space_left_bytes", 0))
     shards_text = "".join([f"• **Shard {idx + 1}**: `{count:,}` files\n" for idx, count in enumerate(db_stats.get("shard_distribution", []))])
     total_files = db_stats.get('total_files', 0)
     
+    uptime_seconds = time.time() - START_TIME
+    uptime_string = format_uptime(uptime_seconds)
+
     text = (
         f"📊 **Advanced System Status Dashboard**\n\n"
+        f"⏱️ **Bot Uptime:** `{uptime_string}`\n"
         f"🗂️ **Total Indexed Files:** `{total_files:,}`\n\n"
         f"💾 **Storage Analytics:**\n"
         f"• **Space Used:** `{used_space}`\n"
@@ -302,7 +316,7 @@ async def get_stats_home_text_and_buttons():
         f"• **Estimated Capacity Left:** `~{db_stats.get('estimated_files_left', 0):,} files`\n\n"
         f"🖲️ **Shard Distribution:**\n{shards_text}"
     )
-    
+
     buttons = [
         [
             InlineKeyboardButton("⚙️ Worker 1: Indexing", callback_data="stats_worker1"),
@@ -314,27 +328,30 @@ async def get_stats_home_text_and_buttons():
 
 async def get_worker1_text_and_buttons():
     active_job = await db.get_active_job()
-    
+
     if active_job:
         target = active_job.get("chat_name", "Unknown Channel")
         scanned = active_job.get("scanned", 0)
-        current = active_job.get("current_id", 0)
-        left = max(0, current)
-        total_msgs = active_job.get("start_id", 0) or (scanned + left)
         
+        total_msgs = active_job.get("start_id", 0)
+        left = active_job.get("left", 0)
+        
+        if not left or left == 0:
+            left = max(0, total_msgs - scanned)
+
         saved = active_job.get("saved", 0)
         duplicates = active_job.get("duplicates", 0) or active_job.get("duplicates_skipped", 0)
         non_media = active_job.get("non_media", 0) or active_job.get("text_skipped", 0)
-        
+
         idx_pct = (scanned / total_msgs * 100) if total_msgs > 0 else 0
         idx_eta_seconds = (left / 200) * 6.0
         idx_eta_string = format_eta(idx_eta_seconds)
-        
+
         text = (
             f"⚙️ **WORKER 1: Mass Channel Indexing**\n"
             f"🔄 **Status:** `Active (Deep Scan in Progress...)`\n\n"
             f"• **Target Channel:** `{target}`\n"
-            f"• **Scanned:** `{scanned:,}` | **Left:** `{left:,}`\n"
+            f"• **Scanned:** `{scanned:,}` | **Remaining to Scan:** `{left:,}`\n"
             f"• **Total Progress:** `{scanned:,}` / `{total_msgs:,}` (`{idx_pct:.1f}%`)\n"
             f"• **Estimated Time Left:** `{idx_eta_string}`\n\n"
             f"📂 **Content Deep-Breakdown:**\n"
@@ -348,7 +365,7 @@ async def get_worker1_text_and_buttons():
             f"💤 **Status:** `Idle (Queue Empty)`\n\n"
             f"No active mass channel indexing tasks are currently running in the background queue."
         )
-        
+
     buttons = [
         [
             InlineKeyboardButton("🔙 Back", callback_data="stats_home"),
@@ -362,11 +379,11 @@ async def get_worker2_text_and_buttons():
     total_files = db_stats.get('total_files', 0)
     indexed_meta = db_stats.get('indexed_metadata', 0)
     pending_meta = total_files - indexed_meta
-    
+
     meta_eta_seconds = pending_meta * 5.5 
     meta_eta_string = format_eta(meta_eta_seconds)
     meta_pct = (indexed_meta / total_files * 100) if total_files > 0 else 100
-    
+
     text = (
         f"⚙️ **WORKER 2: Language & Metadata Extraction**\n"
         f"🔄 **Status:** `Processing Database Shards...`\n\n"
@@ -376,7 +393,7 @@ async def get_worker2_text_and_buttons():
         f"• **Estimated Completion Time (ETA):** `{meta_eta_string}`\n\n"
         f"💡 *Note: This background process routes with a safety buffer delay to avoid hitting Telegram flood limits.*"
     )
-    
+
     buttons = [
         [
             InlineKeyboardButton("🔙 Back", callback_data="stats_home"),
@@ -439,18 +456,3 @@ async def multi_shard_json_backup(client: Client, message: Message):
         await message.reply_document("shard0_backup.json", caption=f"📦 **Backup Export**\nProcessed `{len(documents)}` files.")
         await progress.delete()
     except Exception as e: await progress.edit_text(f"❌ **Schema Export Failed:** `{str(e)}`")
-
-@Client.on_message(filters.command("migrate_db") & filters.user(Config.ADMINS))
-async def migrate_old_database(client: Client, message: Message):
-    status = await message.reply_text("🔄 **Starting Database Migration...**\nTagging old files for the background worker.")
-    total_updated = 0
-    try:
-        for coll in db.collections:
-            result = await coll.update_many(
-                {"language": {"$exists": False}},
-                {"$set": {"language": "pending"}}
-            )
-            total_updated += result.modified_count
-        await status.edit_text(f"✅ **Migration Complete!**\n\nSuccessfully tagged `{total_updated:,}` old files.\nThe Background Worker will now begin processing them silently!")
-    except Exception as e:
-        await status.edit_text(f"❌ **Migration Failed:** `{str(e)}`")
