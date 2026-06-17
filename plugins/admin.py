@@ -504,3 +504,14 @@ async def reset_unknown_languages(client: Client, message: Message):
         total_reset += result.modified_count
         
     await status.edit_text(f"✅ **Database Migration Complete!**\n\nSent `{total_reset}` old files back to the Worker 2 queue to extract their Subtitles and Audio tags.")
+
+@Client.on_message(filters.command("clear_job") & filters.user(Config.ADMINS))
+async def clear_active_job(client: Client, message: Message):
+    # This assumes your db has a method to get/delete the active job. 
+    # If not, it just sets the status to 'completed' to stop the loop.
+    job = await db.get_active_job()
+    if job:
+        await db.update_job(job["_id"], {"status": "completed"})
+        await message.reply_text("✅ **Stuck indexing job marked as completed.** The loop will now stop.")
+    else:
+        await message.reply_text("⚠️ **No active job found.**")
