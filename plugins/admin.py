@@ -479,3 +479,28 @@ async def build_database_indexes(client: Client, message: Message):
         await status.edit_text("✅ **Database Optimization Complete!**\n\nYour MongoDB clusters are now ready to handle 1,000,000+ files at lightning speed.")
     except Exception as e:
         await status.edit_text(f"❌ **Optimization Failed:** `{str(e)}`")
+
+@Client.on_message(filters.command("migrate_db") & filters.user(Config.ADMINS))
+async def reset_unknown_languages(client: Client, message: Message):
+    status = await message.reply_text("⚙️ **Upgrading Database for Subtitles & Audio...**")
+    total_reset = 0
+    
+    for coll in db.collections:
+        # Finds files with "unknown" language OR files that are missing the subtitle field
+        result = await coll.update_many(
+            {
+                "$or": [
+                    {"language": "unknown"},
+                    {"subtitle": {"$exists": False}}
+                ]
+            },
+            {
+                "$set": {
+                    "language": "pending",
+                    "subtitle": "pending"
+                }
+            }
+        )
+        total_reset += result.modified_count
+        
+    await status.edit_text(f"✅ **Database Migration Complete!**\n\nSent `{total_reset}` old files back to the Worker 2 queue to extract their Subtitles and Audio tags.")
