@@ -42,9 +42,10 @@ async def auto_indexer(client: Client, message: Message):
         "title": sanitize_title(raw_title),
         "raw_title": raw_title,
         "size": file_size,
-        "message_id": message.id,
-        "chat_id": message.chat.id,
-        "language": "pending"
+        "message_id": msg.id,
+        "chat_id": msg.chat.id,
+        "language": "pending",
+        "subtitle": "pending" 
     }
     await db.insert_file(file_data)
 
