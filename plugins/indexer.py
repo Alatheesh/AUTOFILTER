@@ -42,10 +42,10 @@ async def auto_indexer(client: Client, message: Message):
         "title": sanitize_title(raw_title),
         "raw_title": raw_title,
         "size": file_size,
-        "message_id": msg.id,
-        "chat_id": msg.chat.id,
+        "message_id": message.id,    # Fixed back to message.id
+        "chat_id": message.chat.id,  # Fixed back to message.chat.id
         "language": "pending",
-        "subtitle": "pending" 
+        "subtitle": "pending"        # Added correctly
     }
     await db.insert_file(file_data)
 
@@ -141,9 +141,10 @@ async def process_indexing_queue(client: Client):
                         "title": sanitize_title(raw_title),
                         "raw_title": raw_title,
                         "size": file_size,
-                        "message_id": msg.id,
-                        "chat_id": msg.chat.id,
-                        "language": "pending"
+                        "message_id": msg.id,      # msg.id is correct here!
+                        "chat_id": msg.chat.id,    # msg.chat.id is correct here!
+                        "language": "pending",
+                        "subtitle": "pending"      # <--- Now safely added!
                     }
                     await db.insert_file(file_data)
                     saved += 1
