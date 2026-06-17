@@ -30,23 +30,23 @@ class MultiDB:
             self.groups = self.clients[0][db_name]["groups"]
             self.jobs = self.clients[0][db_name]["indexing_jobs"]
 
-    async def add_index_job(self, chat_id: int, chat_name: str, start_msg_id: int):
-        if not self.clients: return False
+    async def add_index_job(self, chat_id, chat_name, last_msg_id):
         job_id = f"job_{chat_id}"
-        existing = await self.jobs.find_one({"_id": job_id, "status": {"$in": ["pending", "processing"]}})
-        if existing: return False
-        
-        await self.jobs.insert_one({
-            "_id": job_id,
-            "chat_id": chat_id,
-            "chat_name": chat_name,
-            "start_id": start_msg_id,
-            "current_id": start_msg_id,
-            "status": "pending",
-            "scanned": 0,
-            "saved": 0,
-            "duplicates": 0
-        })
+        # We use update_one with upsert=True instead of insert_one
+        await self.jobs.update_one(
+            {"_id": job_id},
+            {"$set": {
+                "_id": job_id,
+                "chat_id": chat_id,
+                "chat_name": chat_name,
+                "current_id": last_msg_id,
+                "status": "pending",
+                "scanned": 0,
+                "saved": 0,
+                "duplicates": 0
+            }},
+            upsert=True
+        )
         return True
 
     async def get_active_job(self):
