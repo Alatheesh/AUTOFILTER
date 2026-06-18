@@ -4,7 +4,7 @@ import logging
 import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import Message
-from pyrogram.errors import FloodWait, PeerIdInvalid, ChannelInvalid
+from pyrogram.errors import FloodWait
 from database.multi_db import db
 from config import Config
 
@@ -111,14 +111,11 @@ async def process_indexing_queue(client: Client):
                 logger.warning(f"⚠️ Indexer Rate Limit! Sleeping {fw.value}s")
                 await asyncio.sleep(fw.value)
                 continue
-            except (PeerIdInvalid, ChannelInvalid): 
-                logger.error(f"❌ Channel {chat_name} ({chat_id}) is INVALID. Cancelling job.")
-                await db.update_job(job_id, {"status": "failed"})
-                await asyncio.sleep(5)
-                continue
             except Exception as e:
+                # THIS IS THE MAGIC FIX: If Pyrogram glitches, it just safely lowers the ID and keeps surviving!
                 logger.error(f"Failed to fetch batch for {chat_name}: {e}")
                 await db.update_job(job_id, {"current_id": start_id - 1})
+                await asyncio.sleep(5)
                 continue
             
             saved = 0
