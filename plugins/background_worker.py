@@ -34,8 +34,8 @@ LANGUAGE_MAP = {
 }
 
 async def extract_language_micro_chunk(client: Client, file_id: str, unique_id: str) -> tuple[str, str]:
-    """Streams a 5MB chunk and extracts both Audio and Subtitle tracks."""
-    chunk_limit = 5 * 1024 * 1024  # 5MB 
+    """Streams a 2MB chunk and extracts both Audio and Subtitle tracks."""
+    chunk_limit = 2 * 1024 * 1024  # 2MB limits bandwidth usage safely
     temp_path = f"temp_{unique_id}.mkv"
     downloaded = 0
     
@@ -103,10 +103,8 @@ async def start_background_language_indexer(client: Client):
             file_id = target_file.get("file_id")
             unique_id = target_file.get("file_unique_id")
             
-            # Send it to the raw dump scanner (Now returns two variables!)
             audio_langs, sub_langs = await extract_language_micro_chunk(client, file_id, unique_id)
             
-            # Save both Audio and Subtitle data directly to MongoDB
             await target_collection.update_one(
                 {"_id": target_file["_id"]},
                 {"$set": {
@@ -115,8 +113,8 @@ async def start_background_language_indexer(client: Client):
                 }}
             )
             
-            # SAFE API LIMIT SLEEP
-            await asyncio.sleep(4)
+            # 🛡️ Highly Stable Safety Timer (3.0s)
+            await asyncio.sleep(3.0)
 
         except FloodWait as fw:
             logger.warning(f"⚠️ Worker hit Rate Limit. Sleeping for {fw.value}s")
