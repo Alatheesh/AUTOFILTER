@@ -226,7 +226,7 @@ async def auto_filter(client: Client, message: Message):
     )
     
     try:
-        msg = await message.reply_photo(photo=metadata["poster"], caption=caption, reply_markup=InlineKeyboardMarkup(buttons), quote=True)
+        msg = await message.reply_photo(photo=metadata["poster"], caption=caption, reply_markup=InlineKeyboardMarkup(buttons), reply_parameters=ReplyParameters(message_id=message.id))
     except Exception:
         msg = await client.send_message(chat_id, caption, reply_markup=InlineKeyboardMarkup(buttons))
 
