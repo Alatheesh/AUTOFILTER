@@ -6,7 +6,7 @@ from pyrogram import Client, filters
 from pyrogram.enums import ChatType
 from pyrogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton, Message, 
-    InlineQuery, InlineQueryResultArticle, InputTextMessageContent, CallbackQuery, ReplyParameters
+    InlineQuery, InlineQueryResultArticle, InputTextMessageContent, CallbackQuery
 )
 from database.multi_db import db
 from config import Config
@@ -88,6 +88,7 @@ async def get_tmdb_suggestions(query: str) -> list:
     return []
 
 async def get_fuzzy_suggestions(query: str) -> list:
+    """Smarter Local DB Check: Uses words out of order to find the exact DB file."""
     first_word = query.split()[0] if query else query
     pool_query = first_word[:4] if len(first_word) >= 4 else first_word
     
@@ -100,10 +101,12 @@ async def get_fuzzy_suggestions(query: str) -> list:
         if not title: continue
         title_lower = title.lower()
         
+        # 1. Word Match (e.g., "Ganesha Gam" finds "Gam Gam Ganesha")
         if all(word in title_lower for word in query_lower.split()):
             suggestions.append(title)
             continue
             
+        # 2. Distance Match (Allow 1 typo per 4 letters)
         dist = levenshtein_distance(query_lower, title_lower)
         if dist <= max(2, len(query_lower) // 4):
             suggestions.append(title)
@@ -127,7 +130,7 @@ def format_size(size_bytes):
     s = round(size_bytes / p, 2)
     return f"{s} {size_name[i]}"
 
-@Client.on_message((filters.group | filters.private) & filters.text & ~filters.command(["start", "help", "about", "source", "settings", "request", "plot", "history", "clear_history", "broadcast", "stats", "backup", "admin", "index", "batch", "migrate_db", "clear_job", "optimize_db"]))
+@Client.on_message((filters.group | filters.private) & filters.text & ~filters.command(["start", "help", "about", "source", "settings", "request", "plot", "history", "clear_history", "broadcast", "stats", "backup", "admin", "index", "batch", "migrate_db"]))
 async def auto_filter(client: Client, message: Message):
     query = message.text.strip()
     if len(query) < 3: return
@@ -136,18 +139,23 @@ async def auto_filter(client: Client, message: Message):
     chat_id = message.chat.id
     resolved_mode, resolved_lang, resolved_size = await get_filter_settings(user_id, chat_id, getattr(message.chat, "type", ChatType.PRIVATE))
 
+    # Phase 1: Pure Title Search
     raw_results = await db.search_files(query, skip=0, limit=200, exact=False)
     
+    # Phase 2: No-Spaces Bypass
     if not raw_results and " " in query:
         raw_results = await db.search_files(query.replace(" ", ""), skip=0, limit=200, exact=False)
 
+    # Phase 3: Smart Python Filtering (Fixes the Language Bug)
     min_bytes, max_bytes = SIZE_MAP.get(resolved_size, (0, float('inf')))
     filtered_results = []
     
     for f in raw_results:
+        # Check Size
         if not (min_bytes <= f.get("size", 0) <= max_bytes):
             continue
             
+        # Check Language (safely in Python, without breaking Regex)
         if resolved_mode == "interactive" and resolved_lang not in ["all", "none"]:
             db_lang = f.get("language", "unknown").lower()
             db_title = f.get("title", "").lower()
@@ -159,6 +167,7 @@ async def auto_filter(client: Client, message: Message):
     results = filtered_results[:10]
     
     if not results:
+        # Prioritize the exact database filename first to prevent TMDB spelling mismatches!
         suggestions = await get_fuzzy_suggestions(query)
         if not suggestions:
             suggestions = await get_tmdb_suggestions(query)
@@ -169,12 +178,14 @@ async def auto_filter(client: Client, message: Message):
                 
         btn_list.append([InlineKeyboardButton("🔔 Request this Movie", callback_data=f"req_{query[:40]}")])
         
+        # Ensure we don't reply to a message if it's acting as a callback bridge
         try:
             if suggestions:
-                await message.reply_text("😔 **No exact matches found.**\n\nDid you mean one of these?", reply_markup=InlineKeyboardMarkup(btn_list), reply_parameters=ReplyParameters(message_id=message.id))
+                await message.reply_text("😔 **No exact matches found.**\n\nDid you mean one of these?", reply_markup=InlineKeyboardMarkup(btn_list), quote=True)
             else:
-                await message.reply_text("😔 **No files found matching your criteria.**", reply_markup=InlineKeyboardMarkup(btn_list), reply_parameters=ReplyParameters(message_id=message.id))
+                await message.reply_text("😔 **No files found matching your criteria.**", reply_markup=InlineKeyboardMarkup(btn_list), quote=True)
         except Exception:
+            # Fallback if the original message was deleted
             if suggestions:
                 await client.send_message(chat_id, "😔 **No exact matches found.**\n\nDid you mean one of these?", reply_markup=InlineKeyboardMarkup(btn_list))
             else:
@@ -184,16 +195,10 @@ async def auto_filter(client: Client, message: Message):
     metadata = await fetch_imdb_tmdb(query)
     buttons = []
     
-    settings = await db.get_settings()
-    shortener_on = settings.get("shortener_enabled", False)
-
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
-        if shortener_on:
-            buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
-        else:
-            buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{db_id}")])
+        buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
     
     buttons.append([InlineKeyboardButton(text=AD_SLOT_TEXT, url=AD_SLOT_URL)])
     
@@ -209,10 +214,6 @@ async def auto_filter(client: Client, message: Message):
     if resolved_mode == "interactive" and (resolved_lang != "all" or resolved_size != "all"):
         filter_notice = f"\n✨ **Filters Applied:** Size: `{resolved_size.upper()}` | Audio: `{resolved_lang.upper()}`"
 
-    if settings.get("filter_delete_enabled", False):
-        m_time = settings.get("filter_delete_time", 5)
-        filter_notice += f"\n\n⏳ *Note: This search result will automatically delete in {m_time} minutes.*"
-
     caption = (
         f"🎬 **{metadata['title']}**\n"
         f"⭐️ Rating: `{metadata['rating']}`\n"
@@ -222,13 +223,10 @@ async def auto_filter(client: Client, message: Message):
     )
     
     try:
-        msg = await message.reply_photo(photo=metadata["poster"], caption=caption, reply_markup=InlineKeyboardMarkup(buttons), reply_parameters=ReplyParameters(message_id=message.id))
+        await message.reply_photo(photo=metadata["poster"], caption=caption, reply_markup=InlineKeyboardMarkup(buttons), quote=True)
     except Exception:
-        msg = await client.send_message(chat_id, caption, reply_markup=InlineKeyboardMarkup(buttons))
-
-    if settings.get("filter_delete_enabled", False):
-        from plugins.advanced import trigger_ghost_self_destruct
-        trigger_ghost_self_destruct(client, chat_id, msg.id, settings.get("filter_delete_time", 5) * 60)
+        # Fallback to pure message sending if quote fails
+        await client.send_message(chat_id, caption, reply_markup=InlineKeyboardMarkup(buttons))
 
 @Client.on_callback_query(filters.regex(r"^(next|prev)_(\d+)_(.+)$"))
 async def handle_pagination(client: Client, callback: CallbackQuery):
@@ -259,16 +257,10 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
         return await callback.answer("⚠️ No more pages available matching your filters!", show_alert=True)
         
     buttons = []
-    settings = await db.get_settings()
-    shortener_on = settings.get("shortener_enabled", False)
-
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
-        if shortener_on:
-            buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
-        else:
-            buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{db_id}")])
+        buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
     
     buttons.append([InlineKeyboardButton(text=AD_SLOT_TEXT, url=AD_SLOT_URL)])
     

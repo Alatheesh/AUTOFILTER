@@ -32,7 +32,7 @@ class MultiDB:
 
     async def add_index_job(self, chat_id, chat_name, last_msg_id):
         job_id = f"job_{chat_id}"
-        # We use update_one with upsert=True instead of insert_one to prevent DuplicateKey crashes
+        # We use update_one with upsert=True instead of insert_one
         await self.jobs.update_one(
             {"_id": job_id},
             {"$set": {
@@ -104,16 +104,12 @@ class MultiDB:
                 "shortener_api": "", 
                 "shortener_url": "https://gplinks.in/api", 
                 "requests_enabled": True,
+                # 🚀 THE NEW INSIDE FEATURE VARIABLES
                 "inside_enabled": False,
                 "inside_words": [],
                 "inside_times": 5,
                 "inside_channels": [],
-                "inside_placement": "movie",
-                # 🔥 THE NEW AUTO-DELETE SYSTEM 🔥
-                "file_delete_enabled": False,
-                "file_delete_time": 10,
-                "filter_delete_enabled": False,
-                "filter_delete_time": 5
+                "inside_placement": "movie"
             }
             await self.settings.insert_one(default)
             return default
