@@ -169,7 +169,7 @@ async def auto_filter(client: Client, message: Message):
                 
         btn_list.append([InlineKeyboardButton("🔔 Request this Movie", callback_data=f"req_{query[:40]}")])
         
-       try:
+        try:
             if suggestions:
                 await message.reply_text("😔 **No exact matches found.**\n\nDid you mean one of these?", reply_markup=InlineKeyboardMarkup(btn_list), reply_parameters=ReplyParameters(message_id=message.id))
             else:
@@ -187,9 +187,6 @@ async def auto_filter(client: Client, message: Message):
     settings = await db.get_settings()
     shortener_on = settings.get("shortener_enabled", False)
 
-    # -----------------------------------------------------
-    # 🔥 HYBRID BUTTON LOGIC
-    # -----------------------------------------------------
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
@@ -212,7 +209,6 @@ async def auto_filter(client: Client, message: Message):
     if resolved_mode == "interactive" and (resolved_lang != "all" or resolved_size != "all"):
         filter_notice = f"\n✨ **Filters Applied:** Size: `{resolved_size.upper()}` | Audio: `{resolved_lang.upper()}`"
 
-    # AUTO-DELETE FILTER CAUTION
     if settings.get("filter_delete_enabled", False):
         m_time = settings.get("filter_delete_time", 5)
         filter_notice += f"\n\n⏳ *Note: This search result will automatically delete in {m_time} minutes.*"
@@ -230,7 +226,6 @@ async def auto_filter(client: Client, message: Message):
     except Exception:
         msg = await client.send_message(chat_id, caption, reply_markup=InlineKeyboardMarkup(buttons))
 
-    # TRIGGER GHOST TASK FOR FILTER MESSAGE
     if settings.get("filter_delete_enabled", False):
         from plugins.advanced import trigger_ghost_self_destruct
         trigger_ghost_self_destruct(client, chat_id, msg.id, settings.get("filter_delete_time", 5) * 60)
@@ -270,7 +265,6 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
-        # HYBRID BUTTON LOGIC FOR NEXT PAGES
         if shortener_on:
             buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
         else:
