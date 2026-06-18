@@ -2,7 +2,7 @@ import time
 import aiohttp
 import logging
 from pyrogram import Client, filters, ContinuePropagation
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ReplyParameters
 from pyrogram.errors import UserNotParticipant
 from config import Config
 from database.multi_db import db
@@ -67,11 +67,11 @@ async def execute_file_delivery(client: Client, chat_id: int, user_id: int, file
             try: await client.delete_messages(old['chat'], old['msg'])
             except: pass
 
-        # 2. Send the new caution message
+        # 2. Send the new caution message (Warning-Free Version)
         caution_msg = await client.send_message(
             chat_id,
             f"⏳ **Caution:** This file will be automatically deleted in **{del_mins} minutes** to protect against copyright flags.",
-            reply_to_message_id=sent_file.id
+            reply_parameters=ReplyParameters(message_id=sent_file.id)
         )
         LAST_CAUTION_MSG[user_id] = {'chat': chat_id, 'msg': caution_msg.id}
 
