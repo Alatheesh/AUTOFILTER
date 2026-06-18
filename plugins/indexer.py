@@ -4,7 +4,7 @@ import logging
 import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import Message
-from pyrogram.errors import FloodWait
+from pyrogram.errors import FloodWait, PeerIdInvalid, ChannelInvalid
 from database.multi_db import db
 from config import Config
 
@@ -53,15 +53,21 @@ async def auto_indexer(client: Client, message: Message):
 async def mass_indexer_command(client: Client, message: Message):
     target_chat = None
     last_msg_id = 0
+    chat_obj = None
 
+    # HYBRID FEATURE 1: Intelligently extract @username for Public Channels
     if message.reply_to_message:
         reply = message.reply_to_message
         if getattr(reply, "forward_origin", None) and getattr(reply.forward_origin, "chat", None):
-            target_chat = reply.forward_origin.chat.id
+            chat_obj = reply.forward_origin.chat
             last_msg_id = getattr(reply.forward_origin, "message_id", 0)
         elif getattr(reply, "forward_from_chat", None):
-            target_chat = reply.forward_from_chat.id
-            last_msg_id = getattr(reply.forward_from_message_id, 0)
+            chat_obj = reply.forward_from_chat
+            last_msg_id = getattr(reply, "forward_from_message_id", 0)
+
+    if chat_obj:
+        # Use username if public, fallback to -100 ID if private
+        target_chat = chat_obj.username if chat_obj.username else chat_obj.id
 
     if not target_chat or not last_msg_id:
         return await message.reply_text("❌ **Usage:** Forward the **NEWEST** file from your channel, reply to it, and type `/index`")
@@ -70,7 +76,7 @@ async def mass_indexer_command(client: Client, message: Message):
         chat_info = await client.get_chat(target_chat)
         target_chat_name = chat_info.title or str(target_chat)
     except Exception as e:
-        return await message.reply_text(f"❌ **Error Accessing Chat:** Ensure bot is an Admin there!\n`{e}`")
+        return await message.reply_text(f"❌ **Error Accessing Chat:** Ensure bot is an Admin (if private)!\n`{e}`")
 
     success = await db.add_index_job(target_chat, target_chat_name, last_msg_id)
     
@@ -111,8 +117,13 @@ async def process_indexing_queue(client: Client):
                 logger.warning(f"⚠️ Indexer Rate Limit! Sleeping {fw.value}s")
                 await asyncio.sleep(fw.value)
                 continue
+            except (PeerIdInvalid, ChannelInvalid): 
+                # HYBRID FEATURE 2: The Safety Net. Never kill the job! Just sync memory and retry.
+                logger.warning(f"⚠️ Telegram memory syncing for {chat_name}. Retrying in 10s...")
+                await db.update_job(job_id, {"current_id": start_id - 1})
+                await asyncio.sleep(10)
+                continue
             except Exception as e:
-                # THIS IS THE MAGIC FIX: If Pyrogram glitches, it just safely lowers the ID and keeps surviving!
                 logger.error(f"Failed to fetch batch for {chat_name}: {e}")
                 await db.update_job(job_id, {"current_id": start_id - 1})
                 await asyncio.sleep(5)
@@ -159,7 +170,6 @@ async def process_indexing_queue(client: Client):
             })
             
             logger.info(f"🔄 Queue Indexing: {chat_name} - Saved {saved} new files.")
-            # 🛡️ Highly Stable Safety Timer (3.0s)
             await asyncio.sleep(3.0)
 
         except Exception as e:
