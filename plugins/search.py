@@ -6,7 +6,7 @@ from pyrogram import Client, filters
 from pyrogram.enums import ChatType
 from pyrogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton, Message, 
-    InlineQuery, InlineQueryResultArticle, InputTextMessageContent, CallbackQuery
+    InlineQuery, InlineQueryResultArticle, InputTextMessageContent, CallbackQuery, ReplyParameters
 )
 from database.multi_db import db
 from config import Config
@@ -169,11 +169,11 @@ async def auto_filter(client: Client, message: Message):
                 
         btn_list.append([InlineKeyboardButton("🔔 Request this Movie", callback_data=f"req_{query[:40]}")])
         
-        try:
+       try:
             if suggestions:
-                await message.reply_text("😔 **No exact matches found.**\n\nDid you mean one of these?", reply_markup=InlineKeyboardMarkup(btn_list), quote=True)
+                await message.reply_text("😔 **No exact matches found.**\n\nDid you mean one of these?", reply_markup=InlineKeyboardMarkup(btn_list), reply_parameters=ReplyParameters(message_id=message.id))
             else:
-                await message.reply_text("😔 **No files found matching your criteria.**", reply_markup=InlineKeyboardMarkup(btn_list), quote=True)
+                await message.reply_text("😔 **No files found matching your criteria.**", reply_markup=InlineKeyboardMarkup(btn_list), reply_parameters=ReplyParameters(message_id=message.id))
         except Exception:
             if suggestions:
                 await client.send_message(chat_id, "😔 **No exact matches found.**\n\nDid you mean one of these?", reply_markup=InlineKeyboardMarkup(btn_list))
