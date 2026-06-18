@@ -32,6 +32,7 @@ class MultiDB:
 
     async def add_index_job(self, chat_id, chat_name, last_msg_id):
         job_id = f"job_{chat_id}"
+        # We use update_one with upsert=True instead of insert_one to prevent DuplicateKey crashes
         await self.jobs.update_one(
             {"_id": job_id},
             {"$set": {
@@ -90,6 +91,9 @@ class MultiDB:
         cursor = self.groups.find({"admins": user_id})
         return await cursor.to_list(length=50)
 
+    # ===================================================
+    # --- TIER 3 & GLOBAL SETTINGS (PHASE 1 UPGRADE) ---
+    # ===================================================
     async def get_settings(self) -> Dict[str, Any]:
         if not self.clients: return {}
         settings = await self.settings.find_one({"_id": "bot_settings"})
@@ -105,6 +109,7 @@ class MultiDB:
                 "inside_times": 5,
                 "inside_channels": [],
                 "inside_placement": "movie",
+                # 🔥 THE NEW AUTO-DELETE SYSTEM 🔥
                 "file_delete_enabled": False,
                 "file_delete_time": 10,
                 "filter_delete_enabled": False,
@@ -119,6 +124,9 @@ class MultiDB:
         await self.settings.update_one({"_id": "bot_settings"}, {"$set": updates}, upsert=True)
         return True
 
+    # ===================================================
+    # --- MULTI-SHARD FILE SYSTEM ---
+    # ===================================================
     async def insert_file(self, file_data: Dict[str, Any], shard_index: Optional[int] = None) -> bool:
         if not self.collections: return False
         target_shard = shard_index % len(self.collections) if shard_index is not None else 0
