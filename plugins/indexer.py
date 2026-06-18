@@ -4,10 +4,9 @@ import logging
 import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import Message
-from pyrogram.errors import FloodWait
+from pyrogram.errors import FloodWait, PeerIdInvalid, ChannelInvalid
 from database.multi_db import db
 from config import Config
-from pyrogram.errors import FloodWait, PeerIdInvalid, ChannelInvalid
 
 logger = logging.getLogger(__name__)
 
@@ -76,9 +75,9 @@ async def mass_indexer_command(client: Client, message: Message):
     success = await db.add_index_job(target_chat, target_chat_name, last_msg_id)
     
     if success:
-        await message.reply_text(f"✅ **Job Queued Successfully!**\n\nChannel: `{target_chat_name}`\nThe bot will safely process this in the background to prevent bans and survive restarts.")
+        await message.reply_text(f"✅ **Job Queued Successfully!**\n\nChannel: `{target_chat_name}`\nThe bot will safely process this in the background.")
     else:
-        await message.reply_text(f"⚠️ **Job Already Exists!**\n\nThe bot is already scheduled to process `{target_chat_name}`.")
+        await message.reply_text(f"⚠️ **Job Started / Reset!**\n\nThe bot is processing `{target_chat_name}`.")
 
 async def process_indexing_queue(client: Client):
     """Runs 24/7. Survives crashes. Safely parses queued channels."""
@@ -112,7 +111,7 @@ async def process_indexing_queue(client: Client):
                 logger.warning(f"⚠️ Indexer Rate Limit! Sleeping {fw.value}s")
                 await asyncio.sleep(fw.value)
                 continue
-            except (PeerIdInvalid, ChannelInvalid): # <--- ADD THIS BLOCK
+            except (PeerIdInvalid, ChannelInvalid): 
                 logger.error(f"❌ Channel {chat_name} ({chat_id}) is INVALID. Cancelling job.")
                 await db.update_job(job_id, {"status": "failed"})
                 await asyncio.sleep(5)
@@ -163,7 +162,8 @@ async def process_indexing_queue(client: Client):
             })
             
             logger.info(f"🔄 Queue Indexing: {chat_name} - Saved {saved} new files.")
-            await asyncio.sleep(5.0)
+            # 🚀 SPEED UPGRADE
+            await asyncio.sleep(2.0)
 
         except Exception as e:
             logger.error(f"Indexer Queue error: {e}")
