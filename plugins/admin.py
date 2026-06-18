@@ -390,32 +390,44 @@ async def get_worker1_text_and_buttons():
     if active_job:
         target = active_job.get("chat_name", "Unknown Channel")
         scanned = active_job.get("scanned", 0)
-        
-        total_msgs = active_job.get("start_id", 0)
-        left = active_job.get("left", 0)
-        
-        if not left or left == 0:
-            left = max(0, total_msgs - scanned)
-
         saved = active_job.get("saved", 0)
-        duplicates = active_job.get("duplicates", 0) or active_job.get("duplicates_skipped", 0)
-        non_media = active_job.get("non_media", 0) or active_job.get("text_skipped", 0)
+        duplicates = active_job.get("duplicates", 0)
+        
+        current_id = active_job.get("current_id", 0)
 
-        idx_pct = (scanned / total_msgs * 100) if total_msgs > 0 else 0
-        idx_eta_seconds = left * 0.4
-        idx_eta_string = format_eta(idx_eta_seconds)
+        # 1. Dynamic Math Fix
+        remaining = max(0, current_id)
+        total_msgs = scanned + remaining
+
+        # 2. Percentage Fix
+        idx_pct = round((scanned / total_msgs * 100), 2) if total_msgs > 0 else 0.0
+
+        # 3. Empty/Deleted Math Fix
+        skipped_empty = scanned - (saved + duplicates)
+        if skipped_empty < 0:
+            skipped_empty = 0
+
+        # 4. Status and ETA Logic
+        if remaining <= 0:
+            status_text = "✅ Completed (Sleeping)"
+            idx_eta_string = "🎉 Fully Processed!"
+        else:
+            status_text = "🔄 Active (Deep Scan in Progress...)"
+            # Assuming ~3.0s interval per batch delay as set in indexer.py logic
+            idx_eta_seconds = remaining * 3.0  
+            idx_eta_string = format_eta(idx_eta_seconds)
 
         text = (
             f"⚙️ **WORKER 1: Mass Channel Indexing**\n"
-            f"🔄 **Status:** `Active (Deep Scan in Progress...)`\n\n"
+            f"🔄 **Status:** `{status_text}`\n\n"
             f"• **Target Channel:** `{target}`\n"
-            f"• **Scanned:** `{scanned:,}` | **Remaining to Scan:** `{left:,}`\n"
-            f"• **Total Progress:** `{scanned:,}` / `{total_msgs:,}` (`{idx_pct:.1f}%`)\n"
+            f"• **Scanned:** `{scanned:,}` | **Remaining to Scan:** `{remaining:,}`\n"
+            f"• **Total Progress:** `{scanned:,}` / `{total_msgs:,}` (`{idx_pct}%`)\n"
             f"• **Estimated Time Left:** `{idx_eta_string}`\n\n"
             f"📂 **Content Deep-Breakdown:**\n"
             f"• **New Media Saved:** `{saved:,}`\n"
             f"• **Duplicates Skipped:** `{duplicates:,}`\n"
-            f"• **Text / Non-Media Skipped:** `{non_media:,}`"
+            f"• **Deleted / Empty Skipped:** `{skipped_empty:,}`"
         )
     else:
         text = (
