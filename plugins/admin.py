@@ -413,8 +413,8 @@ async def get_worker1_text_and_buttons():
             idx_eta_string = "🎉 Fully Processed!"
         else:
             status_text = "🔄 Active (Deep Scan in Progress...)"
-            # Assuming ~3.0s interval per batch delay as set in indexer.py logic
-            idx_eta_seconds = remaining * 3.0  
+            # RESTORED YOUR ORIGINAL PERFECT CALCULATION
+            idx_eta_seconds = remaining * 0.4  
             idx_eta_string = format_eta(idx_eta_seconds)
 
         text = (
