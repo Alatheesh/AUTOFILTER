@@ -162,8 +162,8 @@ async def process_indexing_queue(client: Client):
             })
             
             logger.info(f"🔄 Queue Indexing: {chat_name} - Saved {saved} new files.")
-            # 🚀 SPEED UPGRADE
-            await asyncio.sleep(2.0)
+            # 🛡️ Highly Stable Safety Timer (3.0s)
+            await asyncio.sleep(3.0)
 
         except Exception as e:
             logger.error(f"Indexer Queue error: {e}")
