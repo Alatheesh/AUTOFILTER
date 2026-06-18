@@ -272,7 +272,7 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
             f"*Deletes actual movie files after delivery.*\n\n"
             f"🔍 **Search Filter Deletion:** {m_status} `({m_time} mins)`\n"
             f"*Deletes movie search result messages.*\n\n"
-            f"*(Note: Timers over 1440 mins/24 hrs may be interrupted by Hugging Face restarts).* "
+            f"*(Note: Timers over 1440 mins/24 hrs may be interrupted by server restarts).* "
         )
         buttons = [
             [
