@@ -29,7 +29,6 @@ async def admin_input_catcher(client: Client, message: Message):
     state = ADMIN_STATE[user_id]
     user_input = message.text.strip()
 
-    # --- THE INSIDE SETUP WIZARDS ---
     if state == "setup_inside_words":
         words = [w.strip() for w in user_input.split() if w.strip()]
         await db.update_settings({"inside_words": words})
@@ -50,7 +49,6 @@ async def admin_input_catcher(client: Client, message: Message):
         del ADMIN_STATE[user_id]
         await message.reply_text(f"✅ **Channels Saved!**\n`{channels}`\nType `/admin` to view dashboard.")
 
-    # --- THE SHORTENER WIZARDS ---
     elif state == "setup_shortener_url":
         await db.update_settings({"shortener_url": user_input})
         ADMIN_STATE[user_id] = "setup_shortener_api"
@@ -71,6 +69,22 @@ async def admin_input_catcher(client: Client, message: Message):
         del ADMIN_STATE[user_id]
         await message.reply_text("✅ **Success!** Shortener Link updated in the database.\nType `/admin` to view.")
 
+    elif state == "setup_file_time":
+        if user_input.isdigit():
+            await db.update_settings({"file_delete_time": int(user_input)})
+            del ADMIN_STATE[user_id]
+            await message.reply_text(f"✅ **File Delete Time Saved:** `{user_input} Minutes`\nType `/admin` to view dashboard.")
+        else:
+            await message.reply_text("❌ **Invalid Input!** Please send only a number in minutes (e.g., `30`).")
+
+    elif state == "setup_filter_time":
+        if user_input.isdigit():
+            await db.update_settings({"filter_delete_time": int(user_input)})
+            del ADMIN_STATE[user_id]
+            await message.reply_text(f"✅ **Filter Delete Time Saved:** `{user_input} Minutes`\nType `/admin` to view dashboard.")
+        else:
+            await message.reply_text("❌ **Invalid Input!** Please send only a number in minutes (e.g., `5`).")
+
 
 @Client.on_message(filters.command("admin") & filters.user(Config.ADMINS))
 async def admin_direct_command(client: Client, message: Message):
@@ -82,6 +96,7 @@ async def send_settings_home(message_or_query):
         [InlineKeyboardButton("🔗 Shortener Settings", callback_data="set_shortener")],
         [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests")],
         [InlineKeyboardButton("🕵️‍♂️ Inside Settings", callback_data="set_inside")], 
+        [InlineKeyboardButton("🗑 Auto-Delete Filters", callback_data="set_autodelete")],
         [InlineKeyboardButton("🔙 Exit", callback_data="tier_root_fallback")]
     ]
 
@@ -90,21 +105,18 @@ async def send_settings_home(message_or_query):
     else:
         await message_or_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
-@Client.on_callback_query(filters.regex(r"^(set_|toggle_|inside_)"))
+@Client.on_callback_query(filters.regex(r"^(set_|toggle_|inside_|time_)"))
 async def settings_callbacks(client: Client, callback: CallbackQuery):
     action = callback.data
     user_id = callback.from_user.id
 
-    if action in ["set_home", "set_inside", "set_shortener", "set_requests"]:
+    if action in ["set_home", "set_inside", "set_shortener", "set_requests", "set_autodelete"]:
         if user_id in ADMIN_STATE:
             del ADMIN_STATE[user_id]
 
     if action == "set_home":
         await send_settings_home(callback)
 
-    # ==========================================
-    # --- 🚀 THE NEW INSIDE DASHBOARD ---
-    # ==========================================
     elif action == "set_inside":
         settings = await db.get_settings()
         status = "🟢 ON" if settings.get("inside_enabled", False) else "🔴 OFF"
@@ -174,9 +186,6 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         callback.data = "set_inside"
         await settings_callbacks(client, callback)
 
-    # ==========================================
-    # --- EXISTING SHORTENER / REQUESTS DASHBOARD ---
-    # ==========================================
     elif action == "set_shortener":
         settings = await db.get_settings()
         status = "🟢 ON" if settings.get("shortener_enabled", False) else "🔴 OFF"
@@ -249,6 +258,55 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         await db.update_settings({"requests_enabled": not current_state})
         callback.data = "set_requests"
         await settings_callbacks(client, callback)
+
+    elif action == "set_autodelete":
+        settings = await db.get_settings()
+        f_status = "🟢 ON" if settings.get("file_delete_enabled", False) else "🔴 OFF"
+        m_status = "🟢 ON" if settings.get("filter_delete_enabled", False) else "🔴 OFF"
+        f_time = settings.get("file_delete_time", 10)
+        m_time = settings.get("filter_delete_time", 5)
+
+        text = (
+            f"🗑 **Auto-Delete (Ghost Mode) Settings**\n\n"
+            f"📂 **File Deletion:** {f_status} `({f_time} mins)`\n"
+            f"*Deletes actual movie files after delivery.*\n\n"
+            f"🔍 **Search Filter Deletion:** {m_status} `({m_time} mins)`\n"
+            f"*Deletes movie search result messages.*\n\n"
+            f"*(Note: Timers over 1440 mins/24 hrs may be interrupted by Hugging Face restarts).* "
+        )
+        buttons = [
+            [
+                InlineKeyboardButton(f"Files: {f_status}", callback_data="toggle_file_del"),
+                InlineKeyboardButton(f"Filters: {m_status}", callback_data="toggle_filter_del")
+            ],
+            [
+                InlineKeyboardButton("⏱ Set File Time", callback_data="time_file_del"),
+                InlineKeyboardButton("⏱ Set Filter Time", callback_data="time_filter_del")
+            ],
+            [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="set_home")]
+        ]
+        await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+    elif action == "toggle_file_del":
+        settings = await db.get_settings()
+        await db.update_settings({"file_delete_enabled": not settings.get("file_delete_enabled", False)})
+        callback.data = "set_autodelete"
+        await settings_callbacks(client, callback)
+
+    elif action == "toggle_filter_del":
+        settings = await db.get_settings()
+        await db.update_settings({"filter_delete_enabled": not settings.get("filter_delete_enabled", False)})
+        callback.data = "set_autodelete"
+        await settings_callbacks(client, callback)
+
+    elif action == "time_file_del":
+        ADMIN_STATE[user_id] = "setup_file_time"
+        await callback.message.edit_text("✏️ **Send the File Auto-Delete time in MINUTES.**\n(e.g., `30` for 30 minutes).", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_autodelete")]]))
+
+    elif action == "time_filter_del":
+        ADMIN_STATE[user_id] = "setup_filter_time"
+        await callback.message.edit_text("✏️ **Send the Search Result Auto-Delete time in MINUTES.**\n(e.g., `5` for 5 minutes).", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_autodelete")]]))
+
 
 async def process_broadcast_queue(client: Client):
     global BROADCAST_STATUS
@@ -344,12 +402,6 @@ async def get_worker1_text_and_buttons():
         non_media = active_job.get("non_media", 0) or active_job.get("text_skipped", 0)
 
         idx_pct = (scanned / total_msgs * 100) if total_msgs > 0 else 0
-        
-        # -----------------------------------------------------
-        # TWEAK: THE NEW ETA MATH 
-        # Assumes ~0.4 seconds per message to account for Telegram API 
-        # fetching and MongoDB write latency.
-        # -----------------------------------------------------
         idx_eta_seconds = left * 0.4
         idx_eta_string = format_eta(idx_eta_seconds)
 
@@ -471,9 +523,7 @@ async def build_database_indexes(client: Client, message: Message):
     try:
         import pymongo
         for idx, coll in enumerate(db.collections):
-            # Create a unique index for ultra-fast duplicate checking
             await coll.create_index([("crypto_hash", pymongo.ASCENDING)], unique=False, background=True)
-            # Create an index for faster title searches
             await coll.create_index([("title", pymongo.ASCENDING)], background=True)
             
         await status.edit_text("✅ **Database Optimization Complete!**\n\nYour MongoDB clusters are now ready to handle 1,000,000+ files at lightning speed.")
@@ -486,7 +536,6 @@ async def reset_unknown_languages(client: Client, message: Message):
     total_reset = 0
     
     for coll in db.collections:
-        # Finds files with "unknown" language OR files that are missing the subtitle field
         result = await coll.update_many(
             {
                 "$or": [
@@ -507,8 +556,6 @@ async def reset_unknown_languages(client: Client, message: Message):
 
 @Client.on_message(filters.command("clear_job") & filters.user(Config.ADMINS))
 async def clear_active_job(client: Client, message: Message):
-    # This assumes your db has a method to get/delete the active job. 
-    # If not, it just sets the status to 'completed' to stop the loop.
     job = await db.get_active_job()
     if job:
         await db.update_job(job["_id"], {"status": "completed"})
