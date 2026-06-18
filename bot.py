@@ -19,12 +19,13 @@ if not Config.BOT_TOKEN or not Config.API_ID or not Config.API_HASH:
     logger.error("Missing essential configuration attributes.")
     exit(1)
 
+# THE FIX: Removed in_memory=True. 
+# Pyrogram will now create a file called "AutoFilterBot_V3.session" to permanently store Access Hashes!
 app = Client(
     "AutoFilterBot_V3", 
     api_id=Config.API_ID,
     api_hash=Config.API_HASH,
     bot_token=Config.BOT_TOKEN,
-    in_memory=True,
     plugins=dict(root="plugins")
 )
 
