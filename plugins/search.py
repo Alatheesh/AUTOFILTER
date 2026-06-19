@@ -1,6 +1,7 @@
 import math
 import os
 import time
+import random
 import logging
 import aiohttp
 from pyrogram import Client, filters
@@ -29,12 +30,27 @@ SIZE_MAP = {
 }
 
 # --- RAM CACHE & ANTI-SPAM SHIELD ---
-SPAM_TRACKER = {}       # Tracks how fast users are typing
-SPAM_COOLDOWN = 3       # Blocks users if they search faster than 3 seconds
+SPAM_TRACKER = {}       
+SPAM_COOLDOWN = 3       
 
-QUERY_CACHE = {}        # Memorizes movie results
-CACHE_TTL = 300         # Keeps memory for 5 minutes (300 seconds)
-# ------------------------------------
+QUERY_CACHE = {}        
+CACHE_TTL = 300         
+
+# --- STICKER PACKS ---
+SEARCH_STICKERS = [
+    "CAACAgIAAxkBAAERau9qNXctqQUyQ4JPHMUlrBCSMmTpRwACvAwAAocoMEntN5GZWCFoBDwE",
+    "CAACAgIAAxkBAAERavdqNXraBk9c93sSXemtFwSlSN_RnAAC_iYAAp2TAUsNtzXDZ_a-szwE",
+    "CAACAgIAAxkBAAERavlqNXreh03oKow7UUFuKzMlU85awAACnRcAArwzqEn0nAMmwtD6cTwE",
+    "CAACAgIAAxkBAAERavtqNXs2CwdwJlLmq8fMSKZ1c5ND-QACwTcAAtEU-EkPUm8y76cYLzwE",
+    "CAACAgIAAxkBAAERav1qNXtV8FtO2gbRrTWwLFXSXtE-mQACgFQAAm3UYUkdD2zFRpBTsDwE",
+    "CAACAgIAAxkBAAERav9qNXuKQrEsKzbDEw-84oYv272ZbgACGUsAArka2Eq7PQ8qin9NpjwE",
+    "CAACAgEAAxkBAAERawVqNXxfqphe9yOpjTNp3VfXUW5sSAACxQIAAkeAGUTTk7G7rIZ7GjwE"
+]
+
+GHOST_STICKERS = [
+    "CAACAgEAAxkBAAERawtqNX0dllDVZhRw9UkAAeIssj3C9RAAAtEBAAI-HjBHuHEaSdq4kGA8BA",
+    "CAACAgEAAxkBAAERaw1qNX00vFFh52_2RWDP8AtWrF8evAAC0gEAAuZSMUd-GR6sSPZFxDwE"
+]
 
 def levenshtein_distance(s1: str, s2: str) -> int:
     if len(s1) < len(s2): return levenshtein_distance(s2, s1)
@@ -148,13 +164,19 @@ async def auto_filter(client: Client, message: Message):
     current_time = time.time()
     if user_id in SPAM_TRACKER:
         if current_time - SPAM_TRACKER[user_id] < SPAM_COOLDOWN:
-            return # Silently ignore the spammer to protect the bot!
+            return 
     SPAM_TRACKER[user_id] = current_time
+
+    # 🎬 --- SEND LOADING ANIMATION ---
+    loading_msg = None
+    try:
+        loading_msg = await message.reply_sticker(random.choice(SEARCH_STICKERS))
+    except Exception: pass
 
     chat_type = getattr(message.chat, "type", ChatType.PRIVATE)
     resolved_mode, resolved_lang, resolved_size = await get_filter_settings(user_id, chat_id, chat_type)
 
-    # 🧠 THE RAM CACHE (Check memory before asking MongoDB)
+    # 🧠 THE RAM CACHE & MONGODB SEARCH
     cache_key = f"{query.lower()}_{resolved_mode}_{resolved_lang}_{resolved_size}"
     
     if cache_key in QUERY_CACHE:
@@ -168,43 +190,45 @@ async def auto_filter(client: Client, message: Message):
     else:
         raw_results = None
 
-    # If it's not in memory, ask MongoDB and save it for next time
     if raw_results is None:
         raw_results = await db.search_files(query, skip=0, limit=200, exact=False)
         if not raw_results and " " in query:
             raw_results = await db.search_files(query.replace(" ", ""), skip=0, limit=200, exact=False)
-        
-        # Save to RAM Cache
         QUERY_CACHE[cache_key] = (current_time, raw_results)
 
     min_bytes, max_bytes = SIZE_MAP.get(resolved_size, (0, float('inf')))
     filtered_results = []
     
     for f in raw_results:
-        if not (min_bytes <= f.get("size", 0) <= max_bytes):
-            continue
-            
+        if not (min_bytes <= f.get("size", 0) <= max_bytes): continue
         if resolved_mode == "interactive" and resolved_lang not in ["all", "none"]:
             db_lang = f.get("language", "unknown").lower()
             db_title = f.get("title", "").lower()
             if resolved_lang.lower() not in db_lang and resolved_lang.lower() not in db_title:
                 continue
-                
         filtered_results.append(f)
 
     results = filtered_results[:10]
     
+    # 🗑️ --- DELETE LOADING ANIMATION BEFORE SHOWING RESULTS ---
+    if loading_msg:
+        try:
+            await loading_msg.delete()
+        except Exception: pass
+    
     if not results:
         suggestions = await get_fuzzy_suggestions(query)
-        if not suggestions:
-            suggestions = await get_tmdb_suggestions(query)
+        if not suggestions: suggestions = await get_tmdb_suggestions(query)
             
         btn_list = []
-        for s in suggestions:
-            btn_list.append([InlineKeyboardButton(f"🔍 Search: {s}", callback_data=f"fuz_{s[:50]}")])
-                
+        for s in suggestions: btn_list.append([InlineKeyboardButton(f"🔍 Search: {s}", callback_data=f"fuz_{s[:50]}")])
         btn_list.append([InlineKeyboardButton("🔔 Request this Movie", callback_data=f"req_{query[:40]}")])
         
+        # 👻 GHOST STICKER FOR FAILED SEARCH
+        try:
+            await message.reply_sticker(random.choice(GHOST_STICKERS))
+        except Exception: pass
+
         try:
             if suggestions:
                 await message.reply_text("😔 **No exact matches found.**\n\nDid you mean one of these?", reply_markup=InlineKeyboardMarkup(btn_list), reply_parameters=ReplyParameters(message_id=message.id))
@@ -216,14 +240,13 @@ async def auto_filter(client: Client, message: Message):
             else:
                 await client.send_message(chat_id, "😔 **No files found matching your criteria.**", reply_markup=InlineKeyboardMarkup(btn_list))
         return
-        
+
     metadata = await fetch_imdb_tmdb(query)
     buttons = []
     
     settings = await db.get_settings()
     shortener_on = settings.get("shortener_enabled", False)
 
-    # 🔥 PM DELIVERY UPGRADE: Use Callbacks to trigger PM check
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
