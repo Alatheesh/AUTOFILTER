@@ -172,25 +172,31 @@ class MultiDB:
     async def search_files(self, query: str, skip: int = 0, limit: int = 10, exact: bool = False) -> List[Dict[str, Any]]:
         if not self.collections: return []
         
-        # 🚀 STEP 1: Blazing Fast Text Index Search
-        text_filter = {"$text": {"$search": f"\"{query}\"" if exact else query}}
-        tasks = [self._safe_search(coll, text_filter, skip, limit) for coll in self.collections]
+        combined_results = []
         
+        # 🚀 STEP 1: Blazing Fast Text Index Search
         try:
+            text_filter = {"$text": {"$search": f"\"{query}\"" if exact else query}}
+            tasks = [self._safe_search(coll, text_filter, skip, limit) for coll in self.collections]
             results = await asyncio.gather(*tasks)
-            combined_results = []
             for result_group in results: combined_results.extend(result_group)
+        except Exception:
+            # If the index is still building or missing, MongoDB throws an error.
+            # We silently ignore it here and let the Regex Fallback handle the search!
+            pass 
             
-            # 🚀 STEP 2: Smart Fallback! If the text index misses a partial word, fall back to Regex.
-            if not combined_results and not exact:
+        # 🚀 STEP 2: Smart Fallback! If text search found nothing OR threw an error, use trusty Regex.
+        if not combined_results and not exact:
+            try:
                 regex_pattern = f".*{'.*'.join(query.split())}.*"
                 regex_filter = {"title": {"$regex": regex_pattern, "$options": "i"}}
                 tasks_regex = [self._safe_search(coll, regex_filter, skip, limit) for coll in self.collections]
                 results_regex = await asyncio.gather(*tasks_regex)
                 for result_group in results_regex: combined_results.extend(result_group)
+            except Exception as e:
+                logger.error(f"Regex Fallback Error: {e}")
                 
-            return combined_results[:limit]
-        except Exception: return []
+        return combined_results[:limit]
 
     async def global_stats(self) -> Dict[str, Any]:
         stats = {
