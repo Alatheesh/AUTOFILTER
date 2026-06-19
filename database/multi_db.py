@@ -35,8 +35,12 @@ class MultiDB:
         if not self.collections: return
         for coll in self.collections:
             try:
-                # Creates a background text index on the 'title' field
-                await coll.create_index([("title", "text")], background=True)
+                # Creates a background text index and forces MongoDB to ignore your 'language' field
+                await coll.create_index(
+                    [("title", "text")], 
+                    background=True,
+                    language_override="dummy_bot_lang"  # <--- THE FIX
+                )
             except Exception as e:
                 logger.error(f"Index creation error: {e}")
         return True
