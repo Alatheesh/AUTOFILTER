@@ -1,6 +1,7 @@
 import random
 import logging
 import asyncio
+from datetime import datetime
 from pyrogram import Client, filters
 from pyrogram.enums import ChatType
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -32,27 +33,26 @@ GHOST_STICKERS = [
     "CAACAgEAAxkBAAERaw1qNX00vFFh52_2RWDP8AtWrF8evAAC0gEAAuZSMUd-GR6sSPZFxDwE"
 ]
 
-# ==========================================
-# --- ORIGINAL WELCOME & HELP MENUS ---
-# ==========================================
-
-def get_start_markup() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🛠 Help", callback_data="ui_help"),
-            InlineKeyboardButton("ℹ️ About", callback_data="ui_about")
-        ],
-        [
-            InlineKeyboardButton("👨‍💻 Source", callback_data="ui_source"),
-            InlineKeyboardButton("✨ Features", callback_data="ui_features")
-        ]
-    ])
+START_BANNER_IMAGES = [
+    "https://telegra.ph/file/c4ddf6a9d136cb1735bb1.jpg",
+    "https://telegra.ph/file/b36685221ce5ac41ad667.jpg",
+    "https://telegra.ph/file/7f59377ace528148d15bd.jpg",
+    "https://telegra.ph/file/e006737306ad1c5c16192.jpg",
+    "https://telegra.ph/file/f8b495d98fd4d89c99150.jpg",
+    "https://telegra.ph/file/320cdc500bc7e3d1c9e94.jpg",
+    "https://telegra.ph/file/90ea7771a7c61e2d45d72.jpg",
+    "https://telegra.ph/file/0d6adc21a51a32c3ac803.jpg",
+    "https://telegra.ph/file/3fd5587f5bf4c3c107c91.jpg",
+    "https://telegra.ph/file/2182f0c156d4ae25c8913.jpg",
+    "https://telegra.ph/file/5966212c0662fa84433e8.jpg"
+]
 
 @Client.on_message(filters.command("start") & filters.private, group=2)
 async def start_menu_handler(client: Client, message: Message):
     if len(message.command) > 1:
         return
         
+    # 1. Show Temporary Loading Sticker
     try:
         loading_msg = await message.reply_sticker(random.choice(START_STICKERS))
         await asyncio.sleep(3)
@@ -60,12 +60,31 @@ async def start_menu_handler(client: Client, message: Message):
     except Exception:
         pass
         
-    username = message.from_user.username if message.from_user else "User"
+    # 2. Determine Time-Aware Greeting
+    current_hour = datetime.now().hour
+    if 5 <= current_hour < 12:
+        greeting = "🌅 Good Morning"
+    elif 12 <= current_hour < 17:
+        greeting = "☀️ Good Afternoon"
+    elif 17 <= current_hour < 21:
+        greeting = "🌆 Good Evening"
+    else:
+        greeting = "🌃 Good Night"
+
+    # 3. Format the beautifully structured text
+    first_name = message.from_user.first_name if message.from_user else "User"
     welcome_text = (
-        f"👋 **Welcome to the Cloud Auto-Filter Bot, {username}!**\n\n"
+        f"**{greeting}, {first_name}!**\n\n"
+        f"Welcome to the **Cloud Auto-Filter Bot**. I am your personal, lightning-fast database assistant.\n\n"
         f"✨ **Use the interactive buttons below to explore my built-in commands:**"
     )
-    await message.reply_text(text=welcome_text, reply_markup=get_start_markup())
+    
+    # 4. Pick a RANDOM image from your list
+    await message.reply_photo(
+        photo=random.choice(START_BANNER_IMAGES),
+        caption=welcome_text,
+        reply_markup=get_start_markup()
+    )
 
 @Client.on_message(filters.command("help") & filters.private)
 async def help_command_handler(client: Client, message: Message):
