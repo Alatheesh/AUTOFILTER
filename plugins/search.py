@@ -127,14 +127,15 @@ def format_size(size_bytes):
     s = round(size_bytes / p, 2)
     return f"{s} {size_name[i]}"
 
-@Client.on_message((filters.group | filters.private) & filters.text & ~filters.command(["start", "help", "about", "source", "settings", "request", "plot", "history", "clear_history", "broadcast", "stats", "backup", "admin", "index", "batch", "migrate_db", "clear_job", "optimize_db"]))
+@Client.on_message((filters.group | filters.private) & filters.text & ~filters.command(["start", "help", "about", "source", "settings", "request", "plot", "history", "clear_history", "broadcast", "stats", "backup", "admin", "index", "batch", "migrate_db", "clear_job", "optimize_db", "connect", "disconnect"]))
 async def auto_filter(client: Client, message: Message):
     query = message.text.strip()
     if len(query) < 3: return
         
     user_id = message.from_user.id
     chat_id = message.chat.id
-    resolved_mode, resolved_lang, resolved_size = await get_filter_settings(user_id, chat_id, getattr(message.chat, "type", ChatType.PRIVATE))
+    chat_type = getattr(message.chat, "type", ChatType.PRIVATE)
+    resolved_mode, resolved_lang, resolved_size = await get_filter_settings(user_id, chat_id, chat_type)
 
     raw_results = await db.search_files(query, skip=0, limit=200, exact=False)
     
@@ -187,9 +188,11 @@ async def auto_filter(client: Client, message: Message):
     settings = await db.get_settings()
     shortener_on = settings.get("shortener_enabled", False)
 
+    # 🔥 PM DELIVERY UPGRADE: Use Callbacks to trigger PM check
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
+        
         if shortener_on:
             buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
         else:
@@ -213,12 +216,17 @@ async def auto_filter(client: Client, message: Message):
         m_time = settings.get("filter_delete_time", 5)
         filter_notice += f"\n\n⏳ *Note: This search result will automatically delete in {m_time} minutes.*"
 
+    # 🔥 Visual UI Cue for Groups
+    pm_notice = ""
+    if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        pm_notice = "\n\n*(Click a file to receive it securely in your Private Messages)*"
+
     caption = (
         f"🎬 **{metadata['title']}**\n"
         f"⭐️ Rating: `{metadata['rating']}`\n"
         f"🎭 Genre: `{metadata['genre']}`\n\n"
         f"📝 **Plot:** {metadata['plot']}\n\n"
-        f"🔍 Found {len(filtered_results)} matching files.{filter_notice}"
+        f"🔍 Found {len(filtered_results)} matching files.{filter_notice}{pm_notice}"
     )
     
     try:
@@ -262,9 +270,11 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     settings = await db.get_settings()
     shortener_on = settings.get("shortener_enabled", False)
 
+    # 🔥 PM DELIVERY UPGRADE FOR PAGINATION
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
+        
         if shortener_on:
             buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
         else:
