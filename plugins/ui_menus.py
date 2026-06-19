@@ -41,6 +41,7 @@ async def help_command_handler(client: Client, message: Message):
         "🛠 **How to Use the Auto-Filter Bot:**\n\n"
         "• **In Groups:** Just drop the title of any movie or document and I will automatically look it up.\n"
         "• **In DMs:** Send any text keyword (directly to my PM) to trigger the multi-DB file search instantly.\n"
+        "• `/connect`: Link your group and become the Primary Connector.\n"
         "• `/plot <movie>`: Generates a beautiful AI-powered movie plot summary.\n"
         "• `/history`: Displays your 10 most recent searches.\n"
         "• `/clear_history`: Wipes your query history records clean.\n"
@@ -89,6 +90,7 @@ async def callback_ui_router(client: Client, callback: CallbackQuery):
             "🛠 **How to Use the Auto-Filter Bot:**\n\n"
             "• **In Groups:** Just drop the title of any movie or document and I will automatically look it up.\n"
             "• **In DMs:** Send any text keyword (directly to my PM) to trigger the multi-DB file search instantly.\n"
+            "• `/connect`: Link your group and become the Primary Connector.\n"
             "• `/settings`: Open the advanced configuration dashboard."
         )
         await callback.message.edit_text(text=help_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ui_back")]]))
@@ -136,29 +138,19 @@ async def settings_router(client: Client, message: Message):
         
     user_id = message.from_user.id
     
+    # CASE A: SETTINGS CALLED IN A GROUP
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-        me = await client.get_me()
-        bot_member = await client.get_chat_member(message.chat.id, me.id)
-        
-        if not bot_member.privileges or not bot_member.privileges.can_delete_messages:
-            return await message.reply_text("❌ **Permission Error:** I need administrative rights with `Delete Messages` privileges to configure layouts securely.")
-            
-        try:
-            user_member = await client.get_chat_member(message.chat.id, user_id)
-            if user_member.status not in ["administrator", "creator"]:
-                return await message.reply_text("🛑 This configuration dashboard is restricted to group administrators.")
-        except Exception:
-            return await message.reply_text("❌ Failed to verify your group administrative permissions.")
-
-        group_admins = []
-        async for admin in client.get_chat_members(message.chat.id, filter="administrators"):
-            if not admin.user.is_bot:
-                group_admins.append(admin.user.id)
-                
-        await db.update_group_setting(message.chat.id, "admins", group_admins)
-        await db.update_group_setting(message.chat.id, "title", message.chat.title)
-
         g_sett = await db.get_group_settings(message.chat.id)
+        connected_by = g_sett.get("connected_by")
+        
+        # Check 1: Is it even connected?
+        if not connected_by:
+            return await message.reply_text("⚠️ **Group Not Connected!**\nAn admin must send `/connect` in this group first to initialize the bot.")
+            
+        # Check 2: Is the person typing /settings the Primary Connector?
+        if connected_by != user_id and not is_creator(user_id):
+            return await message.reply_text("🛑 **Access Denied:** Only the Primary Connector who linked this group can change its settings.")
+
         mode = g_sett.get("search_mode", "let_members_choose")
         
         buttons = [
@@ -175,7 +167,8 @@ async def settings_router(client: Client, message: Message):
     # CASE B: SETTINGS CALLED IN PRIVATE DM
     keyboard = [[InlineKeyboardButton(text="👤 Personal Search Settings", callback_data="tier_user_home")]]
     
-    managed_groups = await db.get_admin_groups(user_id)
+    # Fetch groups ONLY where they are the primary connector!
+    managed_groups = await db.get_connected_groups(user_id)
     if managed_groups:
         keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list")])
         
@@ -219,7 +212,6 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         query.data = "uset_interactive_menu"
         return await menus_callback_handler(client, query)
 
-    # THE NEW PERSONAL SIZE/LANGUAGE FILTER MENU
     if data == "uset_interactive_menu":
         u_sett = await db.get_user_settings(user_id)
         s = u_sett.get("size", "all")
@@ -263,10 +255,11 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
 
 
     # ----------------------------------------------------
-    # TIER 2: GROUP ADMIN SETTINGS
+    # TIER 2: GROUP ADMIN SETTINGS (PRIMARY CONNECTOR ONLY)
     # ----------------------------------------------------
     if data == "tier_group_list":
-        managed = await db.get_admin_groups(user_id)
+        # Only show groups they are the PRIMARY CONNECTOR of
+        managed = await db.get_connected_groups(user_id)
         if not managed:
             return await query.answer("No linked administration nodes found.", show_alert=True)
             
@@ -282,8 +275,9 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         c_id = int(data.split("_")[2])
         g_sett = await db.get_group_settings(c_id)
         
-        if user_id not in g_sett.get("admins", []) and not is_creator(user_id):
-            return await query.answer("Access Denied.", show_alert=True)
+        # GATEKEEPER: Deny if they are not the connector
+        if g_sett.get("connected_by") != user_id and not is_creator(user_id):
+            return await query.answer("Access Denied. You are not the Primary Connector.", show_alert=True)
             
         mode = g_sett.get("search_mode", "let_members_choose")
         buttons = [
@@ -307,8 +301,9 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         chat_id = int(parts[-1])
         g_sett = await db.get_group_settings(chat_id)
         
-        if user_id not in g_sett.get("admins", []) and not is_creator(user_id):
-            return await query.answer("Unauthorized.", show_alert=True)
+        # GATEKEEPER
+        if g_sett.get("connected_by") != user_id and not is_creator(user_id):
+            return await query.answer("Unauthorized. Primary Connectors only.", show_alert=True)
             
         await db.update_group_setting(chat_id, "search_mode", target_mode)
         await query.answer("Group layout policy updated successfully.")
@@ -372,7 +367,8 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
     if data == "tier_root_fallback":
         keyboard = [[InlineKeyboardButton(text="👤 Personal Search Settings", callback_data="tier_user_home")]]
         
-        if await db.get_admin_groups(user_id):
+        # Only show the button if they have actively connected groups
+        if await db.get_connected_groups(user_id):
             keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list")])
             
         if is_creator(user_id):
