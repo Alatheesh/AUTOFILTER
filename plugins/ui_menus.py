@@ -312,7 +312,7 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
     if data == "tier_group_list":
         managed = await db.get_connected_groups(user_id)
         if not managed: return await query.answer("No linked administration nodes found.", show_alert=True)
-        buttons = [[InlineKeyboardButton(text=f"⚙️ {g.get('title', f'Chat ID: {g['chat_id']}')}", callback_data=f"tier_gmanage_{g['chat_id']}")] for g in managed]
+        buttons = [[InlineKeyboardButton(text=f"⚙️ {g.get('title', 'Chat ID: ' + str(g['chat_id']))}", callback_data=f"tier_gmanage_{g['chat_id']}")] for g in managed]
         buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="tier_root_fallback")])
         return await query.message.edit_text("🛡️ **Administered Groups Portal**", reply_markup=InlineKeyboardMarkup(buttons))
 
