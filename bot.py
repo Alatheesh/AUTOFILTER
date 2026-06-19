@@ -58,8 +58,8 @@ async def main():
         logger.info("==================================================")
 
         # 🔥 START THE QUEUE AND METADATA WORKERS HERE 🔥
-        asyncio.create_task(process_indexing_queue(app))
-        asyncio.create_task(start_background_language_indexer(app))
+        #asyncio.create_task(process_indexing_queue(app))
+        #asyncio.create_task(start_background_language_indexer(app))
 
         if Config.ADMINS:
             for admin in Config.ADMINS:
