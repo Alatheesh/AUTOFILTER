@@ -1,3 +1,4 @@
+import random
 import logging
 from pyrogram import Client, filters
 from pyrogram.enums import ChatType
@@ -7,10 +8,32 @@ from database.multi_db import db
 
 logger = logging.getLogger(__name__)
 
+# --- STICKER PACKS ---
+START_STICKERS = [
+    "CAACAgUAAxkBAAERawdqNXyW6Tqft1iZtgABiTVGhBohxgIAApwAA8iUZBRzjwAB89rFhfw8BA",
+    "CAACAgIAAxkBAAERawlqNXy1AwABuumeSFheCDM2d624y90AAiYPAAL7WShJIl_khPeHLac8BA"
+]
+
+ROBO_STICKERS = [
+    "CAACAgUAAxkBAAERautqNXbvA3JLjJg-U_LbOgNmBXLApQACahIAAvYiyVZikUGUoRZynzwE",
+    "CAACAgIAAxkBAAERawFqNXvcF78c77WjPHAAAbL9Yk55HMAAAk4CAAJWnb0KMP5rbYEyA288BA",
+    "CAACAgIAAxkBAAERawNqNXvnj-tDUwXqJGB_6BYXFfIn-QACwGoAAjg5aUn8Q0qGpRajKzwE"
+]
+
+CODE_STICKERS = [
+    "CAACAgIAAxkBAAERavNqNXnoQwKwPnhWsEL5QXglsmRieAACwVsAAhKjgUg7UdLO-nt4VjwE",
+    "CAACAgIAAxkBAAERavVqNXpmmnxWeKfo-qv-kP8WdLuqkwACShcAAutrqUl9AevFXbjHDzwE",
+    "CAACAgEAAxkBAAERavFqNXnOCL7UtEeSAe3-1MHnnBpLPAACMQIAAoKgIEQHCzBVrLHGhzwE"
+]
+
+GHOST_STICKERS = [
+    "CAACAgEAAxkBAAERawtqNX0dllDVZhRw9UkAAeIssj3C9RAAAtEBAAI-HjBHuHEaSdq4kGA8BA",
+    "CAACAgEAAxkBAAERaw1qNX00vFFh52_2RWDP8AtWrF8evAAC0gEAAuZSMUd-GR6sSPZFxDwE"
+]
+
 # ==========================================
 # --- ORIGINAL WELCOME & HELP MENUS ---
 # ==========================================
-
 def get_start_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
@@ -25,8 +48,11 @@ def get_start_markup() -> InlineKeyboardMarkup:
 
 @Client.on_message(filters.command("start") & filters.private, group=2)
 async def start_menu_handler(client: Client, message: Message):
-    if len(message.command) > 1:
-        return
+    if len(message.command) > 1: return
+        
+    try:
+        await message.reply_sticker(random.choice(START_STICKERS))
+    except Exception: pass
         
     username = message.from_user.username if message.from_user else "User"
     welcome_text = (
@@ -37,6 +63,10 @@ async def start_menu_handler(client: Client, message: Message):
 
 @Client.on_message(filters.command("help") & filters.private)
 async def help_command_handler(client: Client, message: Message):
+    try:
+        await message.reply_sticker(random.choice(ROBO_STICKERS))
+    except Exception: pass
+
     help_text = (
         "🛠 **How to Use the Auto-Filter Bot:**\n\n"
         "• **In Groups:** Just drop the title of any movie or document and I will automatically look it up.\n"
@@ -51,6 +81,10 @@ async def help_command_handler(client: Client, message: Message):
 
 @Client.on_message(filters.command("about") & filters.private)
 async def about_command_handler(client: Client, message: Message):
+    try:
+        await message.reply_sticker(random.choice(ROBO_STICKERS))
+    except Exception: pass
+
     about_text = (
         "ℹ️ **About This Bot:**\n\n"
         "• **Engine:** Advanced Asynchronous Pyrogram V2\n"
@@ -127,15 +161,12 @@ async def callback_ui_router(client: Client, callback: CallbackQuery):
 # ==========================================
 # --- 3-TIER SETTINGS DASHBOARD ---
 # ==========================================
-
 def is_creator(user_id: int) -> bool:
     return user_id in Config.ADMINS
 
 @Client.on_message(filters.command("settings"))
 async def settings_router(client: Client, message: Message):
-    if not message.from_user:
-        return
-        
+    if not message.from_user: return
     user_id = message.from_user.id
     
     # CASE A: SETTINGS CALLED IN A GROUP
@@ -145,14 +176,21 @@ async def settings_router(client: Client, message: Message):
         
         # Check 1: Is it even connected?
         if not connected_by:
+            try: await message.reply_sticker(random.choice(GHOST_STICKERS))
+            except Exception: pass
             return await message.reply_text("⚠️ **Group Not Connected!**\nAn admin must send `/connect` in this group first to initialize the bot.")
             
         # Check 2: Is the person typing /settings the Primary Connector?
         if connected_by != user_id and not is_creator(user_id):
+            try: await message.reply_sticker(random.choice(GHOST_STICKERS))
+            except Exception: pass
             return await message.reply_text("🛑 **Access Denied:** Only the Primary Connector who linked this group can change its settings.")
 
+        # Give them the Hacker/Code sticker for successfully entering settings!
+        try: await message.reply_sticker(random.choice(CODE_STICKERS))
+        except Exception: pass
+
         mode = g_sett.get("search_mode", "let_members_choose")
-        
         buttons = [
             [
                 InlineKeyboardButton(text=f"{'✅' if mode=='force_default' else '❌'} Force Default", callback_data=f"gset_mode_force_default_{message.chat.id}"),
@@ -165,9 +203,11 @@ async def settings_router(client: Client, message: Message):
         return await message.reply_text(f"🛠️ **Group Settings Menu:** `{message.chat.title}`\nConfigure search visualization structures for all active participants:", reply_markup=InlineKeyboardMarkup(buttons))
 
     # CASE B: SETTINGS CALLED IN PRIVATE DM
+    try: await message.reply_sticker(random.choice(CODE_STICKERS))
+    except Exception: pass
+
     keyboard = [[InlineKeyboardButton(text="👤 Personal Search Settings", callback_data="tier_user_home")]]
     
-    # Fetch groups ONLY where they are the primary connector!
     managed_groups = await db.get_connected_groups(user_id)
     if managed_groups:
         keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list")])
@@ -182,9 +222,6 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
     user_id = query.from_user.id
     data = query.data
 
-    # ----------------------------------------------------
-    # TIER 1: USER PERSONAL PM SETTINGS
-    # ----------------------------------------------------
     if data == "tier_user_home":
         u_sett = await db.get_user_settings(user_id)
         m = u_sett.get("search_mode", "default")
@@ -253,12 +290,7 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         query.data = "uset_interactive_menu"
         return await menus_callback_handler(client, query)
 
-
-    # ----------------------------------------------------
-    # TIER 2: GROUP ADMIN SETTINGS (PRIMARY CONNECTOR ONLY)
-    # ----------------------------------------------------
     if data == "tier_group_list":
-        # Only show groups they are the PRIMARY CONNECTOR of
         managed = await db.get_connected_groups(user_id)
         if not managed:
             return await query.answer("No linked administration nodes found.", show_alert=True)
@@ -275,7 +307,6 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         c_id = int(data.split("_")[2])
         g_sett = await db.get_group_settings(c_id)
         
-        # GATEKEEPER: Deny if they are not the connector
         if g_sett.get("connected_by") != user_id and not is_creator(user_id):
             return await query.answer("Access Denied. You are not the Primary Connector.", show_alert=True)
             
@@ -301,7 +332,6 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         chat_id = int(parts[-1])
         g_sett = await db.get_group_settings(chat_id)
         
-        # GATEKEEPER
         if g_sett.get("connected_by") != user_id and not is_creator(user_id):
             return await query.answer("Unauthorized. Primary Connectors only.", show_alert=True)
             
@@ -315,7 +345,6 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
             
         return await menus_callback_handler(client, query)
 
-    # THE NEW GROUP SIZE/LANGUAGE FILTER MENU
     if data.startswith("gset_interactive_menu_"):
         c_id = int(data.split("_")[3])
         g_sett = await db.get_group_settings(c_id)
@@ -362,12 +391,10 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         query.data = f"gset_interactive_menu_{c_id}"
         return await menus_callback_handler(client, query)
 
-
     # --- FALLBACK HUB REFRESH ---
     if data == "tier_root_fallback":
         keyboard = [[InlineKeyboardButton(text="👤 Personal Search Settings", callback_data="tier_user_home")]]
         
-        # Only show the button if they have actively connected groups
         if await db.get_connected_groups(user_id):
             keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list")])
             
