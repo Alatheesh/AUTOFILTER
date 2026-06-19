@@ -32,7 +32,6 @@ class MultiDB:
 
     async def add_index_job(self, chat_id, chat_name, last_msg_id):
         job_id = f"job_{chat_id}"
-        # We use update_one with upsert=True instead of insert_one to prevent DuplicateKey crashes
         await self.jobs.update_one(
             {"_id": job_id},
             {"$set": {
@@ -76,7 +75,9 @@ class MultiDB:
         if not group:
             default = {
                 "chat_id": chat_id, "search_mode": "let_members_choose",
-                "quality_lock": "none", "language_lock": "none", "size_lock": "none", "admins": []
+                "quality_lock": "none", "language_lock": "none", "size_lock": "none", 
+                "admins": [],
+                "connected_by": None  # 🔥 NEW: Tracks the Primary Connector!
             }
             await self.groups.insert_one(default)
             return default
@@ -89,6 +90,12 @@ class MultiDB:
     async def get_admin_groups(self, user_id: int):
         if not self.clients: return []
         cursor = self.groups.find({"admins": user_id})
+        return await cursor.to_list(length=50)
+
+    async def get_connected_groups(self, user_id: int):
+        # 🔥 NEW: Fetches only the groups this specific user connected!
+        if not self.clients: return []
+        cursor = self.groups.find({"connected_by": user_id})
         return await cursor.to_list(length=50)
 
     # ===================================================
@@ -109,7 +116,6 @@ class MultiDB:
                 "inside_times": 5,
                 "inside_channels": [],
                 "inside_placement": "movie",
-                # 🔥 THE NEW AUTO-DELETE SYSTEM 🔥
                 "file_delete_enabled": False,
                 "file_delete_time": 10,
                 "filter_delete_enabled": False,
