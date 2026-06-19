@@ -3,6 +3,7 @@ from pyrogram import Client, filters
 from pyrogram.enums import ChatType, ChatMemberStatus, ChatMembersFilter
 from pyrogram.types import Message
 from database.multi_db import db
+from config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ async def connect_group_command(client: Client, message: Message):
             target_chat_id = chat.id
             chat_title = chat.title
         except Exception as e:
-            return await message.reply_text(f"❌ **Error:** Could not find that group. Make sure I am added to it first!\n`{e}`")
+            return await message.reply_text(f"❌ **Error:** Could not find that group. Make sure I am added to it as an Admin first!\n`{e}`")
 
     # 2. Verify User Permissions First
     try:
@@ -45,7 +46,7 @@ async def connect_group_command(client: Client, message: Message):
     except Exception:
         return await message.reply_text("❌ Could not verify my permissions. Ensure I am an admin in the group.")
 
-    # 4. Check if Already Connected
+    # 4. Check if Already Connected & Verify Primary Connector
     g_sett = await db.get_group_settings(target_chat_id)
     connected_by = g_sett.get("connected_by")
     
@@ -63,7 +64,7 @@ async def connect_group_command(client: Client, message: Message):
         if not admin.user.is_bot:
             group_admins.append(admin.user.id)
 
-    # 6. Save to Database
+    # 6. Save Details to Database
     await db.update_group_setting(target_chat_id, "admins", group_admins)
     await db.update_group_setting(target_chat_id, "title", chat_title)
     await db.update_group_setting(target_chat_id, "connected_by", user_id) # The Primary Connector!
@@ -72,4 +73,47 @@ async def connect_group_command(client: Client, message: Message):
         f"✅ **Successfully Connected!**\n\n"
         f"**Group:** `{chat_title}`\n"
         f"You are now registered as the **Primary Connector**. Only you have the authority to change this group's layout and themes!"
+    )
+
+@Client.on_message(filters.command("disconnect"))
+async def disconnect_group_command(client: Client, message: Message):
+    user_id = message.from_user.id
+    
+    # 1. Determine Target Chat (PM vs Group)
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        target_chat_id = message.chat.id
+        chat_title = message.chat.title
+    else:
+        if len(message.command) < 2:
+            return await message.reply_text(
+                "❌ **Usage in PM:** `/disconnect <group_id_or_username>`\n"
+                "*(Or just send `/disconnect` directly inside your group!)*"
+            )
+        target_chat_input = message.command[1]
+        try:
+            chat = await client.get_chat(target_chat_input)
+            target_chat_id = chat.id
+            chat_title = chat.title
+        except Exception:
+            return await message.reply_text("❌ **Error:** Could not find that group.")
+
+    # 2. Fetch the current group connection status
+    g_sett = await db.get_group_settings(target_chat_id)
+    connected_by = g_sett.get("connected_by")
+    
+    if not connected_by:
+        return await message.reply_text("⚠️ This group is not currently connected to any administrator.")
+
+    # 3. Security Gatekeeper: Only the Primary Connector (or Bot Creator) can disconnect
+    if connected_by != user_id and user_id not in Config.ADMINS:
+        return await message.reply_text("🛑 **Access Denied:** Only the Primary Connector who linked this group can disconnect it.")
+
+    # 4. Erase the connection data from the database
+    await db.update_group_setting(target_chat_id, "connected_by", None)
+    await db.update_group_setting(target_chat_id, "admins", [])
+
+    await message.reply_text(
+        f"🔌 **Successfully Disconnected!**\n\n"
+        f"**Group:** `{chat_title}`\n"
+        f"This group has been unlinked from your account. The settings dashboard is now completely locked until an admin sends `/connect` again."
     )
