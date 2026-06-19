@@ -30,6 +30,17 @@ class MultiDB:
             self.groups = self.clients[0][db_name]["groups"]
             self.jobs = self.clients[0][db_name]["indexing_jobs"]
 
+    async def ensure_indexes(self):
+        """Builds MongoDB Text Indexes for lightning-fast searching."""
+        if not self.collections: return
+        for coll in self.collections:
+            try:
+                # Creates a background text index on the 'title' field
+                await coll.create_index([("title", "text")], background=True)
+            except Exception as e:
+                logger.error(f"Index creation error: {e}")
+        return True
+
     async def add_index_job(self, chat_id, chat_name, last_msg_id):
         job_id = f"job_{chat_id}"
         await self.jobs.update_one(
@@ -77,7 +88,7 @@ class MultiDB:
                 "chat_id": chat_id, "search_mode": "let_members_choose",
                 "quality_lock": "none", "language_lock": "none", "size_lock": "none", 
                 "admins": [],
-                "connected_by": None  # 🔥 NEW: Tracks the Primary Connector!
+                "connected_by": None
             }
             await self.groups.insert_one(default)
             return default
@@ -93,14 +104,10 @@ class MultiDB:
         return await cursor.to_list(length=50)
 
     async def get_connected_groups(self, user_id: int):
-        # 🔥 NEW: Fetches only the groups this specific user connected!
         if not self.clients: return []
         cursor = self.groups.find({"connected_by": user_id})
         return await cursor.to_list(length=50)
 
-    # ===================================================
-    # --- TIER 3 & GLOBAL SETTINGS (PHASE 1 UPGRADE) ---
-    # ===================================================
     async def get_settings(self) -> Dict[str, Any]:
         if not self.clients: return {}
         settings = await self.settings.find_one({"_id": "bot_settings"})
@@ -130,9 +137,6 @@ class MultiDB:
         await self.settings.update_one({"_id": "bot_settings"}, {"$set": updates}, upsert=True)
         return True
 
-    # ===================================================
-    # --- MULTI-SHARD FILE SYSTEM ---
-    # ===================================================
     async def insert_file(self, file_data: Dict[str, Any], shard_index: Optional[int] = None) -> bool:
         if not self.collections: return False
         target_shard = shard_index % len(self.collections) if shard_index is not None else 0
@@ -163,13 +167,24 @@ class MultiDB:
 
     async def search_files(self, query: str, skip: int = 0, limit: int = 10, exact: bool = False) -> List[Dict[str, Any]]:
         if not self.collections: return []
-        regex_pattern = query if exact else f".*{'.*'.join(query.split())}.*"
-        query_filter = {"title": {"$regex": regex_pattern, "$options": "i"}}
-        tasks = [self._safe_search(coll, query_filter, skip, limit) for coll in self.collections]
+        
+        # 🚀 STEP 1: Blazing Fast Text Index Search
+        text_filter = {"$text": {"$search": f"\"{query}\"" if exact else query}}
+        tasks = [self._safe_search(coll, text_filter, skip, limit) for coll in self.collections]
+        
         try:
             results = await asyncio.gather(*tasks)
             combined_results = []
             for result_group in results: combined_results.extend(result_group)
+            
+            # 🚀 STEP 2: Smart Fallback! If the text index misses a partial word, fall back to Regex.
+            if not combined_results and not exact:
+                regex_pattern = f".*{'.*'.join(query.split())}.*"
+                regex_filter = {"title": {"$regex": regex_pattern, "$options": "i"}}
+                tasks_regex = [self._safe_search(coll, regex_filter, skip, limit) for coll in self.collections]
+                results_regex = await asyncio.gather(*tasks_regex)
+                for result_group in results_regex: combined_results.extend(result_group)
+                
             return combined_results[:limit]
         except Exception: return []
 
