@@ -79,7 +79,7 @@ async def mass_indexer_command(client: Client, message: Message):
         return await message.reply_text(f"❌ **Error Accessing Chat:** Ensure bot is an Admin (if private)!\n`{e}`")
 
     success = await db.add_index_job(target_chat, target_chat_name, last_msg_id)
-    
+
     if success:
         await message.reply_text(f"✅ **Job Queued Successfully!**\n\nChannel: `{target_chat_name}`\nThe bot will safely process this in the background.")
     else:
@@ -88,29 +88,31 @@ async def mass_indexer_command(client: Client, message: Message):
 async def process_indexing_queue(client: Client):
     """Runs 24/7. Survives crashes. Safely parses queued channels."""
     logger.info("🟢 Safe Indexing Job Queue Started!")
-    
+
     while True:
         try:
             job = await db.get_active_job()
             if not job:
                 await asyncio.sleep(60) 
                 continue
-                
+
             job_id = job["_id"]
             chat_id = job["chat_id"]
             chat_name = job["chat_name"]
             current_id = job["current_id"]
-            
+
             await db.update_job(job_id, {"status": "processing"})
-            
+
             if current_id <= 0:
                 await db.update_job(job_id, {"status": "completed"})
                 logger.info(f"✅ Indexing completed for {chat_name}")
+                # THE FIX: Added sleep to prevent runaway loop deadlock
+                await asyncio.sleep(5)
                 continue
 
             start_id = max(1, current_id - 199)
             batch_ids = list(range(start_id, current_id + 1))
-            
+
             try:
                 messages = await client.get_messages(chat_id, message_ids=batch_ids)
             except FloodWait as fw:
@@ -128,15 +130,15 @@ async def process_indexing_queue(client: Client):
                 await db.update_job(job_id, {"current_id": start_id - 1})
                 await asyncio.sleep(5)
                 continue
-            
+
             saved = 0
             dupes = 0
             scanned = 0
-            
+
             for msg in messages:
                 scanned += 1
                 if msg.empty: continue
-                
+
                 media = msg.document or msg.video or msg.audio
                 if not media: continue
 
@@ -161,14 +163,14 @@ async def process_indexing_queue(client: Client):
                     }
                     await db.insert_file(file_data)
                     saved += 1
-            
+
             await db.update_job(job_id, {
                 "current_id": start_id - 1,
                 "scanned": job["scanned"] + scanned,
                 "saved": job["saved"] + saved,
                 "duplicates": job["duplicates"] + dupes
             })
-            
+
             logger.info(f"🔄 Queue Indexing: {chat_name} - Saved {saved} new files.")
             await asyncio.sleep(3.0)
 
