@@ -1,6 +1,6 @@
 import random
 import logging
-from pyrogram import Client, filters
+import asynciofrom pyrogram import Client, filters
 from pyrogram.enums import ChatType, ChatMemberStatus, ChatMembersFilter
 from pyrogram.types import Message
 from database.multi_db import db
@@ -72,8 +72,11 @@ async def connect_group_command(client: Client, message: Message):
 
     await status_msg.delete()
     
-    # 🔓 Send Hacker Unlock Sticker!
-    try: await message.reply_sticker(random.choice(CODE_STICKERS))
+    loading_msg = None
+    try: 
+        loading_msg = await message.reply_sticker(random.choice(CODE_STICKERS))
+        await asyncio.sleep(3)
+        await loading_msg.delete()
     except Exception: pass
 
     await message.reply_text(
@@ -115,8 +118,11 @@ async def disconnect_group_command(client: Client, message: Message):
     await db.update_group_setting(target_chat_id, "connected_by", None)
     await db.update_group_setting(target_chat_id, "admins", [])
 
-    # 🔓 Send Hacker Unlock Sticker for successful disconnect!
-    try: await message.reply_sticker(random.choice(CODE_STICKERS))
+    loading_msg = None
+    try: 
+        loading_msg = await message.reply_sticker(random.choice(CODE_STICKERS))
+        await asyncio.sleep(3)
+        await loading_msg.delete()
     except Exception: pass
 
     await message.reply_text(
