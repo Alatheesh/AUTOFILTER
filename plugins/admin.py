@@ -395,25 +395,19 @@ async def get_worker1_text_and_buttons():
         
         current_id = active_job.get("current_id", 0)
 
-        # 1. Dynamic Math Fix
         remaining = max(0, current_id)
         total_msgs = scanned + remaining
-
-        # 2. Percentage Fix
         idx_pct = round((scanned / total_msgs * 100), 2) if total_msgs > 0 else 0.0
 
-        # 3. Empty/Deleted Math Fix
         skipped_empty = scanned - (saved + duplicates)
         if skipped_empty < 0:
             skipped_empty = 0
 
-        # 4. Status and ETA Logic
         if remaining <= 0:
             status_text = "✅ Completed (Sleeping)"
             idx_eta_string = "🎉 Fully Processed!"
         else:
             status_text = "🔄 Active (Deep Scan in Progress...)"
-            # RESTORED YOUR ORIGINAL PERFECT CALCULATION
             idx_eta_seconds = remaining * 0.4  
             idx_eta_string = format_eta(idx_eta_seconds)
 
@@ -529,18 +523,10 @@ async def multi_shard_json_backup(client: Client, message: Message):
     except Exception as e: await progress.edit_text(f"❌ **Schema Export Failed:** `{str(e)}`")
 
 @Client.on_message(filters.command("optimize_db") & filters.user(Config.ADMINS))
-async def build_database_indexes(client: Client, message: Message):
-    status = await message.reply_text("⚙️ **Building High-Speed Indexes across all Shards...**\nThis might take a few seconds.")
-    
-    try:
-        import pymongo
-        for idx, coll in enumerate(db.collections):
-            await coll.create_index([("crypto_hash", pymongo.ASCENDING)], unique=False, background=True)
-            await coll.create_index([("title", pymongo.ASCENDING)], background=True)
-            
-        await status.edit_text("✅ **Database Optimization Complete!**\n\nYour MongoDB clusters are now ready to handle 1,000,000+ files at lightning speed.")
-    except Exception as e:
-        await status.edit_text(f"❌ **Optimization Failed:** `{str(e)}`")
+async def trigger_db_optimization(client: Client, message: Message):
+    status = await message.reply_text("⚙️ **Building MongoDB Text Indexes...** This may take a moment.")
+    await db.ensure_indexes()
+    await status.edit_text("⚡️ **Optimization Complete!** Your database is now searching at maximum speed.")
 
 @Client.on_message(filters.command("migrate_db") & filters.user(Config.ADMINS))
 async def reset_unknown_languages(client: Client, message: Message):
