@@ -1,6 +1,7 @@
+import asyncio
 import random
 import logging
-import asynciofrom pyrogram import Client, filters
+from pyrogram import Client, filters
 from pyrogram.enums import ChatType, ChatMemberStatus, ChatMembersFilter
 from pyrogram.types import Message
 from database.multi_db import db
@@ -18,6 +19,7 @@ CODE_STICKERS = [
 async def connect_group_command(client: Client, message: Message):
     user_id = message.from_user.id
     
+    # 1. Determine Target Chat (PM vs Group)
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         target_chat_id = message.chat.id
         chat_title = message.chat.title
@@ -35,6 +37,7 @@ async def connect_group_command(client: Client, message: Message):
         except Exception as e:
             return await message.reply_text(f"❌ **Error:** Could not find that group. Make sure I am added to it as an Admin first!\n`{e}`")
 
+    # 2. Verify User Permissions First
     try:
         user_member = await client.get_chat_member(target_chat_id, user_id)
         if user_member.status not in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
@@ -42,6 +45,7 @@ async def connect_group_command(client: Client, message: Message):
     except Exception:
         return await message.reply_text("🛑 You don't have enough permissions to connect this bot to the group.")
 
+    # 3. Verify Bot Permissions
     try:
         me = await client.get_me()
         bot_member = await client.get_chat_member(target_chat_id, me.id)
@@ -50,6 +54,7 @@ async def connect_group_command(client: Client, message: Message):
     except Exception:
         return await message.reply_text("❌ Could not verify my permissions. Ensure I am an admin in the group.")
 
+    # 4. Check if Already Connected & Verify Primary Connector
     g_sett = await db.get_group_settings(target_chat_id)
     connected_by = g_sett.get("connected_by")
     
@@ -59,25 +64,24 @@ async def connect_group_command(client: Client, message: Message):
         else:
             return await message.reply_text("⚠️ This group is already connected to the database by another administrator.")
 
-    status_msg = await message.reply_text("🔄 **Verifying and linking group...**")
+    # 🔓 Send Hacker Unlock Sticker Animation First!
+    try:
+        loading_msg = await message.reply_sticker(random.choice(CODE_STICKERS))
+        await asyncio.sleep(3)
+        await loading_msg.delete()
+    except Exception:
+        pass
 
+    # 5. Build the Admin Registry for future features
     group_admins = []
     async for admin in client.get_chat_members(target_chat_id, filter=ChatMembersFilter.ADMINISTRATORS):
         if not admin.user.is_bot:
             group_admins.append(admin.user.id)
 
+    # 6. Save Details to Database
     await db.update_group_setting(target_chat_id, "admins", group_admins)
     await db.update_group_setting(target_chat_id, "title", chat_title)
-    await db.update_group_setting(target_chat_id, "connected_by", user_id) 
-
-    await status_msg.delete()
-    
-    loading_msg = None
-    try: 
-        loading_msg = await message.reply_sticker(random.choice(CODE_STICKERS))
-        await asyncio.sleep(3)
-        await loading_msg.delete()
-    except Exception: pass
+    await db.update_group_setting(target_chat_id, "connected_by", user_id) # The Primary Connector!
 
     await message.reply_text(
         f"✅ **Successfully Connected!**\n\n"
@@ -89,6 +93,7 @@ async def connect_group_command(client: Client, message: Message):
 async def disconnect_group_command(client: Client, message: Message):
     user_id = message.from_user.id
     
+    # 1. Determine Target Chat (PM vs Group)
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         target_chat_id = message.chat.id
         chat_title = message.chat.title
@@ -106,24 +111,28 @@ async def disconnect_group_command(client: Client, message: Message):
         except Exception:
             return await message.reply_text("❌ **Error:** Could not find that group.")
 
+    # 2. Fetch the current group connection status
     g_sett = await db.get_group_settings(target_chat_id)
     connected_by = g_sett.get("connected_by")
     
     if not connected_by:
         return await message.reply_text("⚠️ This group is not currently connected to any administrator.")
 
+    # 3. Security Gatekeeper: Only the Primary Connector (or Bot Creator) can disconnect
     if connected_by != user_id and user_id not in Config.ADMINS:
         return await message.reply_text("🛑 **Access Denied:** Only the Primary Connector who linked this group can disconnect it.")
 
-    await db.update_group_setting(target_chat_id, "connected_by", None)
-    await db.update_group_setting(target_chat_id, "admins", [])
-
-    loading_msg = None
-    try: 
+    # 🔓 Send Hacker Unlock Sticker Animation First!
+    try:
         loading_msg = await message.reply_sticker(random.choice(CODE_STICKERS))
         await asyncio.sleep(3)
         await loading_msg.delete()
-    except Exception: pass
+    except Exception:
+        pass
+
+    # 4. Erase the connection data from the database
+    await db.update_group_setting(target_chat_id, "connected_by", None)
+    await db.update_group_setting(target_chat_id, "admins", [])
 
     await message.reply_text(
         f"🔌 **Successfully Disconnected!**\n\n"
