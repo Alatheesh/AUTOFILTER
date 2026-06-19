@@ -1,5 +1,6 @@
 import math
 import os
+import time
 import logging
 import aiohttp
 from pyrogram import Client, filters
@@ -26,6 +27,14 @@ SIZE_MAP = {
     "xlarge": (2 * GB, float('inf')),
     "all": (0, float('inf'))
 }
+
+# --- RAM CACHE & ANTI-SPAM SHIELD ---
+SPAM_TRACKER = {}       # Tracks how fast users are typing
+SPAM_COOLDOWN = 3       # Blocks users if they search faster than 3 seconds
+
+QUERY_CACHE = {}        # Memorizes movie results
+CACHE_TTL = 300         # Keeps memory for 5 minutes (300 seconds)
+# ------------------------------------
 
 def levenshtein_distance(s1: str, s2: str) -> int:
     if len(s1) < len(s2): return levenshtein_distance(s2, s1)
@@ -134,13 +143,39 @@ async def auto_filter(client: Client, message: Message):
         
     user_id = message.from_user.id
     chat_id = message.chat.id
+    
+    # 🛡️ THE ANTI-SPAM SHIELD
+    current_time = time.time()
+    if user_id in SPAM_TRACKER:
+        if current_time - SPAM_TRACKER[user_id] < SPAM_COOLDOWN:
+            return # Silently ignore the spammer to protect the bot!
+    SPAM_TRACKER[user_id] = current_time
+
     chat_type = getattr(message.chat, "type", ChatType.PRIVATE)
     resolved_mode, resolved_lang, resolved_size = await get_filter_settings(user_id, chat_id, chat_type)
 
-    raw_results = await db.search_files(query, skip=0, limit=200, exact=False)
+    # 🧠 THE RAM CACHE (Check memory before asking MongoDB)
+    cache_key = f"{query.lower()}_{resolved_mode}_{resolved_lang}_{resolved_size}"
     
-    if not raw_results and " " in query:
-        raw_results = await db.search_files(query.replace(" ", ""), skip=0, limit=200, exact=False)
+    if cache_key in QUERY_CACHE:
+        cached_time, cached_results = QUERY_CACHE[cache_key]
+        if current_time - cached_time < CACHE_TTL:
+            raw_results = cached_results
+            logger.info(f"⚡ RAM Cache Hit for: {query}")
+        else:
+            del QUERY_CACHE[cache_key]
+            raw_results = None
+    else:
+        raw_results = None
+
+    # If it's not in memory, ask MongoDB and save it for next time
+    if raw_results is None:
+        raw_results = await db.search_files(query, skip=0, limit=200, exact=False)
+        if not raw_results and " " in query:
+            raw_results = await db.search_files(query.replace(" ", ""), skip=0, limit=200, exact=False)
+        
+        # Save to RAM Cache
+        QUERY_CACHE[cache_key] = (current_time, raw_results)
 
     min_bytes, max_bytes = SIZE_MAP.get(resolved_size, (0, float('inf')))
     filtered_results = []
@@ -216,7 +251,6 @@ async def auto_filter(client: Client, message: Message):
         m_time = settings.get("filter_delete_time", 5)
         filter_notice += f"\n\n⏳ *Note: This search result will automatically delete in {m_time} minutes.*"
 
-    # 🔥 Visual UI Cue for Groups
     pm_notice = ""
     if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         pm_notice = "\n\n*(Click a file to receive it securely in your Private Messages)*"
@@ -270,7 +304,6 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     settings = await db.get_settings()
     shortener_on = settings.get("shortener_enabled", False)
 
-    # 🔥 PM DELIVERY UPGRADE FOR PAGINATION
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
