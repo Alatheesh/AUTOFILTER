@@ -4,11 +4,13 @@ import time
 import random
 import logging
 import aiohttp
+import json
+import urllib.parse
 from pyrogram import Client, filters
 from pyrogram.enums import ChatType
 from pyrogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton, Message, 
-    InlineQuery, InlineQueryResultArticle, InputTextMessageContent, CallbackQuery, ReplyParameters
+    InlineQuery, InlineQueryResultArticle, InputTextMessageContent, CallbackQuery, ReplyParameters, WebAppInfo
 )
 from database.multi_db import db
 from config import Config
@@ -247,6 +249,16 @@ async def auto_filter(client: Client, message: Message):
     settings = await db.get_settings()
     shortener_on = settings.get("shortener_enabled", False)
 
+    # 🚀 NEW WEB APP INTEGRATION: Generate the safe URL payload
+    webapp_data = [{"i": str(f.get("_id", "")), "t": f.get("title", "Unknown")[:30]} for f in results]
+    safe_data = urllib.parse.quote(json.dumps(webapp_data))
+    
+    # ⚠️ CHANGE THIS URL to your actual GitHub Pages URL once you deploy it!
+    web_app_url = f"https://github.com/Alatheesh/FILTERWEB/?bot={client.me.username}&data={safe_data}"
+    
+    # Inject the Web App button at the top of the search results
+    buttons.insert(0, [InlineKeyboardButton(text="☑️ Select Multiple Movies", web_app=WebAppInfo(url=web_app_url))])
+
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
@@ -326,6 +338,12 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     buttons = []
     settings = await db.get_settings()
     shortener_on = settings.get("shortener_enabled", False)
+
+    # 🚀 NEW WEB APP INTEGRATION FOR PAGINATION
+    webapp_data = [{"i": str(f.get("_id", "")), "t": f.get("title", "Unknown")[:30]} for f in results]
+    safe_data = urllib.parse.quote(json.dumps(webapp_data))
+    web_app_url = f"https://YOUR_GITHUB_USERNAME.github.io/autofilter-web/?bot={client.me.username}&data={safe_data}"
+    buttons.insert(0, [InlineKeyboardButton(text="☑️ Select Multiple Movies", web_app=WebAppInfo(url=web_app_url))])
 
     for file in results:
         db_id = str(file.get("_id", ""))
