@@ -1,5 +1,5 @@
 from threading import Thread
-from web import app
+from server import app
 import os
 import asyncio
 import bot
