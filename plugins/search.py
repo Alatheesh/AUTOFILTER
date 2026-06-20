@@ -218,7 +218,7 @@ async def auto_filter(client: Client, message: Message):
 
     if settings.get("bulk_enabled", True):
         # 🚀 THE FIX: Cap the cloud payload to a maximum of 500 movies (50 pages) to ensure it successfully uploads!
-        web_app_results = filtered_results[:500] 
+        web_app_results = filtered_results[:1000] 
         short_id = hashlib.md5(f"{user_id}_{query}_{time.time()}".encode()).hexdigest()[:8]
         
         BULK_CACHE[short_id] = (time.time(), web_app_results)
@@ -308,7 +308,7 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
 
     if settings.get("bulk_enabled", True):
         # 🚀 THE FIX: Cap the cloud payload to 500 movies during pagination as well!
-        web_app_results = filtered_results[:500] 
+        web_app_results = filtered_results[:1000] 
         short_id = hashlib.md5(f"{user_id}_{base_query}_{time.time()}".encode()).hexdigest()[:8]
         BULK_CACHE[short_id] = (time.time(), web_app_results)
         
