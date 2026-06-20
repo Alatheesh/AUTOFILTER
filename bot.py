@@ -54,6 +54,8 @@ async def main():
         if app.is_initialized:
             await app.stop()
 
-if __name__ == "__main__":
+def run_bot():
     asyncio.run(main())
-    
+
+if __name__ == "__main__":
+    run_bot()
