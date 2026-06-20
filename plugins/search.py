@@ -193,9 +193,10 @@ async def auto_filter(client: Client, message: Message):
         raw_results = None
 
     if raw_results is None:
-        raw_results = await db.search_files(query, skip=0, limit=200, exact=False)
+        # 🚀 LIMIT = 0 fetches ALL documents matching the search query!
+        raw_results = await db.search_files(query, skip=0, limit=0, exact=False)
         if not raw_results and " " in query:
-            raw_results = await db.search_files(query.replace(" ", ""), skip=0, limit=200, exact=False)
+            raw_results = await db.search_files(query.replace(" ", ""), skip=0, limit=0, exact=False)
         QUERY_CACHE[cache_key] = (current_time, raw_results)
 
     min_bytes, max_bytes = SIZE_MAP.get(resolved_size, (0, float('inf')))
@@ -210,7 +211,6 @@ async def auto_filter(client: Client, message: Message):
                 continue
         filtered_results.append(f)
 
-    # 10 items for inline buttons
     results = filtered_results[:10]
     
     if loading_msg:
@@ -247,30 +247,24 @@ async def auto_filter(client: Client, message: Message):
     settings = await db.get_settings()
     shortener_on = settings.get("shortener_enabled", False)
 
-    # 🚀 NEW: ADVANCED CACHE BITMASK INJECTION (UP TO 60 FILES)
-    # We grab up to 60 files from the entire filtered_results list, not just the 10 shown!
-    web_app_results = filtered_results[:60]
-    short_id = hashlib.md5(f"{user_id}_{query}_{time.time()}".encode()).hexdigest()[:8]
-    
-    # Store the 60 files in RAM securely
-    BULK_CACHE[short_id] = (time.time(), web_app_results)
-    
-    # Cleanup old RAM cache to prevent memory leaks
-    for k in list(BULK_CACHE.keys()):
-        if time.time() - BULK_CACHE[k][0] > BULK_CACHE_TTL:
-            del BULK_CACHE[k]
+    # 🚀 BULK DELIVERY CACHE (Supports up to 200 files in the Web App)
+    if settings.get("bulk_enabled", True):
+        web_app_results = filtered_results[:200]
+        short_id = hashlib.md5(f"{user_id}_{query}_{time.time()}".encode()).hexdigest()[:8]
+        
+        BULK_CACHE[short_id] = (time.time(), web_app_results)
+        
+        for k in list(BULK_CACHE.keys()):
+            if time.time() - BULK_CACHE[k][0] > BULK_CACHE_TTL:
+                del BULK_CACHE[k]
 
-    # Send ONLY the titles to the Web App to save URL space (Data limits)
-    webapp_data = [f.get("title", "Unknown")[:35] for f in web_app_results]
-    safe_data = urllib.parse.quote(json.dumps(webapp_data))
-    
-    # ⚠️ IMPORTANT: Change YOUR_GITHUB_USERNAME to your actual username!
-    web_app_url = f"https://alatheesh.github.io/FILTERWEB/?bot={client.me.username}&id={short_id}&data={safe_data}"
-    
-    # Add the Multi-Select Button
-    buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)} Max)", web_app=WebAppInfo(url=web_app_url))])
+        webapp_data = [{"t": f.get("title", "Unknown")[:40], "s": format_size(f.get('size', 0))} for f in web_app_results]
+        safe_data = urllib.parse.quote(json.dumps(webapp_data))
+        
+        web_app_url = f"{Config.BULK_LINK}?bot={client.me.username}&id={short_id}&data={safe_data}"
+        
+        buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)} Max)", web_app=WebAppInfo(url=web_app_url))])
 
-    # Standard file buttons (Top 10)
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
@@ -329,9 +323,9 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     chat_type = callback.message.chat.type
     resolved_mode, resolved_lang, resolved_size = await get_filter_settings(user_id, chat_id, chat_type)
 
-    raw_results = await db.search_files(base_query, skip=0, limit=200, exact=False)
+    raw_results = await db.search_files(base_query, skip=0, limit=0, exact=False)
     if not raw_results and " " in base_query:
-        raw_results = await db.search_files(base_query.replace(" ", ""), skip=0, limit=200, exact=False)
+        raw_results = await db.search_files(base_query.replace(" ", ""), skip=0, limit=0, exact=False)
     
     min_bytes, max_bytes = SIZE_MAP.get(resolved_size, (0, float('inf')))
     filtered_results = []
@@ -351,15 +345,16 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     settings = await db.get_settings()
     shortener_on = settings.get("shortener_enabled", False)
 
-    # 🚀 RE-INJECT ADVANCED CACHE FOR PAGINATION SO BUTTON STAYS
-    web_app_results = filtered_results[:60]
-    short_id = hashlib.md5(f"{user_id}_{base_query}_{time.time()}".encode()).hexdigest()[:8]
-    BULK_CACHE[short_id] = (time.time(), web_app_results)
-    webapp_data = [f.get("title", "Unknown")[:35] for f in web_app_results]
-    safe_data = urllib.parse.quote(json.dumps(webapp_data))
-    web_app_url = f"https://YOUR_GITHUB_USERNAME.github.io/autofilter-web/?bot={client.me.username}&id={short_id}&data={safe_data}"
-    
-    buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)} Max)", web_app=WebAppInfo(url=web_app_url))])
+    if settings.get("bulk_enabled", True):
+        web_app_results = filtered_results[:200]
+        short_id = hashlib.md5(f"{user_id}_{base_query}_{time.time()}".encode()).hexdigest()[:8]
+        BULK_CACHE[short_id] = (time.time(), web_app_results)
+        
+        webapp_data = [{"t": f.get("title", "Unknown")[:40], "s": format_size(f.get('size', 0))} for f in web_app_results]
+        safe_data = urllib.parse.quote(json.dumps(webapp_data))
+        web_app_url = f"{Config.BULK_LINK}?bot={client.me.username}&id={short_id}&data={safe_data}"
+        
+        buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)} Max)", web_app=WebAppInfo(url=web_app_url))])
 
     for file in results:
         db_id = str(file.get("_id", ""))
