@@ -1,31 +1,12 @@
-print("START.PY EXECUTED")
-
 import subprocess
 import time
 
-print("STARTING WEB")
+print("START.PY EXECUTED")
 
-web = subprocess.Popen(
-    ["python", "web.py"],
-    stdout=None,
-    stderr=None
-)
+web = subprocess.Popen(["python", "web.py"])
 
-print("WEB PROCESS STARTED")
-
-print("STARTING BOT")
-
-bot = subprocess.Popen(
-    ["python", "bot.py"],
-    stdout=None,
-    stderr=None
-)
-
-print("BOT PROCESS STARTED")
+bot = subprocess.Popen(["python", "bot.py"])
 
 while True:
-    print(
-        "WEB:", web.poll(),
-        "BOT:", bot.poll()
-    )
+    print(f"WEB={web.poll()} BOT={bot.poll()}")
     time.sleep(30)
