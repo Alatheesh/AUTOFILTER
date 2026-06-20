@@ -35,12 +35,12 @@ class MultiDB:
         if not self.collections: return
         for coll in self.collections:
             try:
-                # Creates a background text index and forces MongoDB to ignore your 'language' field
                 await coll.create_index(
                     [("title", "text")], 
                     background=True,
-                    language_override="dummy_bot_lang"  # <--- THE FIX
+                    language_override="dummy_bot_lang"
                 )
+                await coll.create_index("language", background=True)
             except Exception as e:
                 logger.error(f"Index creation error: {e}")
         return True
@@ -174,18 +174,14 @@ class MultiDB:
         
         combined_results = []
         
-        # 🚀 STEP 1: Blazing Fast Text Index Search
         try:
             text_filter = {"$text": {"$search": f"\"{query}\"" if exact else query}}
             tasks = [self._safe_search(coll, text_filter, skip, limit) for coll in self.collections]
             results = await asyncio.gather(*tasks)
             for result_group in results: combined_results.extend(result_group)
         except Exception:
-            # If the index is still building or missing, MongoDB throws an error.
-            # We silently ignore it here and let the Regex Fallback handle the search!
             pass 
             
-        # 🚀 STEP 2: Smart Fallback! If text search found nothing OR threw an error, use trusty Regex.
         if not combined_results and not exact:
             try:
                 regex_pattern = f".*{'.*'.join(query.split())}.*"
@@ -204,6 +200,7 @@ class MultiDB:
             "total_files": 0, 
             "total_size_bytes": 0, 
             "indexed_metadata": 0,
+            "corrupted_files": 0,  # <--- NEW CORRUPTED COUNTER
             "shard_distribution": []
         }
         
@@ -218,12 +215,20 @@ class MultiDB:
                 
                 processed = await coll.count_documents({"language": {"$exists": True, "$ne": "pending"}})
                 stats["indexed_metadata"] += processed
+
+                # Count how many files were specifically tagged as corrupted
+                corrupted = await coll.count_documents({"language": "corrupted"})
+                stats["corrupted_files"] += corrupted
             except Exception:
                 count = await coll.count_documents({})
                 stats["shard_distribution"].append(count)
                 stats["total_files"] += count
+
                 processed = await coll.count_documents({"language": {"$exists": True, "$ne": "pending"}})
                 stats["indexed_metadata"] += processed
+
+                corrupted = await coll.count_documents({"language": "corrupted"})
+                stats["corrupted_files"] += corrupted
                 
         total_capacity_bytes = len(self.collections) * 512 * 1024 * 1024
         stats["space_left_bytes"] = max(0, total_capacity_bytes - stats["total_size_bytes"])
