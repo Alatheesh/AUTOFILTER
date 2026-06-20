@@ -41,6 +41,9 @@ CACHE_TTL = 300
 BULK_CACHE = {}
 BULK_CACHE_TTL = 1800 
 
+# 🚀 THE FIX: Memorize the Telegraph Token to avoid Rate Limits!
+TELEGRAPH_TOKEN = None
+
 SEARCH_STICKERS = [
     "CAACAgIAAxkBAAERau9qNXctqQUyQ4JPHMUlrBCSMmTpRwACvAwAAocoMEntN5GZWCFoBDwE",
     "CAACAgIAAxkBAAERavdqNXraBk9c93sSXemtFwSlSN_RnAAC_iYAAp2TAUsNtzXDZ_a-szwE",
@@ -124,7 +127,8 @@ def format_size(size_bytes):
     return f"{s} {size_name[i]}"
 
 async def upload_json_payload(data_list):
-    # 🚀 THE FIX: Increased timeouts to 8 seconds to prevent Hugging Face network lag from failing the upload
+    global TELEGRAPH_TOKEN
+    
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post("https://api.npoint.io/", json=data_list, timeout=8) as resp:
@@ -136,17 +140,26 @@ async def upload_json_payload(data_list):
     
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get("https://api.telegra.ph/createAccount?short_name=AutoFilter", timeout=8) as resp:
-                token = (await resp.json())["result"]["access_token"]
+            if not TELEGRAPH_TOKEN:
+                async with session.get("https://api.telegra.ph/createAccount?short_name=AutoFilter", timeout=8) as resp:
+                    res = await resp.json()
+                    if res.get("ok"):
+                        TELEGRAPH_TOKEN = res["result"]["access_token"]
             
-            json_str = json.dumps(data_list)
-            chunks = [json_str[i:i+30000] for i in range(0, len(json_str), 30000)]
-            content = [{"tag": "p", "children": [chunk]} for chunk in chunks]
-            
-            req_data = {"access_token": token, "title": "Data", "content": json.dumps(content)}
-            async with session.post("https://api.telegra.ph/createPage", data=req_data, timeout=8) as resp:
-                path = (await resp.json())["result"]["path"]
-                return f"https://api.telegra.ph/getPage/{path}?return_content=true"
+            if TELEGRAPH_TOKEN:
+                json_str = json.dumps(data_list)
+                chunks = [json_str[i:i+30000] for i in range(0, len(json_str), 30000)]
+                content = [{"tag": "p", "children": [chunk]} for chunk in chunks]
+                
+                req_data = {"access_token": TELEGRAPH_TOKEN, "title": "Data", "content": json.dumps(content)}
+                # 🚀 Use json=req_data to properly encode the telegraph request
+                async with session.post("https://api.telegra.ph/createPage", json=req_data, timeout=8) as resp:
+                    res = await resp.json()
+                    if res.get("ok"):
+                        path = res["result"]["path"]
+                        return f"https://api.telegra.ph/getPage/{path}?return_content=true"
+                    else:
+                        logger.error(f"Telegraph Page Failed: {res}")
     except Exception as e: 
         logger.error(f"Telegraph Cloud Upload Failed: {e}")
         
@@ -217,8 +230,8 @@ async def auto_filter(client: Client, message: Message):
     shortener_on = settings.get("shortener_enabled", False)
 
     if settings.get("bulk_enabled", True):
-        # 🚀 THE FIX: Cap the cloud payload to a maximum of 500 movies (50 pages) to ensure it successfully uploads!
-        web_app_results = filtered_results[:1000] 
+        # 🚀 RESTORED SAFE LIMIT: 500 max to guarantee it stays under Telegraph's 64KB limit!
+        web_app_results = filtered_results[:500] 
         short_id = hashlib.md5(f"{user_id}_{query}_{time.time()}".encode()).hexdigest()[:8]
         
         BULK_CACHE[short_id] = (time.time(), web_app_results)
@@ -229,7 +242,6 @@ async def auto_filter(client: Client, message: Message):
         
         data_url = await upload_json_payload(webapp_data)
         
-        # If data_url successfully generated, attach the button!
         if data_url:
             safe_url = urllib.parse.quote(data_url)
             web_app_url = f"{Config.BULK_LINK}?bot={client.me.username}&id={short_id}&url={safe_url}"
@@ -307,8 +319,8 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     shortener_on = settings.get("shortener_enabled", False)
 
     if settings.get("bulk_enabled", True):
-        # 🚀 THE FIX: Cap the cloud payload to 500 movies during pagination as well!
-        web_app_results = filtered_results[:1000] 
+        # 🚀 RESTORED SAFE LIMIT HERE AS WELL
+        web_app_results = filtered_results[:500] 
         short_id = hashlib.md5(f"{user_id}_{base_query}_{time.time()}".encode()).hexdigest()[:8]
         BULK_CACHE[short_id] = (time.time(), web_app_results)
         
