@@ -41,9 +41,6 @@ CACHE_TTL = 300
 BULK_CACHE = {}
 BULK_CACHE_TTL = 1800 
 
-# 🚀 THE FIX: Memorize the Telegraph Token to avoid Rate Limits!
-TELEGRAPH_TOKEN = None
-
 SEARCH_STICKERS = [
     "CAACAgIAAxkBAAERau9qNXctqQUyQ4JPHMUlrBCSMmTpRwACvAwAAocoMEntN5GZWCFoBDwE",
     "CAACAgIAAxkBAAERavdqNXraBk9c93sSXemtFwSlSN_RnAAC_iYAAp2TAUsNtzXDZ_a-szwE",
@@ -126,42 +123,36 @@ def format_size(size_bytes):
     s = round(size_bytes / p, 2)
     return f"{s} {size_name[i]}"
 
+# 🚀 THE FIX: Removed Telegraph entirely! Now using Npoint, Dpaste, and Rentry.
 async def upload_json_payload(data_list):
-    global TELEGRAPH_TOKEN
+    json_string = json.dumps(data_list)
     
+    # 1. NPOINT (Fastest for JSON data)
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post("https://api.npoint.io/", json=data_list, timeout=8) as resp:
                 if resp.status == 200:
-                    res = await resp.json()
-                    return f"https://api.npoint.io/{res['id']}"
-    except Exception as e: 
-        logger.error(f"Npoint Cloud Upload Failed: {e}")
-    
+                    return f"https://api.npoint.io/{(await resp.json())['id']}"
+    except Exception as e: logger.error(f"Npoint Cloud Upload Failed: {e}")
+
+    # 2. DPASTE (Allows massive 1MB payloads, extremely stable)
     try:
         async with aiohttp.ClientSession() as session:
-            if not TELEGRAPH_TOKEN:
-                async with session.get("https://api.telegra.ph/createAccount?short_name=AutoFilter", timeout=8) as resp:
+            async with session.post("https://dpaste.com/api/v2/", data={"content": json_string, "syntax": "json"}, timeout=8) as resp:
+                if resp.status in [200, 201]:
+                    url = await resp.text()
+                    return f"{url.strip()}.txt"
+    except Exception as e: logger.error(f"Dpaste Cloud Upload Failed: {e}")
+        
+    # 3. RENTRY.CO (Bulletproof fallback)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post("https://rentry.co/api/new", data={"text": json_string}, timeout=8) as resp:
+                if resp.status == 200:
                     res = await resp.json()
-                    if res.get("ok"):
-                        TELEGRAPH_TOKEN = res["result"]["access_token"]
-            
-            if TELEGRAPH_TOKEN:
-                json_str = json.dumps(data_list)
-                chunks = [json_str[i:i+30000] for i in range(0, len(json_str), 30000)]
-                content = [{"tag": "p", "children": [chunk]} for chunk in chunks]
-                
-                req_data = {"access_token": TELEGRAPH_TOKEN, "title": "Data", "content": json.dumps(content)}
-                # 🚀 Use json=req_data to properly encode the telegraph request
-                async with session.post("https://api.telegra.ph/createPage", json=req_data, timeout=8) as resp:
-                    res = await resp.json()
-                    if res.get("ok"):
-                        path = res["result"]["path"]
-                        return f"https://api.telegra.ph/getPage/{path}?return_content=true"
-                    else:
-                        logger.error(f"Telegraph Page Failed: {res}")
-    except Exception as e: 
-        logger.error(f"Telegraph Cloud Upload Failed: {e}")
+                    if res.get("url"):
+                        return f"{res['url']}/raw"
+    except Exception as e: logger.error(f"Rentry Cloud Upload Failed: {e}")
         
     return None
 
@@ -230,8 +221,8 @@ async def auto_filter(client: Client, message: Message):
     shortener_on = settings.get("shortener_enabled", False)
 
     if settings.get("bulk_enabled", True):
-        # 🚀 RESTORED SAFE LIMIT: 500 max to guarantee it stays under Telegraph's 64KB limit!
-        web_app_results = filtered_results[:500] 
+        # 🚀 RESTORED HIGH LIMIT: Because we now use Dpaste, it easily supports 1000 movies without crashing!
+        web_app_results = filtered_results[:1000] 
         short_id = hashlib.md5(f"{user_id}_{query}_{time.time()}".encode()).hexdigest()[:8]
         
         BULK_CACHE[short_id] = (time.time(), web_app_results)
@@ -319,8 +310,8 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     shortener_on = settings.get("shortener_enabled", False)
 
     if settings.get("bulk_enabled", True):
-        # 🚀 RESTORED SAFE LIMIT HERE AS WELL
-        web_app_results = filtered_results[:500] 
+        # 🚀 RESTORED HIGH LIMIT HERE AS WELL
+        web_app_results = filtered_results[:1000] 
         short_id = hashlib.md5(f"{user_id}_{base_query}_{time.time()}".encode()).hexdigest()[:8]
         BULK_CACHE[short_id] = (time.time(), web_app_results)
         
