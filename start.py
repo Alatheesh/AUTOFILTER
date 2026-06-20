@@ -1,8 +1,29 @@
 import subprocess
 import time
 
-web = subprocess.Popen(["python", "web.py"])
-bot = subprocess.Popen(["python", "bot.py"])
+print("STARTING WEB")
+
+web = subprocess.Popen(
+    ["python", "web.py"],
+    stdout=None,
+    stderr=None
+)
+
+print("WEB PROCESS STARTED")
+
+print("STARTING BOT")
+
+bot = subprocess.Popen(
+    ["python", "bot.py"],
+    stdout=None,
+    stderr=None
+)
+
+print("BOT PROCESS STARTED")
 
 while True:
-    time.sleep(60)
+    print(
+        "WEB:", web.poll(),
+        "BOT:", bot.poll()
+    )
+    time.sleep(30)
