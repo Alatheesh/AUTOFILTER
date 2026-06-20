@@ -2,11 +2,13 @@ import asyncio
 import time
 import logging
 import aiohttp
+import json
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from database.multi_db import db
 from config import Config
 from plugins.search import BULK_CACHE
+from plugins.monetization import execute_file_delivery
 
 logger = logging.getLogger(__name__)
 
@@ -60,13 +62,34 @@ async def handle_bulk_delivery(client: Client, message: Message):
             status_msg = await message.reply_text("☁️ **Fetching your massive selection from the secure cloud...**")
             try:
                 async with aiohttp.ClientSession() as session:
-                    async with session.get(f"https://api.npoint.io/{payload}") as resp:
-                        if resp.status == 200:
-                            selected_indices = await resp.json()
-                        else:
-                            return await status_msg.edit_text("❌ **Error:** Cloud fetch failed.")
+                    # 🚀 THE FIX: Handles both Npoint (np_) and Dpaste (dp_) fallbacks!
+                    if payload.startswith("np_"):
+                        np_id = payload.replace("np_", "")
+                        async with session.get(f"https://api.npoint.io/{np_id}") as resp:
+                            if resp.status == 200:
+                                text_data = await resp.text()
+                                selected_indices = json.loads(text_data)
+                            else:
+                                return await status_msg.edit_text("❌ **Error:** Npoint fetch failed.")
+                    elif payload.startswith("dp_"):
+                        dp_id = payload.replace("dp_", "")
+                        async with session.get(f"https://dpaste.com/{dp_id}.txt") as resp:
+                            if resp.status == 200:
+                                text_data = await resp.text()
+                                selected_indices = json.loads(text_data)
+                            else:
+                                return await status_msg.edit_text("❌ **Error:** Dpaste fetch failed.")
+                    else:
+                        # Legacy support
+                        async with session.get(f"https://api.npoint.io/{payload}") as resp:
+                            if resp.status == 200:
+                                text_data = await resp.text()
+                                selected_indices = json.loads(text_data)
+                            else:
+                                return await status_msg.edit_text("❌ **Error:** Cloud fetch failed.")
                 await status_msg.delete()
-            except Exception:
+            except Exception as e:
+                logger.error(f"Bulk Cloud Fetch Error: {e}")
                 return await status_msg.edit_text("❌ **Error:** Network error contacting cloud.")
 
         selected_files = []
@@ -82,7 +105,6 @@ async def handle_bulk_delivery(client: Client, message: Message):
         sent_message_ids = []
         settings = await db.get_settings()
         
-        # 🚀 THE FIX: Send just the files smoothly, without triggering the single-file spam message!
         for f_data in selected_files:
             if f_data:
                 try:
@@ -98,7 +120,6 @@ async def handle_bulk_delivery(client: Client, message: Message):
                 
                 await asyncio.sleep(0.5) 
                 
-        # 🚀 THE FIX: One single summary deletion caution at the very end!
         await status_msg.delete()
         if settings.get("file_delete_enabled", False):
             del_time = settings.get("file_delete_time", 10)
@@ -108,10 +129,8 @@ async def handle_bulk_delivery(client: Client, message: Message):
             )
             try:
                 from plugins.advanced import trigger_ghost_self_destruct
-                # Set deletion timer for all files at once
                 for m_id in sent_message_ids:
                     trigger_ghost_self_destruct(client, user_id, m_id, del_time * 60)
-                # Set deletion timer for the summary message
                 trigger_ghost_self_destruct(client, user_id, summary_msg.id, del_time * 60)
             except Exception as e:
                 logger.error(f"Bulk Ghost Destruct Error: {e}")
