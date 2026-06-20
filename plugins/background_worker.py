@@ -50,7 +50,6 @@ async def extract_language_micro_chunk(client: Client, file_id: str, unique_id: 
                 if downloaded >= chunk_limit:
                     break 
 
-        # THE FIX: Generate the raw metadata in a background thread to prevent freezing!
         media_info = await asyncio.to_thread(MediaInfo.parse, temp_path)
 
         for track in media_info.tracks:
@@ -73,12 +72,18 @@ async def extract_language_micro_chunk(client: Client, file_id: str, unique_id: 
 
         return final_audio, final_subs
 
+    except FloodWait as fw:
+        raise fw  # Let the main loop handle the sleep
     except Exception as e:
         logger.error(f"Worker extraction error on {unique_id}: {e}")
-        return "unknown", "none"
+        # Mark as corrupted if it throws a fatal error reading the file!
+        return "corrupted", "corrupted"
     finally:
         if os.path.exists(temp_path):
-            os.remove(temp_path)
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
 
 async def start_background_language_indexer(client: Client):
     """The 24/7 invisible loop that processes files one by one."""
@@ -101,9 +106,21 @@ async def start_background_language_indexer(client: Client):
                 continue
 
             file_id = target_file.get("file_id")
-            unique_id = target_file.get("file_unique_id")
+            unique_id = target_file.get("file_unique_id", "UNKNOWN")
 
-            audio_langs, sub_langs = await extract_language_micro_chunk(client, file_id, unique_id)
+            try:
+                # 🚀 THE SILVER BULLET: If a file is corrupted, skip it after 45 seconds!
+                audio_langs, sub_langs = await asyncio.wait_for(
+                    extract_language_micro_chunk(client, file_id, unique_id),
+                    timeout=45.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"⚠️ Worker TIMEOUT on {unique_id}. Marking as corrupted to skip.")
+                audio_langs, sub_langs = "corrupted", "corrupted"
+            except FloodWait as fw:
+                logger.warning(f"⚠️ Worker hit Rate Limit. Sleeping for {fw.value}s")
+                await asyncio.sleep(fw.value)
+                continue
 
             await target_collection.update_one(
                 {"_id": target_file["_id"]},
@@ -116,9 +133,6 @@ async def start_background_language_indexer(client: Client):
             # 🛡️ Highly Stable Safety Timer (3.0s)
             await asyncio.sleep(3.0)
 
-        except FloodWait as fw:
-            logger.warning(f"⚠️ Worker hit Rate Limit. Sleeping for {fw.value}s")
-            await asyncio.sleep(fw.value)
         except Exception as e:
             logger.error(f"Background loop crashed: {e}. Restarting in 10s...")
             await asyncio.sleep(10)
