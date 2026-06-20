@@ -10,15 +10,13 @@ from pyrogram.errors import UserIsBlocked, PeerIdInvalid
 from database.multi_db import db
 from config import Config
 
-# IMPORT THE NEW BULK CACHE
-from plugins.search import BULK_CACHE
-
 logger = logging.getLogger(__name__)
 
 # In-memory storage for shortener tokens
 VERIFICATION_TOKENS = {}
 
 async def check_double_fsub(client: Client, user_id: int) -> bool:
+    """Checks if the user has joined the forced subscription channels."""
     if not Config.FSUB_CHANNELS:
         return True
     for channel in Config.FSUB_CHANNELS:
@@ -31,6 +29,7 @@ async def check_double_fsub(client: Client, user_id: int) -> bool:
     return True
 
 async def get_shortlink(url: str, api: str, site: str) -> str:
+    """Contacts the Shortener API to generate a monetized link."""
     try:
         async with aiohttp.ClientSession() as session:
             api_url = f"{site}?api={api}&url={url}"
@@ -43,6 +42,7 @@ async def get_shortlink(url: str, api: str, site: str) -> str:
     return url
 
 async def execute_file_delivery(client: Client, chat_id: int, file_id: str):
+    """Sends the file, handles caution cleanup, and sets self-destruct timers."""
     try:
         sent_file = await client.send_cached_media(
             chat_id=chat_id, 
@@ -69,12 +69,16 @@ async def execute_file_delivery(client: Client, chat_id: int, file_id: str):
     except Exception as send_err:
         raise send_err
 
+# -----------------------------------------------------
+# 🔥 HYBRID DIRECT FILE BUTTON LISTENER (PM DELIVERY)
+# -----------------------------------------------------
 @Client.on_callback_query(filters.regex(r"^sendfile_(.+)"))
 async def direct_send_callback(client: Client, callback: CallbackQuery):
     user_id = callback.from_user.id
     chat_id = callback.message.chat.id
     db_id = callback.data.split("_")[1]
 
+    # Verify FSub 
     is_joined = await check_double_fsub(client, user_id)
     if not is_joined:
         buttons = []
@@ -95,6 +99,7 @@ async def direct_send_callback(client: Client, callback: CallbackQuery):
 
     try:
         await execute_file_delivery(client, user_id, file_data.get("file_id"))
+        
         if callback.message.chat.type.name in ["GROUP", "SUPERGROUP"]:
             await callback.answer("✅ File sent securely to your Private Messages!", show_alert=True)
         else:
@@ -122,69 +127,20 @@ async def direct_send_callback(client: Client, callback: CallbackQuery):
                 from plugins.advanced import trigger_ghost_self_destruct
                 trigger_ghost_self_destruct(client, chat_id, alert_msg.id, 120)
             except Exception:
-                logger.warning("Ghost self destruct failed for alert message.")
+                pass
 
 
+# -----------------------------------------------------
+# 🔥 DEEP LINK & SHORTENER LOGIC (SINGLE FILES ONLY)
+# -----------------------------------------------------
 @Client.on_message(filters.command("start") & filters.private, group=1)
 async def deep_link_start(client: Client, message: Message):
     if len(message.command) > 1:
         cmd = message.command[1]
 
-        # 🚀 THE NEW HEX BITMASK DECODER FOR BULK FILES
-        if cmd.startswith("blk_"):
-            user_id = message.from_user.id
-            
-            is_joined = await check_double_fsub(client, user_id)
-            if not is_joined:
-                buttons = []
-                for idx, channel in enumerate(Config.FSUB_CHANNELS[:2], start=1):
-                    try:
-                        chat = await client.get_chat(channel)
-                        invite_link = chat.invite_link if chat.invite_link else await client.export_chat_invite_link(channel)
-                    except Exception: 
-                        invite_link = "https://t.me/telegram"
-                    buttons.append([InlineKeyboardButton(text=f"Join Channel #{idx}", url=invite_link)])
-                
-                return await message.reply_text("🛑 **Lock Warning:**\nYou must join our official channels before downloading bulk files.", reply_markup=InlineKeyboardMarkup(buttons))
+        # ⚠️ NOTE: The "bulk_" / "blk_" handler was removed from here. 
+        # It is now safely isolated inside plugins/bulk_delivery.py!
 
-            parts = cmd.split("_")
-            if len(parts) < 3:
-                return await message.reply_text("❌ **Error:** Invalid bulk request format.")
-                
-            short_id, hex_mask = parts[1], parts[2]
-            
-            # Fetch the files from RAM Cache!
-            if short_id not in BULK_CACHE:
-                return await message.reply_text("⏳ **Session Expired!**\nYour search result has expired to save memory. Please search for the movie again in the group.")
-                
-            cached_time, cached_files = BULK_CACHE[short_id]
-            
-            # Decode the Hexadecimal Bitmask into array indices
-            try:
-                mask = int(hex_mask, 16)
-            except ValueError:
-                return await message.reply_text("❌ **Error:** Invalid file selection mask.")
-                
-            selected_files = []
-            for i, f_data in enumerate(cached_files):
-                if (mask & (1 << i)):
-                    selected_files.append(f_data)
-                    
-            if not selected_files:
-                return await message.reply_text("⚠️ No valid files were selected.")
-            
-            status_msg = await message.reply_text(f"📦 **Queueing {len(selected_files)} files...**\nSending them securely. Please wait!")
-            
-            successful = 0
-            for f_data in selected_files:
-                if f_data:
-                    await execute_file_delivery(client, user_id, f_data.get("file_id"))
-                    successful += 1
-                    # 🛡️ ANTI-SPAM SHIELD: 0.5s delay to prevent Telegram FloodWait limits!
-                    await asyncio.sleep(0.5) 
-                    
-            return await status_msg.edit_text(f"✅ **Successfully delivered {successful} files directly to you!**")
-        
         # --- TOKEN VERIFICATION (Returning from Shortener) ---
         if cmd.startswith("verify_"):
             token = cmd.split("_")[1]
