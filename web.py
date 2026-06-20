@@ -1,6 +1,8 @@
+print("WEB SERVER STARTED")
+
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import os
-
+print("WEB SERVER STARTED")
 PORT = int(os.environ.get("PORT", 7860))
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
