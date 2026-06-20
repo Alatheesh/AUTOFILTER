@@ -8,5 +8,5 @@ class Handler(BaseHTTPRequestHandler):
 
 server = HTTPServer(("0.0.0.0", 7860), Handler)
 
-print("SERVER STARTED")
-server.serve_forever()
+print("START FILE EXECUTED")
+raise Exception("TEST CRASH")
