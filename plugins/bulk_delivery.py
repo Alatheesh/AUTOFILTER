@@ -1,6 +1,7 @@
 import asyncio
 import time
 import logging
+import aiohttp
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from database.multi_db import db
@@ -20,7 +21,7 @@ async def check_fsub_for_bulk(client: Client, user_id: int) -> bool:
 
 @Client.on_message(filters.command("start") & filters.private, group=2)
 async def handle_bulk_delivery(client: Client, message: Message):
-    if len(message.command) > 1 and message.command[1].startswith("blk_"):
+    if len(message.command) > 1 and message.command[1].startswith("blk"):
         cmd = message.command[1]
         user_id = message.from_user.id
         
@@ -39,21 +40,40 @@ async def handle_bulk_delivery(client: Client, message: Message):
         if len(parts) < 3:
             return await message.reply_text("❌ **Error:** Invalid bulk request format.")
             
-        short_id, hex_mask = parts[1], parts[2]
+        req_type = parts[0]  # Will be 'blks' (small) or 'blkc' (cloud)
+        short_id = parts[1]
+        payload = parts[2]
         
         if short_id not in BULK_CACHE:
             return await message.reply_text("⏳ **Session Expired!**\nYour search result has expired to save memory. Please search for the movie again in the group.")
             
         cached_time, cached_files = BULK_CACHE[short_id]
+        selected_indices = []
+
+        # 🚀 THE FIX: Hybrid Decoder to guarantee 100% accurate file selections
+        if req_type == "blks":
+            try:
+                selected_indices = [int(x) for x in payload.split("-") if x.isdigit()]
+            except Exception:
+                return await message.reply_text("❌ **Error:** Failed to read your file selections.")
         
-        # Decode the Hexadecimal Bitmask
-        try: mask = int(hex_mask, 16)
-        except ValueError: return await message.reply_text("❌ **Error:** Invalid file selection mask.")
-            
+        elif req_type == "blkc":
+            status_msg = await message.reply_text("☁️ **Fetching your massive selection from the secure cloud...**")
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(f"https://api.npoint.io/{payload}") as resp:
+                        if resp.status == 200:
+                            selected_indices = await resp.json()
+                        else:
+                            return await status_msg.edit_text("❌ **Error:** Cloud fetch failed.")
+                await status_msg.delete()
+            except Exception:
+                return await status_msg.edit_text("❌ **Error:** Network error contacting cloud.")
+
         selected_files = []
-        for i, f_data in enumerate(cached_files):
-            if (mask & (1 << i)):
-                selected_files.append(f_data)
+        for i in selected_indices:
+            if 0 <= i < len(cached_files):
+                selected_files.append(cached_files[i])
                 
         if not selected_files: return await message.reply_text("⚠️ No valid files were selected.")
         
@@ -78,23 +98,17 @@ async def handle_bulk_delivery(client: Client, message: Message):
                 
                 await asyncio.sleep(0.5) 
                 
-        # 🚀 NEW: SINGLE DELETION SUMMARY CAUTION
-        await status_msg.delete()
         if settings.get("file_delete_enabled", False):
             del_time = settings.get("file_delete_time", 10)
             summary_msg = await message.reply_text(
                 f"✅ **Successfully delivered {successful} files!**\n\n"
                 f"⏳ **Caution:** All {successful} files will be automatically deleted in **{del_time} minutes** to protect our servers. Please forward them to your Saved Messages!"
             )
-            
             try:
                 from plugins.advanced import trigger_ghost_self_destruct
-                # Destruct all files
                 for m_id in sent_message_ids:
                     trigger_ghost_self_destruct(client, user_id, m_id, del_time * 60)
-                # Destruct the summary message too
                 trigger_ghost_self_destruct(client, user_id, summary_msg.id, del_time * 60)
-            except Exception as e:
-                logger.error(f"Ghost destruct error in bulk: {e}")
+            except Exception as e: pass
         else:
             await message.reply_text(f"✅ **Successfully delivered {successful} files directly to you!**")
