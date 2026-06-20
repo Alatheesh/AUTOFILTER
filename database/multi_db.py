@@ -130,7 +130,8 @@ class MultiDB:
                 "file_delete_enabled": False,
                 "file_delete_time": 10,
                 "filter_delete_enabled": False,
-                "filter_delete_time": 5
+                "filter_delete_time": 5,
+                "bulk_enabled": True
             }
             await self.settings.insert_one(default)
             return default
