@@ -123,11 +123,10 @@ def format_size(size_bytes):
     s = round(size_bytes / p, 2)
     return f"{s} {size_name[i]}"
 
-# 🚀 THE FIX: Removed Telegraph entirely! Now using Npoint, Dpaste, and Rentry.
 async def upload_json_payload(data_list):
     json_string = json.dumps(data_list)
     
-    # 1. NPOINT (Fastest for JSON data)
+    # 1. NPOINT
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post("https://api.npoint.io/", json=data_list, timeout=8) as resp:
@@ -135,16 +134,17 @@ async def upload_json_payload(data_list):
                     return f"https://api.npoint.io/{(await resp.json())['id']}"
     except Exception as e: logger.error(f"Npoint Cloud Upload Failed: {e}")
 
-    # 2. DPASTE (Allows massive 1MB payloads, extremely stable)
+    # 2. DPASTE
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post("https://dpaste.com/api/v2/", data={"content": json_string, "syntax": "json"}, timeout=8) as resp:
                 if resp.status in [200, 201]:
-                    url = await resp.text()
-                    return f"{url.strip()}.txt"
+                    url = (await resp.text()).strip()
+                    if url.startswith("http"):
+                        return f"{url}.txt"
     except Exception as e: logger.error(f"Dpaste Cloud Upload Failed: {e}")
         
-    # 3. RENTRY.CO (Bulletproof fallback)
+    # 3. RENTRY
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post("https://rentry.co/api/new", data={"text": json_string}, timeout=8) as resp:
@@ -155,6 +155,16 @@ async def upload_json_payload(data_list):
     except Exception as e: logger.error(f"Rentry Cloud Upload Failed: {e}")
         
     return None
+
+def build_safe_webapp_url(client_username, short_id, data_url):
+    base_link = getattr(Config, "BULK_LINK", "https://yourusername.github.io/autofilter-web/").strip()
+    if not base_link.startswith("http"):
+        base_link = f"https://{base_link}"
+        
+    safe_url = urllib.parse.quote(data_url)
+    bot_username = client_username or "Bot"
+    
+    return f"{base_link}?bot={bot_username}&id={short_id}&url={safe_url}"
 
 @Client.on_message((filters.group | filters.private) & filters.text & ~filters.command(["start", "help", "about", "source", "settings", "request", "plot", "history", "clear_history", "broadcast", "stats", "backup", "admin", "index", "batch", "migrate_db", "clear_job", "optimize_db", "connect", "disconnect"]))
 async def auto_filter(client: Client, message: Message):
@@ -202,11 +212,15 @@ async def auto_filter(client: Client, message: Message):
         filtered_results.append(f)
 
     results = filtered_results[:10]
-    if loading_msg:
-        try: await loading_msg.delete()
-        except Exception: pass
+    
+    # 🚀 REMOVED EARLY STICKER DELETION FROM HERE
     
     if not results:
+        # If no results, delete the sticker right before sending the suggestions
+        if loading_msg:
+            try: await loading_msg.delete()
+            except Exception: pass
+            
         suggestions = await get_fuzzy_suggestions(query)
         btn_list = []
         for s in suggestions: btn_list.append([InlineKeyboardButton(f"🔍 Search: {s}", callback_data=f"fuz_{s[:50]}")])
@@ -221,7 +235,6 @@ async def auto_filter(client: Client, message: Message):
     shortener_on = settings.get("shortener_enabled", False)
 
     if settings.get("bulk_enabled", True):
-        # 🚀 RESTORED HIGH LIMIT: Because we now use Dpaste, it easily supports 1000 movies without crashing!
         web_app_results = filtered_results[:1000] 
         short_id = hashlib.md5(f"{user_id}_{query}_{time.time()}".encode()).hexdigest()[:8]
         
@@ -234,8 +247,7 @@ async def auto_filter(client: Client, message: Message):
         data_url = await upload_json_payload(webapp_data)
         
         if data_url:
-            safe_url = urllib.parse.quote(data_url)
-            web_app_url = f"{Config.BULK_LINK}?bot={client.me.username}&id={short_id}&url={safe_url}"
+            web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url)
             buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)})", web_app=WebAppInfo(url=web_app_url))])
         else:
             logger.error("Skipped drawing Bulk Delivery button because Cloud Upload failed completely.")
@@ -273,6 +285,11 @@ async def auto_filter(client: Client, message: Message):
         f"📝 **Plot:** {metadata['plot']}\n\n🔍 Found {len(filtered_results)} matching files.{filter_notice}{pm_notice}"
     )
     
+    # 🚀 THE FIX: Now we delete the sticker right here, exactly before sending the final message!
+    if loading_msg:
+        try: await loading_msg.delete()
+        except Exception: pass
+        
     try: msg = await message.reply_photo(photo=metadata["poster"], caption=caption, reply_markup=InlineKeyboardMarkup(buttons), reply_parameters=ReplyParameters(message_id=message.id))
     except Exception: msg = await client.send_message(chat_id, caption, reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -310,7 +327,6 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     shortener_on = settings.get("shortener_enabled", False)
 
     if settings.get("bulk_enabled", True):
-        # 🚀 RESTORED HIGH LIMIT HERE AS WELL
         web_app_results = filtered_results[:1000] 
         short_id = hashlib.md5(f"{user_id}_{base_query}_{time.time()}".encode()).hexdigest()[:8]
         BULK_CACHE[short_id] = (time.time(), web_app_results)
@@ -319,8 +335,7 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
         data_url = await upload_json_payload(webapp_data)
         
         if data_url:
-            safe_url = urllib.parse.quote(data_url)
-            web_app_url = f"{Config.BULK_LINK}?bot={client.me.username}&id={short_id}&url={safe_url}"
+            web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url)
             buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)})", web_app=WebAppInfo(url=web_app_url))])
 
     for file in results:
