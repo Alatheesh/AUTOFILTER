@@ -37,11 +37,16 @@ async def web_server():
     web_app = web.Application()
     web_app.router.add_get('/', handle_request)
     
+    # Adding a specific health endpoint for Hugging Face
+    web_app.router.add_get('/health', handle_request)
+    
     runner = web.AppRunner(web_app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', Config.PORT)
+    
+    # 🚀 THE FIX: Hardcoding 7860 here so Hugging Face environment variables CANNOT override it!
+    site = web.TCPSite(runner, '0.0.0.0', 7860)
     await site.start()
-    logger.info(f"Aiohttp web server started on port {Config.PORT}")
+    logger.info("Aiohttp web server FORCE started on port 7860")
 
 async def main():
     logger.info("Initializing multi-DB connections and starting bot...")
