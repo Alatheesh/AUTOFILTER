@@ -10,13 +10,15 @@ from pyrogram.errors import UserIsBlocked, PeerIdInvalid
 from database.multi_db import db
 from config import Config
 
+# IMPORT THE NEW BULK CACHE
+from plugins.search import BULK_CACHE
+
 logger = logging.getLogger(__name__)
 
 # In-memory storage for shortener tokens
 VERIFICATION_TOKENS = {}
 
 async def check_double_fsub(client: Client, user_id: int) -> bool:
-    """Checks if the user has joined the forced subscription channels."""
     if not Config.FSUB_CHANNELS:
         return True
     for channel in Config.FSUB_CHANNELS:
@@ -25,12 +27,10 @@ async def check_double_fsub(client: Client, user_id: int) -> bool:
             if member.status.value in ["left", "kicked", "banned", "restricted"]:
                 return False
         except Exception:
-            # If the bot is not in the channel or user hasn't joined
             return False
     return True
 
 async def get_shortlink(url: str, api: str, site: str) -> str:
-    """Contacts the Shortener API to generate a monetized link."""
     try:
         async with aiohttp.ClientSession() as session:
             api_url = f"{site}?api={api}&url={url}"
@@ -43,7 +43,6 @@ async def get_shortlink(url: str, api: str, site: str) -> str:
     return url
 
 async def execute_file_delivery(client: Client, chat_id: int, file_id: str):
-    """Sends the file, handles caution cleanup, and sets self-destruct timers."""
     try:
         sent_file = await client.send_cached_media(
             chat_id=chat_id, 
@@ -51,17 +50,13 @@ async def execute_file_delivery(client: Client, chat_id: int, file_id: str):
             caption="✨ **Here is your requested file.**\n\n🛡 *Provided securely by the Auto-Filter System.*"
         )
         
-        # 🔥 RESTORED: AUTO DELETE GHOST MODE LOGIC
         settings = await db.get_settings()
         if settings.get("file_delete_enabled", False):
             delete_time_mins = settings.get("file_delete_time", 10)
             try:
                 from plugins.advanced import trigger_ghost_self_destruct
-                
-                # Delete the actual file
                 trigger_ghost_self_destruct(client, chat_id, sent_file.id, delete_time_mins * 60)
                 
-                # Send and delete the warning message
                 warning_msg = await client.send_message(
                     chat_id, 
                     f"⏳ **Attention:** This file will automatically self-destruct in {delete_time_mins} minutes to protect our servers. Please forward it to your Saved Messages!"
@@ -72,19 +67,14 @@ async def execute_file_delivery(client: Client, chat_id: int, file_id: str):
                 
         return sent_file
     except Exception as send_err:
-        # We raise the error up so the callback handler can catch it if the user hasn't started the bot!
         raise send_err
 
-# -----------------------------------------------------
-# 🔥 HYBRID DIRECT FILE BUTTON LISTENER (PM DELIVERY)
-# -----------------------------------------------------
 @Client.on_callback_query(filters.regex(r"^sendfile_(.+)"))
 async def direct_send_callback(client: Client, callback: CallbackQuery):
     user_id = callback.from_user.id
     chat_id = callback.message.chat.id
     db_id = callback.data.split("_")[1]
 
-    # Verify FSub (Since they bypassed /start)
     is_joined = await check_double_fsub(client, user_id)
     if not is_joined:
         buttons = []
@@ -104,17 +94,13 @@ async def direct_send_callback(client: Client, callback: CallbackQuery):
         return await callback.answer("❌ Error: File not found in database.", show_alert=True)
 
     try:
-        # 🚀 TRY TO SEND FILE DIRECTLY TO THEIR PM
         await execute_file_delivery(client, user_id, file_data.get("file_id"))
-        
-        # Determine if they clicked it in a group vs already in PM
         if callback.message.chat.type.name in ["GROUP", "SUPERGROUP"]:
             await callback.answer("✅ File sent securely to your Private Messages!", show_alert=True)
         else:
             await callback.answer("✅ File retrieved successfully!", show_alert=False)
             
     except (UserIsBlocked, PeerIdInvalid, Exception) as e:
-        # ❌ FAILED: User hasn't started bot, or blocked it.
         bot_me = await client.get_me()
         start_url = f"https://t.me/{bot_me.username}?start=getfile_{db_id}"
         
@@ -123,7 +109,6 @@ async def direct_send_callback(client: Client, callback: CallbackQuery):
             f"I cannot send files to your PM until you start me! Please click the button below to start the bot and receive your file."
         )
         
-        # Send notification in group
         alert_msg = await client.send_message(
             chat_id=chat_id,
             text=error_text,
@@ -131,7 +116,6 @@ async def direct_send_callback(client: Client, callback: CallbackQuery):
         )
         await callback.answer("⚠️ You must start the bot in PM first!", show_alert=True)
         
-        # Auto-delete the alert message after 2 minutes to prevent group spam
         settings = await db.get_settings()
         if settings.get("filter_delete_enabled", False):
             try:
@@ -141,19 +125,15 @@ async def direct_send_callback(client: Client, callback: CallbackQuery):
                 logger.warning("Ghost self destruct failed for alert message.")
 
 
-# -----------------------------------------------------
-# 🔥 RESTORED: DEEP LINK & SHORTENER LOGIC
-# -----------------------------------------------------
 @Client.on_message(filters.command("start") & filters.private, group=1)
 async def deep_link_start(client: Client, message: Message):
     if len(message.command) > 1:
         cmd = message.command[1]
 
-        # 🚀 NEW BULK DELIVERY HANDLER
-        if cmd.startswith("bulk_"):
+        # 🚀 THE NEW HEX BITMASK DECODER FOR BULK FILES
+        if cmd.startswith("blk_"):
             user_id = message.from_user.id
             
-            # Verify Force Sub first
             is_joined = await check_double_fsub(client, user_id)
             if not is_joined:
                 buttons = []
@@ -167,17 +147,38 @@ async def deep_link_start(client: Client, message: Message):
                 
                 return await message.reply_text("🛑 **Lock Warning:**\nYou must join our official channels before downloading bulk files.", reply_markup=InlineKeyboardMarkup(buttons))
 
-            file_ids = cmd.split("bulk_")[1].split("-")
+            parts = cmd.split("_")
+            if len(parts) < 3:
+                return await message.reply_text("❌ **Error:** Invalid bulk request format.")
+                
+            short_id, hex_mask = parts[1], parts[2]
             
-            # Send a status message so they know the bot is working
-            status_msg = await message.reply_text(f"📦 **Queueing {len(file_ids)} files...**\nSending them securely to avoid group spam. Please wait!")
+            # Fetch the files from RAM Cache!
+            if short_id not in BULK_CACHE:
+                return await message.reply_text("⏳ **Session Expired!**\nYour search result has expired to save memory. Please search for the movie again in the group.")
+                
+            cached_time, cached_files = BULK_CACHE[short_id]
+            
+            # Decode the Hexadecimal Bitmask into array indices
+            try:
+                mask = int(hex_mask, 16)
+            except ValueError:
+                return await message.reply_text("❌ **Error:** Invalid file selection mask.")
+                
+            selected_files = []
+            for i, f_data in enumerate(cached_files):
+                if (mask & (1 << i)):
+                    selected_files.append(f_data)
+                    
+            if not selected_files:
+                return await message.reply_text("⚠️ No valid files were selected.")
+            
+            status_msg = await message.reply_text(f"📦 **Queueing {len(selected_files)} files...**\nSending them securely. Please wait!")
             
             successful = 0
-            for db_id in file_ids:
-                if not db_id: continue
-                file_data = await db.get_file(db_id) 
-                if file_data:
-                    await execute_file_delivery(client, user_id, file_data.get("file_id"))
+            for f_data in selected_files:
+                if f_data:
+                    await execute_file_delivery(client, user_id, f_data.get("file_id"))
                     successful += 1
                     # 🛡️ ANTI-SPAM SHIELD: 0.5s delay to prevent Telegram FloodWait limits!
                     await asyncio.sleep(0.5) 
@@ -192,14 +193,12 @@ async def deep_link_start(client: Client, message: Message):
                 token_data = VERIFICATION_TOKENS[token]
                 
                 if token_data["user_id"] == user_id:
-                    # Grant pass for 24 hours
                     pass_expiry = time.time() + (24 * 3600)
                     await db.update_user_setting(user_id, "shortener_pass", pass_expiry)
                     del VERIFICATION_TOKENS[token]
                     
                     await message.reply_text("✅ **Verification Successful!** You have unlimited access for 24 hours.")
                     
-                    # Deliver the pending file automatically after verification
                     pending_file = token_data.get("pending_file")
                     if pending_file:
                         file_data = await db.get_file(pending_file)
@@ -214,7 +213,6 @@ async def deep_link_start(client: Client, message: Message):
             user_id = message.from_user.id
             db_id = cmd.split("_")[1]
             
-            # 1. Verify FSub 
             is_joined = await check_double_fsub(client, user_id)
             if not is_joined:
                 buttons = []
@@ -229,13 +227,11 @@ async def deep_link_start(client: Client, message: Message):
                 buttons.append([InlineKeyboardButton(text="🔄 Request Verification", callback_data=f"retry_getfile_{db_id}")])
                 return await message.reply_text("🛑 **Lock Warning:**\nYou must join our official distribution channels before downloading files.", reply_markup=InlineKeyboardMarkup(buttons))
 
-            # 2. Check Shortener Status
             settings = await db.get_settings()
             if settings.get("shortener_enabled", False):
                 u_sett = await db.get_user_settings(user_id)
                 pass_time = u_sett.get("shortener_pass", 0)
                 
-                # If pass is expired, force shortener
                 if time.time() > pass_time:
                     token = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
                     VERIFICATION_TOKENS[token] = {"user_id": user_id, "pending_file": db_id}
@@ -259,7 +255,6 @@ async def deep_link_start(client: Client, message: Message):
                         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Verify Access", url=short_link)]])
                     )
 
-            # 3. Deliver File (If no shortener or pass is valid)
             file_data = await db.get_file(db_id)
             if not file_data:
                 return await message.reply_text("❌ **Error:** File not found in database or has been deleted.")
