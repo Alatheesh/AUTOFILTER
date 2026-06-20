@@ -193,10 +193,10 @@ async def auto_filter(client: Client, message: Message):
         raw_results = None
 
     if raw_results is None:
-        # 🚀 LIMIT = 0 fetches ALL documents matching the search query!
-        raw_results = await db.search_files(query, skip=0, limit=0, exact=False)
+        # 🚀 FIX: Use 10000 instead of 0 so the database actually fetches the files!
+        raw_results = await db.search_files(query, skip=0, limit=10000, exact=False)
         if not raw_results and " " in query:
-            raw_results = await db.search_files(query.replace(" ", ""), skip=0, limit=0, exact=False)
+            raw_results = await db.search_files(query.replace(" ", ""), skip=0, limit=10000, exact=False)
         QUERY_CACHE[cache_key] = (current_time, raw_results)
 
     min_bytes, max_bytes = SIZE_MAP.get(resolved_size, (0, float('inf')))
