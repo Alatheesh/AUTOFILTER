@@ -265,7 +265,7 @@ async def auto_filter(client: Client, message: Message):
     safe_data = urllib.parse.quote(json.dumps(webapp_data))
     
     # ⚠️ IMPORTANT: Change YOUR_GITHUB_USERNAME to your actual username!
-    web_app_url = f"https://YOUR_GITHUB_USERNAME.github.io/autofilter-web/?bot={client.me.username}&id={short_id}&data={safe_data}"
+    web_app_url = f"https://alatheesh.github.io/FILTERWEB/?bot={client.me.username}&id={short_id}&data={safe_data}"
     
     # Add the Multi-Select Button
     buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)} Max)", web_app=WebAppInfo(url=web_app_url))])
