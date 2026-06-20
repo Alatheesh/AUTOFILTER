@@ -1,15 +1,12 @@
-import subprocess
-import time
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
-web = subprocess.Popen(["python", "web.py"])
-bot = subprocess.Popen(["python", "bot.py"])
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
 
-print("WEB PID:", web.pid)
-print("BOT PID:", bot.pid)
+server = HTTPServer(("0.0.0.0", 7860), Handler)
 
-while True:
-    print(
-        "WEB STATUS:", web.poll(),
-        "BOT STATUS:", bot.poll()
-    )
-    time.sleep(30)
+print("SERVER STARTED")
+server.serve_forever()
