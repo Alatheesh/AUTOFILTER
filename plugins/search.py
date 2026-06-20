@@ -6,6 +6,7 @@ import logging
 import aiohttp
 import json
 import urllib.parse
+import hashlib
 from pyrogram import Client, filters
 from pyrogram.enums import ChatType
 from pyrogram.types import (
@@ -31,14 +32,17 @@ SIZE_MAP = {
     "all": (0, float('inf'))
 }
 
-# --- RAM CACHE & ANTI-SPAM SHIELD ---
+# --- RAM CACHE SYSTEMS ---
 SPAM_TRACKER = {}       
 SPAM_COOLDOWN = 3       
 
 QUERY_CACHE = {}        
 CACHE_TTL = 300         
 
-# --- STICKER PACKS ---
+# 🚀 NEW: BULK DELIVERY CACHE (Stores searches for the Web App)
+BULK_CACHE = {}
+BULK_CACHE_TTL = 1800 # Expires after 30 minutes
+
 SEARCH_STICKERS = [
     "CAACAgIAAxkBAAERau9qNXctqQUyQ4JPHMUlrBCSMmTpRwACvAwAAocoMEntN5GZWCFoBDwE",
     "CAACAgIAAxkBAAERavdqNXraBk9c93sSXemtFwSlSN_RnAAC_iYAAp2TAUsNtzXDZ_a-szwE",
@@ -161,15 +165,13 @@ async def auto_filter(client: Client, message: Message):
         
     user_id = message.from_user.id
     chat_id = message.chat.id
-    
-    # 🛡️ THE ANTI-SPAM SHIELD
     current_time = time.time()
+    
     if user_id in SPAM_TRACKER:
         if current_time - SPAM_TRACKER[user_id] < SPAM_COOLDOWN:
             return 
     SPAM_TRACKER[user_id] = current_time
 
-    # 🎬 --- SEND LOADING ANIMATION ---
     loading_msg = None
     try:
         loading_msg = await message.reply_sticker(random.choice(SEARCH_STICKERS))
@@ -178,14 +180,12 @@ async def auto_filter(client: Client, message: Message):
     chat_type = getattr(message.chat, "type", ChatType.PRIVATE)
     resolved_mode, resolved_lang, resolved_size = await get_filter_settings(user_id, chat_id, chat_type)
 
-    # 🧠 THE RAM CACHE & MONGODB SEARCH
     cache_key = f"{query.lower()}_{resolved_mode}_{resolved_lang}_{resolved_size}"
     
     if cache_key in QUERY_CACHE:
         cached_time, cached_results = QUERY_CACHE[cache_key]
         if current_time - cached_time < CACHE_TTL:
             raw_results = cached_results
-            logger.info(f"⚡ RAM Cache Hit for: {query}")
         else:
             del QUERY_CACHE[cache_key]
             raw_results = None
@@ -210,9 +210,9 @@ async def auto_filter(client: Client, message: Message):
                 continue
         filtered_results.append(f)
 
+    # 10 items for inline buttons
     results = filtered_results[:10]
     
-    # 🗑️ --- DELETE LOADING ANIMATION BEFORE SHOWING RESULTS ---
     if loading_msg:
         try:
             await loading_msg.delete()
@@ -226,7 +226,6 @@ async def auto_filter(client: Client, message: Message):
         for s in suggestions: btn_list.append([InlineKeyboardButton(f"🔍 Search: {s}", callback_data=f"fuz_{s[:50]}")])
         btn_list.append([InlineKeyboardButton("🔔 Request this Movie", callback_data=f"req_{query[:40]}")])
         
-        # 👻 GHOST STICKER FOR FAILED SEARCH
         try:
             await message.reply_sticker(random.choice(GHOST_STICKERS))
         except Exception: pass
@@ -245,20 +244,33 @@ async def auto_filter(client: Client, message: Message):
 
     metadata = await fetch_imdb_tmdb(query)
     buttons = []
-    
     settings = await db.get_settings()
     shortener_on = settings.get("shortener_enabled", False)
 
-    # 🚀 NEW WEB APP INTEGRATION: Generate the safe URL payload
-    webapp_data = [{"i": str(f.get("_id", "")), "t": f.get("title", "Unknown")[:30]} for f in results]
+    # 🚀 NEW: ADVANCED CACHE BITMASK INJECTION (UP TO 60 FILES)
+    # We grab up to 60 files from the entire filtered_results list, not just the 10 shown!
+    web_app_results = filtered_results[:60]
+    short_id = hashlib.md5(f"{user_id}_{query}_{time.time()}".encode()).hexdigest()[:8]
+    
+    # Store the 60 files in RAM securely
+    BULK_CACHE[short_id] = (time.time(), web_app_results)
+    
+    # Cleanup old RAM cache to prevent memory leaks
+    for k in list(BULK_CACHE.keys()):
+        if time.time() - BULK_CACHE[k][0] > BULK_CACHE_TTL:
+            del BULK_CACHE[k]
+
+    # Send ONLY the titles to the Web App to save URL space (Data limits)
+    webapp_data = [f.get("title", "Unknown")[:35] for f in web_app_results]
     safe_data = urllib.parse.quote(json.dumps(webapp_data))
     
-    # ⚠️ CHANGE THIS URL to your actual GitHub Pages URL once you deploy it!
-    web_app_url = f"https://alatheesh.github.io/FILTERWEB/?bot={client.me.username}&data={safe_data}"
+    # ⚠️ IMPORTANT: Change YOUR_GITHUB_USERNAME to your actual username!
+    web_app_url = f"https://YOUR_GITHUB_USERNAME.github.io/autofilter-web/?bot={client.me.username}&id={short_id}&data={safe_data}"
     
-    # Inject the Web App button at the top of the search results
-    buttons.insert(0, [InlineKeyboardButton(text="☑️ Select Multiple Movies", web_app=WebAppInfo(url=web_app_url))])
+    # Add the Multi-Select Button
+    buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)} Max)", web_app=WebAppInfo(url=web_app_url))])
 
+    # Standard file buttons (Top 10)
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
@@ -339,11 +351,15 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     settings = await db.get_settings()
     shortener_on = settings.get("shortener_enabled", False)
 
-    # 🚀 NEW WEB APP INTEGRATION FOR PAGINATION
-    webapp_data = [{"i": str(f.get("_id", "")), "t": f.get("title", "Unknown")[:30]} for f in results]
+    # 🚀 RE-INJECT ADVANCED CACHE FOR PAGINATION SO BUTTON STAYS
+    web_app_results = filtered_results[:60]
+    short_id = hashlib.md5(f"{user_id}_{base_query}_{time.time()}".encode()).hexdigest()[:8]
+    BULK_CACHE[short_id] = (time.time(), web_app_results)
+    webapp_data = [f.get("title", "Unknown")[:35] for f in web_app_results]
     safe_data = urllib.parse.quote(json.dumps(webapp_data))
-    web_app_url = f"https://YOUR_GITHUB_USERNAME.github.io/autofilter-web/?bot={client.me.username}&data={safe_data}"
-    buttons.insert(0, [InlineKeyboardButton(text="☑️ Select Multiple Movies", web_app=WebAppInfo(url=web_app_url))])
+    web_app_url = f"https://YOUR_GITHUB_USERNAME.github.io/autofilter-web/?bot={client.me.username}&id={short_id}&data={safe_data}"
+    
+    buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)} Max)", web_app=WebAppInfo(url=web_app_url))])
 
     for file in results:
         db_id = str(file.get("_id", ""))
