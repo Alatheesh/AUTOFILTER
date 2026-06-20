@@ -3,12 +3,16 @@ import time
 import logging
 import aiohttp
 import json
+import string
+import random
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from database.multi_db import db
 from config import Config
 from plugins.search import BULK_CACHE
-from plugins.monetization import execute_file_delivery
+
+# 🚀 Import the Shortener Logic from the Monetization file!
+from plugins.monetization import VERIFICATION_TOKENS, get_shortlink
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +31,7 @@ async def handle_bulk_delivery(client: Client, message: Message):
         cmd = message.command[1]
         user_id = message.from_user.id
         
+        # 1. Check Force Sub Status
         is_joined = await check_fsub_for_bulk(client, user_id)
         if not is_joined:
             buttons = []
@@ -38,6 +43,39 @@ async def handle_bulk_delivery(client: Client, message: Message):
                 buttons.append([InlineKeyboardButton(text=f"Join Channel #{idx}", url=invite_link)])
             return await message.reply_text("🛑 **Lock Warning:**\nYou must join our official channels before downloading bulk files.", reply_markup=InlineKeyboardMarkup(buttons))
 
+        # 🚀 THE FIX: Check Shortener Verification before allowing any bulk downloads!
+        settings = await db.get_settings()
+        if settings.get("shortener_enabled", False):
+            u_sett = await db.get_user_settings(user_id)
+            pass_time = u_sett.get("shortener_pass", 0)
+            
+            if time.time() > pass_time:
+                token = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
+                
+                # Store token. We use 'None' for pending_file because they will just click Send in the Web App again!
+                VERIFICATION_TOKENS[token] = {"user_id": user_id, "pending_file": None}
+                
+                bot_me = await client.get_me()
+                verify_link = f"https://t.me/{bot_me.username}?start=verify_{token}"
+                
+                api = settings.get("shortener_api", "")
+                site = settings.get("shortener_url", "https://gplinks.in/api")
+                
+                if api:
+                    short_link = await get_shortlink(verify_link, api, site)
+                else:
+                    short_link = verify_link
+                    
+                return await message.reply_text(
+                    "🔒 **Verification Required for Bulk Downloads**\n\n"
+                    "To keep this bot alive, please verify your access. This will grant you **24 Hours of Unlimited Downloads!**\n\n"
+                    f"👉 [Click Here to Verify]({short_link})\n\n"
+                    "*(Once verified, just open your minimized Web App and click Send again!)*",
+                    disable_web_page_preview=True,
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Verify Access", url=short_link)]])
+                )
+
+        # 2. Process the Bulk Request
         parts = cmd.split("_")
         if len(parts) < 3:
             return await message.reply_text("❌ **Error:** Invalid bulk request format.")
@@ -62,7 +100,6 @@ async def handle_bulk_delivery(client: Client, message: Message):
             status_msg = await message.reply_text("☁️ **Fetching your massive selection from the secure cloud...**")
             try:
                 async with aiohttp.ClientSession() as session:
-                    # 🚀 THE FIX: Handles both Npoint (np_) and Dpaste (dp_) fallbacks!
                     if payload.startswith("np_"):
                         np_id = payload.replace("np_", "")
                         async with session.get(f"https://api.npoint.io/{np_id}") as resp:
@@ -80,7 +117,6 @@ async def handle_bulk_delivery(client: Client, message: Message):
                             else:
                                 return await status_msg.edit_text("❌ **Error:** Dpaste fetch failed.")
                     else:
-                        # Legacy support
                         async with session.get(f"https://api.npoint.io/{payload}") as resp:
                             if resp.status == 200:
                                 text_data = await resp.text()
@@ -103,7 +139,6 @@ async def handle_bulk_delivery(client: Client, message: Message):
         
         successful = 0
         sent_message_ids = []
-        settings = await db.get_settings()
         
         for f_data in selected_files:
             if f_data:
