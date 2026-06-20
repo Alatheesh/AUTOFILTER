@@ -1,3 +1,5 @@
+print("START.PY EXECUTED")
+
 import subprocess
 import time
 
