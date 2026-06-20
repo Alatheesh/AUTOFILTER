@@ -8,6 +8,9 @@ from database.multi_db import db
 from config import Config
 from plugins.search import BULK_CACHE
 
+# 🚀 THE FIX: Import the exact same working delivery function that single-files use!
+from plugins.monetization import execute_file_delivery
+
 logger = logging.getLogger(__name__)
 
 async def check_fsub_for_bulk(client: Client, user_id: int) -> bool:
@@ -40,7 +43,7 @@ async def handle_bulk_delivery(client: Client, message: Message):
         if len(parts) < 3:
             return await message.reply_text("❌ **Error:** Invalid bulk request format.")
             
-        req_type = parts[0]  # Will be 'blks' (small) or 'blkc' (cloud)
+        req_type = parts[0]  
         short_id = parts[1]
         payload = parts[2]
         
@@ -50,7 +53,6 @@ async def handle_bulk_delivery(client: Client, message: Message):
         cached_time, cached_files = BULK_CACHE[short_id]
         selected_indices = []
 
-        # 🚀 THE FIX: Hybrid Decoder to guarantee 100% accurate file selections
         if req_type == "blks":
             try:
                 selected_indices = [int(x) for x in payload.split("-") if x.isdigit()]
@@ -80,35 +82,16 @@ async def handle_bulk_delivery(client: Client, message: Message):
         status_msg = await message.reply_text(f"📦 **Processing {len(selected_files)} files...**\nSending them securely to your PM.")
         
         successful = 0
-        sent_message_ids = []
-        settings = await db.get_settings()
         
+        # 🚀 THE FIX: Use execute_file_delivery so Auto-Delete ghost mode is handled perfectly.
         for f_data in selected_files:
             if f_data:
                 try:
-                    sent_file = await client.send_cached_media(
-                        chat_id=user_id, 
-                        file_id=f_data.get("file_id"), 
-                        caption="✨ **Here is your requested file.**\n\n🛡 *Provided securely by the Auto-Filter System.*"
-                    )
-                    sent_message_ids.append(sent_file.id)
+                    await execute_file_delivery(client, user_id, f_data.get("file_id"))
                     successful += 1
                 except Exception as e:
                     logger.error(f"Bulk send error: {e}")
                 
                 await asyncio.sleep(0.5) 
                 
-        if settings.get("file_delete_enabled", False):
-            del_time = settings.get("file_delete_time", 10)
-            summary_msg = await message.reply_text(
-                f"✅ **Successfully delivered {successful} files!**\n\n"
-                f"⏳ **Caution:** All {successful} files will be automatically deleted in **{del_time} minutes** to protect our servers. Please forward them to your Saved Messages!"
-            )
-            try:
-                from plugins.advanced import trigger_ghost_self_destruct
-                for m_id in sent_message_ids:
-                    trigger_ghost_self_destruct(client, user_id, m_id, del_time * 60)
-                trigger_ghost_self_destruct(client, user_id, summary_msg.id, del_time * 60)
-            except Exception as e: pass
-        else:
-            await message.reply_text(f"✅ **Successfully delivered {successful} files directly to you!**")
+        await status_msg.edit_text(f"✅ **Successfully delivered {successful} files directly to your PM!**")
