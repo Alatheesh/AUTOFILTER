@@ -254,7 +254,7 @@ async def auto_filter(client: Client, message: Message):
     safe_data = urllib.parse.quote(json.dumps(webapp_data))
     
     # ⚠️ CHANGE THIS URL to your actual GitHub Pages URL once you deploy it!
-    web_app_url = f"https://github.com/Alatheesh/FILTERWEB/?bot={client.me.username}&data={safe_data}"
+    web_app_url = f"https://alatheesh.github.io/FILTERWEB/?bot={client.me.username}&data={safe_data}"
     
     # Inject the Web App button at the top of the search results
     buttons.insert(0, [InlineKeyboardButton(text="☑️ Select Multiple Movies", web_app=WebAppInfo(url=web_app_url))])
