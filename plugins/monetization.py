@@ -3,6 +3,7 @@ import time
 import string
 import random
 import aiohttp
+import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import UserIsBlocked, PeerIdInvalid
@@ -147,6 +148,41 @@ async def direct_send_callback(client: Client, callback: CallbackQuery):
 async def deep_link_start(client: Client, message: Message):
     if len(message.command) > 1:
         cmd = message.command[1]
+
+        # 🚀 NEW BULK DELIVERY HANDLER
+        if cmd.startswith("bulk_"):
+            user_id = message.from_user.id
+            
+            # Verify Force Sub first
+            is_joined = await check_double_fsub(client, user_id)
+            if not is_joined:
+                buttons = []
+                for idx, channel in enumerate(Config.FSUB_CHANNELS[:2], start=1):
+                    try:
+                        chat = await client.get_chat(channel)
+                        invite_link = chat.invite_link if chat.invite_link else await client.export_chat_invite_link(channel)
+                    except Exception: 
+                        invite_link = "https://t.me/telegram"
+                    buttons.append([InlineKeyboardButton(text=f"Join Channel #{idx}", url=invite_link)])
+                
+                return await message.reply_text("🛑 **Lock Warning:**\nYou must join our official channels before downloading bulk files.", reply_markup=InlineKeyboardMarkup(buttons))
+
+            file_ids = cmd.split("bulk_")[1].split("-")
+            
+            # Send a status message so they know the bot is working
+            status_msg = await message.reply_text(f"📦 **Queueing {len(file_ids)} files...**\nSending them securely to avoid group spam. Please wait!")
+            
+            successful = 0
+            for db_id in file_ids:
+                if not db_id: continue
+                file_data = await db.get_file(db_id) 
+                if file_data:
+                    await execute_file_delivery(client, user_id, file_data.get("file_id"))
+                    successful += 1
+                    # 🛡️ ANTI-SPAM SHIELD: 0.5s delay to prevent Telegram FloodWait limits!
+                    await asyncio.sleep(0.5) 
+                    
+            return await status_msg.edit_text(f"✅ **Successfully delivered {successful} files directly to you!**")
         
         # --- TOKEN VERIFICATION (Returning from Shortener) ---
         if cmd.startswith("verify_"):
