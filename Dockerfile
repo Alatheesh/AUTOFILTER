@@ -5,5 +5,5 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 EXPOSE 7860
-
+RUN echo "BUILD TEST 123456"
 CMD ["python", "start.py"]
