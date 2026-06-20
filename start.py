@@ -1,19 +1,8 @@
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import os
+import subprocess
+import time
 
-PORT = int(os.environ.get("PORT", 7860))
+web = subprocess.Popen(["python", "web.py"])
+bot = subprocess.Popen(["python", "bot.py"])
 
-print("PORT ENV =", os.environ.get("PORT"), flush=True)
-print("USING PORT =", PORT, flush=True)
-
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
-
-server = HTTPServer(("0.0.0.0", PORT), Handler)
-
-print("SERVER STARTED", flush=True)
-
-server.serve_forever()
+while True:
+    time.sleep(60)
