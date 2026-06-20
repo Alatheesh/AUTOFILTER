@@ -19,20 +19,23 @@ if not Config.BOT_TOKEN or not Config.API_ID or not Config.API_HASH:
     logger.error("Missing essential configuration attributes.")
     exit(1)
 
-# THE FIX: Added workers=100 to handle message floods and prevent freezing!
-# Pyrogram will now create a file called "AutoFilterBot_V3.session" to permanently store Access Hashes!
 app = Client(
     "AutoFilterBot_V3", 
     api_id=Config.API_ID,
     api_hash=Config.API_HASH,
     bot_token=Config.BOT_TOKEN,
     plugins=dict(root="plugins"),
-    workers=100  # <--- ADDED THIS EXACT LINE
+    workers=100  
 )
 
 async def web_server():
     async def handle_request(request):
-        return web.Response(text="Bot is running smoothly!", content_type='text/html')
+        # 🚀 UPDATE: Serve the actual HTML website file!
+        try:
+            return web.FileResponse('./web/index.html')
+        except Exception:
+            # Fallback just in case the folder isn't found
+            return web.Response(text="Bot is running, but website file is missing!", content_type='text/html')
 
     web_app = web.Application()
     web_app.router.add_get('/', handle_request)
@@ -66,7 +69,7 @@ async def main():
                 try:
                     await app.send_message(
                         chat_id=admin,
-                        text=f"🚀 **System Alert:**\n\n{me.first_name} (`@{me.username}`) has successfully started on Hugging Face!\n⚙️ Background Workers Active."
+                        text=f"🚀 **System Alert:**\n\n{me.first_name} (`@{me.username}`) has successfully started!\n⚙️ Website and Background Workers are Active."
                     )
                 except Exception as e:
                     logger.warning(f"⚠️ Could not send startup ping to Admin {admin}. Error: {e}")
@@ -83,3 +86,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
