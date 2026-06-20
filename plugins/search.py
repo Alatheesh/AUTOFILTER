@@ -123,19 +123,20 @@ def format_size(size_bytes):
     s = round(size_bytes / p, 2)
     return f"{s} {size_name[i]}"
 
-# 🚀 THE LIMIT BREAKER: Uploads the massive movie list to the cloud
 async def upload_json_payload(data_list):
+    # 🚀 THE FIX: Increased timeouts to 8 seconds to prevent Hugging Face network lag from failing the upload
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post("https://api.npoint.io/", json=data_list, timeout=4) as resp:
+            async with session.post("https://api.npoint.io/", json=data_list, timeout=8) as resp:
                 if resp.status == 200:
                     res = await resp.json()
                     return f"https://api.npoint.io/{res['id']}"
-    except Exception: pass
+    except Exception as e: 
+        logger.error(f"Npoint Cloud Upload Failed: {e}")
     
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get("https://api.telegra.ph/createAccount?short_name=AutoFilter", timeout=4) as resp:
+            async with session.get("https://api.telegra.ph/createAccount?short_name=AutoFilter", timeout=8) as resp:
                 token = (await resp.json())["result"]["access_token"]
             
             json_str = json.dumps(data_list)
@@ -143,10 +144,12 @@ async def upload_json_payload(data_list):
             content = [{"tag": "p", "children": [chunk]} for chunk in chunks]
             
             req_data = {"access_token": token, "title": "Data", "content": json.dumps(content)}
-            async with session.post("https://api.telegra.ph/createPage", data=req_data, timeout=4) as resp:
+            async with session.post("https://api.telegra.ph/createPage", data=req_data, timeout=8) as resp:
                 path = (await resp.json())["result"]["path"]
                 return f"https://api.telegra.ph/getPage/{path}?return_content=true"
-    except Exception: pass
+    except Exception as e: 
+        logger.error(f"Telegraph Cloud Upload Failed: {e}")
+        
     return None
 
 @Client.on_message((filters.group | filters.private) & filters.text & ~filters.command(["start", "help", "about", "source", "settings", "request", "plot", "history", "clear_history", "broadcast", "stats", "backup", "admin", "index", "batch", "migrate_db", "clear_job", "optimize_db", "connect", "disconnect"]))
@@ -214,8 +217,8 @@ async def auto_filter(client: Client, message: Message):
     shortener_on = settings.get("shortener_enabled", False)
 
     if settings.get("bulk_enabled", True):
-        # 🚀 ALL FILES are passed to the Web App!
-        web_app_results = filtered_results 
+        # 🚀 THE FIX: Cap the cloud payload to a maximum of 500 movies (50 pages) to ensure it successfully uploads!
+        web_app_results = filtered_results[:500] 
         short_id = hashlib.md5(f"{user_id}_{query}_{time.time()}".encode()).hexdigest()[:8]
         
         BULK_CACHE[short_id] = (time.time(), web_app_results)
@@ -224,13 +227,15 @@ async def auto_filter(client: Client, message: Message):
 
         webapp_data = [f"{f.get('title', 'Unknown')}|{format_size(f.get('size', 0))}" for f in web_app_results]
         
-        # Hand off the heavy lifting to the Cloud!
         data_url = await upload_json_payload(webapp_data)
         
+        # If data_url successfully generated, attach the button!
         if data_url:
             safe_url = urllib.parse.quote(data_url)
             web_app_url = f"{Config.BULK_LINK}?bot={client.me.username}&id={short_id}&url={safe_url}"
             buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)})", web_app=WebAppInfo(url=web_app_url))])
+        else:
+            logger.error("Skipped drawing Bulk Delivery button because Cloud Upload failed completely.")
 
     for file in results:
         db_id = str(file.get("_id", ""))
@@ -248,9 +253,21 @@ async def auto_filter(client: Client, message: Message):
             InlineKeyboardButton(text="Next ▶️", callback_data=f"next_1_{query}")
         ])
     
+    filter_notice = ""
+    if resolved_mode == "interactive" and (resolved_lang != "all" or resolved_size != "all"):
+        filter_notice = f"\n✨ **Filters Applied:** Size: `{resolved_size.upper()}` | Audio: `{resolved_lang.upper()}`"
+
+    if settings.get("filter_delete_enabled", False):
+        m_time = settings.get("filter_delete_time", 5)
+        filter_notice += f"\n\n⏳ *Note: This search result will automatically delete in {m_time} minutes.*"
+
+    pm_notice = ""
+    if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        pm_notice = "\n\n*(Click a file to receive it securely in your Private Messages)*"
+
     caption = (
         f"🎬 **{metadata['title']}**\n⭐️ Rating: `{metadata['rating']}`\n🎭 Genre: `{metadata['genre']}`\n\n"
-        f"📝 **Plot:** {metadata['plot']}\n\n🔍 Found {len(filtered_results)} matching files."
+        f"📝 **Plot:** {metadata['plot']}\n\n🔍 Found {len(filtered_results)} matching files.{filter_notice}{pm_notice}"
     )
     
     try: msg = await message.reply_photo(photo=metadata["poster"], caption=caption, reply_markup=InlineKeyboardMarkup(buttons), reply_parameters=ReplyParameters(message_id=message.id))
@@ -290,7 +307,8 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     shortener_on = settings.get("shortener_enabled", False)
 
     if settings.get("bulk_enabled", True):
-        web_app_results = filtered_results 
+        # 🚀 THE FIX: Cap the cloud payload to 500 movies during pagination as well!
+        web_app_results = filtered_results[:500] 
         short_id = hashlib.md5(f"{user_id}_{base_query}_{time.time()}".encode()).hexdigest()[:8]
         BULK_CACHE[short_id] = (time.time(), web_app_results)
         
