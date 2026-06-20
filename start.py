@@ -1,8 +1,15 @@
 import subprocess
-
-subprocess.Popen(["python", "web.py"])
-subprocess.Popen(["python", "bot.py"])
-
 import time
+
+web = subprocess.Popen(["python", "web.py"])
+bot = subprocess.Popen(["python", "bot.py"])
+
+print("WEB PID:", web.pid)
+print("BOT PID:", bot.pid)
+
 while True:
-    time.sleep(60)
+    print(
+        "WEB STATUS:", web.poll(),
+        "BOT STATUS:", bot.poll()
+    )
+    time.sleep(30)
