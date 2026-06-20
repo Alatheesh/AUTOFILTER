@@ -1,6 +1,7 @@
 import asyncio
 import logging
-from aiohttp import web
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pyrogram import Client, idle
 from pyrogram.errors import ApiIdInvalid, ApiIdPublishedFlood, AccessTokenInvalid
 from config import Config
@@ -19,44 +20,35 @@ if not Config.BOT_TOKEN or not Config.API_ID or not Config.API_HASH:
     logger.error("Missing essential configuration attributes.")
     exit(1)
 
-# THE FIX: Added workers=100 to handle message floods and prevent freezing!
-# Pyrogram will now create a file called "AutoFilterBot_V3.session" to permanently store Access Hashes!
 app = Client(
     "AutoFilterBot_V3", 
     api_id=Config.API_ID,
     api_hash=Config.API_HASH,
     bot_token=Config.BOT_TOKEN,
     plugins=dict(root="plugins"),
-    workers=100  # <--- ADDED THIS EXACT LINE
+    workers=100
 )
 
-async def web_server():
-    async def handle_request(request):
-        return web.Response(text="Bot is running smoothly!", content_type='text/html')
+# 🚀 THE FIX: A dedicated, independent HTTP Server just for Hugging Face
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/html")
+        self.end_headers()
+        self.wfile.write(b"Bot is running smoothly on Hugging Face!")
+    
+    # Disable terminal logging so it doesn't spam your logs
+    def log_message(self, format, *args):
+        pass
 
-    web_app = web.Application()
-    web_app.router.add_get('/', handle_request)
-    
-    # Adding a specific health endpoint for Hugging Face
-    web_app.router.add_get('/health', handle_request)
-    
-    runner = web.AppRunner(web_app)
-    await runner.setup()
-    
-    # 🚀 THE FIX: Hardcoding 7860 here so Hugging Face environment variables CANNOT override it!
-    site = web.TCPSite(runner, '0.0.0.0', 7860)
-    await site.start()
-    logger.info("Aiohttp web server FORCE started on port 7860")
-
-    # 🚀 THE FINAL FIX: Keep the web server awake forever!
-    # Without this, Python silently shuts the port down right after it opens.
-    await asyncio.Event().wait()
+def start_web_server():
+    server_address = ('0.0.0.0', 7860)
+    httpd = HTTPServer(server_address, HealthCheckHandler)
+    logger.info("Built-in Threaded HTTP server started on port 7860")
+    httpd.serve_forever()
 
 async def main():
     logger.info("Initializing multi-DB connections and starting bot...")
-    
-    # Start the web server as a background task
-    asyncio.create_task(web_server())
 
     try:
         await app.start()
@@ -93,4 +85,7 @@ async def main():
             await app.stop()
 
 if __name__ == "__main__":
+    # Start the web server in an independent background thread before anything else
+    threading.Thread(target=start_web_server, daemon=True).start()
     asyncio.run(main())
+    
