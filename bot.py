@@ -1,7 +1,6 @@
 import asyncio
 import logging
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from aiohttp import web
 from pyrogram import Client, idle
 from pyrogram.errors import ApiIdInvalid, ApiIdPublishedFlood, AccessTokenInvalid
 from config import Config
@@ -20,35 +19,33 @@ if not Config.BOT_TOKEN or not Config.API_ID or not Config.API_HASH:
     logger.error("Missing essential configuration attributes.")
     exit(1)
 
+# THE FIX: Added workers=100 to handle message floods and prevent freezing!
+# Pyrogram will now create a file called "AutoFilterBot_V3.session" to permanently store Access Hashes!
 app = Client(
     "AutoFilterBot_V3", 
     api_id=Config.API_ID,
     api_hash=Config.API_HASH,
     bot_token=Config.BOT_TOKEN,
     plugins=dict(root="plugins"),
-    workers=100
+    workers=100  # <--- ADDED THIS EXACT LINE
 )
 
-# 🚀 THE FIX: A dedicated, independent HTTP Server just for Hugging Face
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/html")
-        self.end_headers()
-        self.wfile.write(b"Bot is running smoothly on Hugging Face!")
-    
-    # Disable terminal logging so it doesn't spam your logs
-    def log_message(self, format, *args):
-        pass
+async def web_server():
+    async def handle_request(request):
+        return web.Response(text="Bot is running smoothly!", content_type='text/html')
 
-def start_web_server():
-    server_address = ('0.0.0.0', 7860)
-    httpd = HTTPServer(server_address, HealthCheckHandler)
-    logger.info("Built-in Threaded HTTP server started on port 7860")
-    httpd.serve_forever()
+    web_app = web.Application()
+    web_app.router.add_get('/', handle_request)
+    
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', Config.PORT)
+    await site.start()
+    logger.info(f"Aiohttp web server started on port {Config.PORT}")
 
 async def main():
     logger.info("Initializing multi-DB connections and starting bot...")
+    asyncio.create_task(web_server())
 
     try:
         await app.start()
@@ -85,7 +82,4 @@ async def main():
             await app.stop()
 
 if __name__ == "__main__":
-    # Start the web server in an independent background thread before anything else
-    threading.Thread(target=start_web_server, daemon=True).start()
     asyncio.run(main())
-    
