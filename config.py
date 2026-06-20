@@ -23,6 +23,9 @@ class Config(object):
     PREMIUM_TIER: bool = os.environ.get("PREMIUM_TIER", "False").lower() == "true"
     MAX_RESULTS: int = int(os.environ.get("MAX_RESULTS", "50"))
     
+    # 🚀 NEW: Web App Link Configuration
+    BULK_LINK: str = os.environ.get("BULK_LINK", "https://YOUR_GITHUB_USERNAME.github.io/autofilter-web/")
+    
     # Ghost mode parameter (Auto-delete links)
     GHOST_MODE_EXPIRY: int = int(os.environ.get("GHOST_MODE_EXPIRY", "86400")) # Default 24 hours
 
