@@ -1,12 +1,11 @@
-import subprocess
-import time
+from threading import Thread
+from web import app
+import os
 
-print("START.PY EXECUTED")
+def run_web():
+    port = int(os.environ.get("PORT", 7860))
+    app.run(host="0.0.0.0", port=port)
 
-web = subprocess.Popen(["python", "web.py"])
+Thread(target=run_web, daemon=True).start()
 
-bot = subprocess.Popen(["python", "bot.py"])
-
-while True:
-    print(f"WEB={web.poll()} BOT={bot.poll()}")
-    time.sleep(30)
+import bot
