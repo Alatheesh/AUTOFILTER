@@ -48,8 +48,14 @@ async def web_server():
     await site.start()
     logger.info("Aiohttp web server FORCE started on port 7860")
 
+    # 🚀 THE FINAL FIX: Keep the web server awake forever!
+    # Without this, Python silently shuts the port down right after it opens.
+    await asyncio.Event().wait()
+
 async def main():
     logger.info("Initializing multi-DB connections and starting bot...")
+    
+    # Start the web server as a background task
     asyncio.create_task(web_server())
 
     try:
