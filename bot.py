@@ -1,6 +1,7 @@
 import asyncio
 import logging
-from aiohttp import web
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pyrogram import Client, idle
 from pyrogram.errors import ApiIdInvalid, ApiIdPublishedFlood, AccessTokenInvalid
 from config import Config
@@ -25,30 +26,34 @@ app = Client(
     api_hash=Config.API_HASH,
     bot_token=Config.BOT_TOKEN,
     plugins=dict(root="plugins"),
-    workers=100  
+    workers=100
 )
 
-async def web_server():
-    async def handle_request(request):
-        # 🚀 UPDATE: Serve the actual HTML website file!
+# 🚀 THE 100% FIX: Independent Web Server serving the HTML file
+class WebsiteHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/html")
+        self.end_headers()
         try:
-            return web.FileResponse('./web/index.html')
+            # Serve the beautiful website we just created!
+            with open('./web/index.html', 'rb') as file:
+                self.wfile.write(file.read())
         except Exception:
-            # Fallback just in case the folder isn't found
-            return web.Response(text="Bot is running, but website file is missing!", content_type='text/html')
-
-    web_app = web.Application()
-    web_app.router.add_get('/', handle_request)
+            self.wfile.write(b"Bot is running, but the web/index.html file is missing!")
     
-    runner = web.AppRunner(web_app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', Config.PORT)
-    await site.start()
-    logger.info(f"Aiohttp web server started on port {Config.PORT}")
+    # Disable terminal logging so it doesn't spam your logs
+    def log_message(self, format, *args):
+        pass
+
+def start_web_server():
+    server_address = ('0.0.0.0', Config.PORT)
+    httpd = HTTPServer(server_address, WebsiteHandler)
+    logger.info(f"Threaded Website server started on port {Config.PORT}")
+    httpd.serve_forever()
 
 async def main():
     logger.info("Initializing multi-DB connections and starting bot...")
-    asyncio.create_task(web_server())
 
     try:
         await app.start()
@@ -69,7 +74,7 @@ async def main():
                 try:
                     await app.send_message(
                         chat_id=admin,
-                        text=f"🚀 **System Alert:**\n\n{me.first_name} (`@{me.username}`) has successfully started!\n⚙️ Website and Background Workers are Active."
+                        text=f"🚀 **System Alert:**\n\n{me.first_name} (`@{me.username}`) has successfully started!\n⚙️ Website and Workers Active."
                     )
                 except Exception as e:
                     logger.warning(f"⚠️ Could not send startup ping to Admin {admin}. Error: {e}")
@@ -85,5 +90,6 @@ async def main():
             await app.stop()
 
 if __name__ == "__main__":
+    # Start the website server in an independent thread before the bot starts
+    threading.Thread(target=start_web_server, daemon=True).start()
     asyncio.run(main())
-    
