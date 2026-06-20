@@ -7,6 +7,10 @@ app = Flask(__name__)
 def home():
     return "Bot Running"
 
-port = int(os.environ.get("PORT", 7860))
+@app.route("/health")
+def health():
+    return "ok", 200
 
-app.run(host="0.0.0.0", port=port)
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 7860))
+    app.run(host="0.0.0.0", port=port)
