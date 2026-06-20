@@ -96,7 +96,7 @@ async def send_settings_home(message_or_query):
         [InlineKeyboardButton("🔗 Shortener Settings", callback_data="set_shortener")],
         [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests")],
         [InlineKeyboardButton("🕵️‍♂️ Inside Settings", callback_data="set_inside")], 
-        [InlineKeyboardButton("🗑 Auto-Delete Filters", callback_data="set_autodelete")],
+        [InlineKeyboardButton("⚙️ Filter & Bulk Settings", callback_data="set_filters")], 
         [InlineKeyboardButton("🔙 Exit", callback_data="tier_root_fallback")]
     ]
 
@@ -110,7 +110,7 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
     action = callback.data
     user_id = callback.from_user.id
 
-    if action in ["set_home", "set_inside", "set_shortener", "set_requests", "set_autodelete"]:
+    if action in ["set_home", "set_inside", "set_shortener", "set_requests", "set_filters"]:
         if user_id in ADMIN_STATE:
             del ADMIN_STATE[user_id]
 
@@ -259,22 +259,24 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         callback.data = "set_requests"
         await settings_callbacks(client, callback)
 
-    elif action == "set_autodelete":
+    elif action == "set_filters":
         settings = await db.get_settings()
         f_status = "🟢 ON" if settings.get("file_delete_enabled", False) else "🔴 OFF"
         m_status = "🟢 ON" if settings.get("filter_delete_enabled", False) else "🔴 OFF"
+        b_status = "🟢 ON" if settings.get("bulk_enabled", True) else "🔴 OFF"
         f_time = settings.get("file_delete_time", 10)
         m_time = settings.get("filter_delete_time", 5)
 
         text = (
-            f"🗑 **Auto-Delete (Ghost Mode) Settings**\n\n"
+            f"⚙️ **Filter & Bulk Delivery Settings**\n\n"
+            f"📦 **Bulk Web App Delivery:** {b_status}\n"
+            f"*Shows the 'Select Multiple Movies' button.*\n\n"
+            f"🗑 **Auto-Delete (Ghost Mode):**\n"
             f"📂 **File Deletion:** {f_status} `({f_time} mins)`\n"
-            f"*Deletes actual movie files after delivery.*\n\n"
-            f"🔍 **Search Filter Deletion:** {m_status} `({m_time} mins)`\n"
-            f"*Deletes movie search result messages.*\n\n"
-            f"*(Note: Timers over 1440 mins/24 hrs may be interrupted by server restarts).* "
+            f"🔍 **Search Filter Deletion:** {m_status} `({m_time} mins)`"
         )
         buttons = [
+            [InlineKeyboardButton(f"Toggle Bulk Delivery: {b_status}", callback_data="toggle_bulk_del")],
             [
                 InlineKeyboardButton(f"Files: {f_status}", callback_data="toggle_file_del"),
                 InlineKeyboardButton(f"Filters: {m_status}", callback_data="toggle_filter_del")
@@ -287,25 +289,31 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         ]
         await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
+    elif action == "toggle_bulk_del":
+        settings = await db.get_settings()
+        await db.update_settings({"bulk_enabled": not settings.get("bulk_enabled", True)})
+        callback.data = "set_filters"
+        await settings_callbacks(client, callback)
+
     elif action == "toggle_file_del":
         settings = await db.get_settings()
         await db.update_settings({"file_delete_enabled": not settings.get("file_delete_enabled", False)})
-        callback.data = "set_autodelete"
+        callback.data = "set_filters"
         await settings_callbacks(client, callback)
 
     elif action == "toggle_filter_del":
         settings = await db.get_settings()
         await db.update_settings({"filter_delete_enabled": not settings.get("filter_delete_enabled", False)})
-        callback.data = "set_autodelete"
+        callback.data = "set_filters"
         await settings_callbacks(client, callback)
 
     elif action == "time_file_del":
         ADMIN_STATE[user_id] = "setup_file_time"
-        await callback.message.edit_text("✏️ **Send the File Auto-Delete time in MINUTES.**\n(e.g., `30` for 30 minutes).", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_autodelete")]]))
+        await callback.message.edit_text("✏️ **Send the File Auto-Delete time in MINUTES.**\n(e.g., `30` for 30 minutes).", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_filters")]]))
 
     elif action == "time_filter_del":
         ADMIN_STATE[user_id] = "setup_filter_time"
-        await callback.message.edit_text("✏️ **Send the Search Result Auto-Delete time in MINUTES.**\n(e.g., `5` for 5 minutes).", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_autodelete")]]))
+        await callback.message.edit_text("✏️ **Send the Search Result Auto-Delete time in MINUTES.**\n(e.g., `5` for 5 minutes).", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_filters")]]))
 
 
 async def process_broadcast_queue(client: Client):
@@ -442,7 +450,7 @@ async def get_worker2_text_and_buttons():
     db_stats = await db.global_stats()
     total_files = db_stats.get('total_files', 0)
     indexed_meta = db_stats.get('indexed_metadata', 0)
-    corrupted_files = db_stats.get('corrupted_files', 0)  # <--- WE READ THE NEW STAT HERE
+    corrupted_files = db_stats.get('corrupted_files', 0)  
     pending_meta = total_files - indexed_meta
 
     meta_eta_seconds = pending_meta * 5.5 
@@ -453,7 +461,7 @@ async def get_worker2_text_and_buttons():
         f"⚙️ **WORKER 2: Language & Metadata Extraction**\n"
         f"🔄 **Status:** `Processing Database Shards...`\n\n"
         f"• **Extracted Files:** `{indexed_meta:,}` / `{total_files:,}`\n"
-        f"• **Corrupted / Skipped:** `{corrupted_files:,}` files\n" # <--- ADDED IT TO THE DISPLAY
+        f"• **Corrupted / Skipped:** `{corrupted_files:,}` files\n" 
         f"• **Current Progress:** `{meta_pct:.1f}%` complete\n"
         f"• **Pending Migration Queue:** `{pending_meta:,}` files left\n"
         f"• **Estimated Completion Time (ETA):** `{meta_eta_string}`\n\n"
