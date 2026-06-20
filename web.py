@@ -1,13 +1,12 @@
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from flask import Flask
 import os
 
-PORT = int(os.environ.get("PORT", 7860))
+app = Flask(__name__)
 
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
+@app.route("/")
+def home():
+    return "Bot Running"
 
-server = HTTPServer(("0.0.0.0", PORT), HealthCheckHandler)
-server.serve_forever()
+port = int(os.environ.get("PORT", 7860))
+
+app.run(host="0.0.0.0", port=port)
