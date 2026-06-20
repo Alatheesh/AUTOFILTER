@@ -8,9 +8,6 @@ from database.multi_db import db
 from config import Config
 from plugins.search import BULK_CACHE
 
-# 🚀 THE FIX: Import the exact same working delivery function that single-files use!
-from plugins.monetization import execute_file_delivery
-
 logger = logging.getLogger(__name__)
 
 async def check_fsub_for_bulk(client: Client, user_id: int) -> bool:
@@ -82,16 +79,41 @@ async def handle_bulk_delivery(client: Client, message: Message):
         status_msg = await message.reply_text(f"📦 **Processing {len(selected_files)} files...**\nSending them securely to your PM.")
         
         successful = 0
+        sent_message_ids = []
+        settings = await db.get_settings()
         
-        # 🚀 THE FIX: Use execute_file_delivery so Auto-Delete ghost mode is handled perfectly.
+        # 🚀 THE FIX: Send just the files smoothly, without triggering the single-file spam message!
         for f_data in selected_files:
             if f_data:
                 try:
-                    await execute_file_delivery(client, user_id, f_data.get("file_id"))
+                    sent_file = await client.send_cached_media(
+                        chat_id=user_id, 
+                        file_id=f_data.get("file_id"), 
+                        caption="✨ **Here is your requested file.**\n\n🛡 *Provided securely by the Auto-Filter System.*"
+                    )
+                    sent_message_ids.append(sent_file.id)
                     successful += 1
                 except Exception as e:
                     logger.error(f"Bulk send error: {e}")
                 
                 await asyncio.sleep(0.5) 
                 
-        await status_msg.edit_text(f"✅ **Successfully delivered {successful} files directly to your PM!**")
+        # 🚀 THE FIX: One single summary deletion caution at the very end!
+        await status_msg.delete()
+        if settings.get("file_delete_enabled", False):
+            del_time = settings.get("file_delete_time", 10)
+            summary_msg = await message.reply_text(
+                f"✅ **Successfully delivered {successful} files!**\n\n"
+                f"⏳ **Caution:** All {successful} files will be automatically deleted in **{del_time} minutes** to protect our servers. Please forward them to your Saved Messages!"
+            )
+            try:
+                from plugins.advanced import trigger_ghost_self_destruct
+                # Set deletion timer for all files at once
+                for m_id in sent_message_ids:
+                    trigger_ghost_self_destruct(client, user_id, m_id, del_time * 60)
+                # Set deletion timer for the summary message
+                trigger_ghost_self_destruct(client, user_id, summary_msg.id, del_time * 60)
+            except Exception as e:
+                logger.error(f"Bulk Ghost Destruct Error: {e}")
+        else:
+            await message.reply_text(f"✅ **Successfully delivered {successful} files directly to your PM!**")
