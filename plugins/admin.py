@@ -438,11 +438,11 @@ async def get_worker1_text_and_buttons():
     ]
     return text, InlineKeyboardMarkup(buttons)
 
-
 async def get_worker2_text_and_buttons():
     db_stats = await db.global_stats()
     total_files = db_stats.get('total_files', 0)
     indexed_meta = db_stats.get('indexed_metadata', 0)
+    corrupted_files = db_stats.get('corrupted_files', 0)  # <--- WE READ THE NEW STAT HERE
     pending_meta = total_files - indexed_meta
 
     meta_eta_seconds = pending_meta * 5.5 
@@ -453,6 +453,7 @@ async def get_worker2_text_and_buttons():
         f"⚙️ **WORKER 2: Language & Metadata Extraction**\n"
         f"🔄 **Status:** `Processing Database Shards...`\n\n"
         f"• **Extracted Files:** `{indexed_meta:,}` / `{total_files:,}`\n"
+        f"• **Corrupted / Skipped:** `{corrupted_files:,}` files\n" # <--- ADDED IT TO THE DISPLAY
         f"• **Current Progress:** `{meta_pct:.1f}%` complete\n"
         f"• **Pending Migration Queue:** `{pending_meta:,}` files left\n"
         f"• **Estimated Completion Time (ETA):** `{meta_eta_string}`\n\n"
