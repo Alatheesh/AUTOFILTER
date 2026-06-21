@@ -49,26 +49,6 @@ async def admin_input_catcher(client: Client, message: Message):
         del ADMIN_STATE[user_id]
         await message.reply_text(f"✅ **Channels Saved!**\n`{channels}`\nType `/admin` to view dashboard.")
 
-    elif state == "setup_shortener_url":
-        await db.update_settings({"shortener_url": user_input})
-        ADMIN_STATE[user_id] = "setup_shortener_api"
-        await message.reply_text("✅ **URL Saved!**\n\nNow, please send me your secret **API Key** for this shortener.")
-
-    elif state == "setup_shortener_api":
-        await db.update_settings({"shortener_api": user_input, "shortener_enabled": True})
-        del ADMIN_STATE[user_id]
-        await message.reply_text("✅ **Success!** API Key saved and Shortener is now **🟢 ON**.\nType `/admin` to view.")
-
-    elif state == "waiting_for_api":
-        await db.update_settings({"shortener_api": user_input})
-        del ADMIN_STATE[user_id]
-        await message.reply_text("✅ **Success!** API Key updated in the database.\nType `/admin` to view.")
-
-    elif state == "waiting_for_url":
-        await db.update_settings({"shortener_url": user_input})
-        del ADMIN_STATE[user_id]
-        await message.reply_text("✅ **Success!** Shortener Link updated in the database.\nType `/admin` to view.")
-
     elif state == "setup_file_time":
         if user_input.isdigit():
             await db.update_settings({"file_delete_time": int(user_input)})
@@ -195,13 +175,12 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         text = (
             f"🔗 **Shortener Configurations**\n\n"
             f"**Status:** {status}\n"
-            f"**Current URL:** `{url}`\n"
-            f"**Current API:** `{api}`"
+            f"**Current URL Template:** `{url}`\n"
+            f"**Current API Key:** `{api}`"
         )
         buttons = [
             [InlineKeyboardButton(f"Toggle Shortener {'OFF' if 'ON' in status else 'ON'}", callback_data="set_toggle")],
-            [InlineKeyboardButton("✏️ Change API Key", callback_data="set_api")],
-            [InlineKeyboardButton("✏️ Change Link", callback_data="set_url")],
+            [InlineKeyboardButton("⚙️ Configure API & Link", callback_data="set_api_url_help")],
             [InlineKeyboardButton("🔙 Back", callback_data="set_home")]
         ]
         await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
@@ -215,26 +194,14 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
             callback.data = "set_shortener"
             await settings_callbacks(client, callback)
         else:
-            ADMIN_STATE[user_id] = "setup_shortener_url"
-            await callback.message.edit_text(
-                "🛠 **Shortener Setup Wizard**\n\n"
-                "To enable the shortener, please send me the **Shortener URL** in the chat now.\n"
-                "(Example: `https://gplinks.in/api`)",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_home")]])
-            )
+            # Tell them to use the /setshort command if it's currently OFF and they want to turn it on!
+            await callback.answer("⚠️ Please use the /setshort command to turn the shortener ON and configure your link!", show_alert=True)
 
-    elif action == "set_api":
-        ADMIN_STATE[user_id] = "waiting_for_api"
-        await callback.message.edit_text(
-            "✏️ **Send the new API Key in the chat now.**",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_home")]])
-        )
-
-    elif action == "set_url":
-        ADMIN_STATE[user_id] = "waiting_for_url"
-        await callback.message.edit_text(
-            "✏️ **Send the new URL Link in the chat now.**\n(Example: `https://gplinks.in/api`)",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_home")]])
+    elif action == "set_api_url_help":
+        # 🚀 THE UPGRADE: Instead of the old broken process, tell them to use the Live Tester!
+        await callback.answer(
+            "🛠 To change your shortener link, please exit the menu and send the /setshort command in the chat.\n\nExample:\n/setshort <API> <URL>", 
+            show_alert=True
         )
 
     elif action == "set_requests":
