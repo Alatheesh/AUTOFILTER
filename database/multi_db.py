@@ -31,6 +31,7 @@ class MultiDB:
             self.groups = self.clients[0][db_name]["groups"]
             self.jobs = self.clients[0][db_name]["indexing_jobs"]
             self.broadcast_logs = self.clients[0][db_name]["broadcast_logs"]
+            self.scheduled_broadcasts = self.clients[0][db_name]["scheduled_broadcasts"]
 
     async def ensure_indexes(self):
         """Builds MongoDB Text Indexes for lightning-fast searching."""
@@ -168,6 +169,7 @@ class MultiDB:
             if res: return res
         return None
 
+    # THE ORIGINAL SAFE SEARCH
     async def _safe_search(self, collection, query_filter: dict, skip: int, limit: int) -> List[Dict[str, Any]]:
         cursor = collection.find(query_filter).skip(skip).limit(limit)
         return await cursor.to_list(length=limit)
@@ -197,13 +199,14 @@ class MultiDB:
                 
         return combined_results[:limit]
 
+    # THE ORIGINAL GLOBAL STATS
     async def global_stats(self) -> Dict[str, Any]:
         stats = {
             "shards_active": len(self.collections), 
             "total_files": 0, 
             "total_size_bytes": 0, 
             "indexed_metadata": 0,
-            "corrupted_files": 0,  
+            "corrupted_files": 0,
             "shard_distribution": []
         }
         
@@ -239,25 +242,19 @@ class MultiDB:
         return stats
 
     # ==========================================
-    # 📢 BROADCAST ENGINE DATABASE LOGIC
+    # 📢 BROADCAST & SCHEDULER ENGINE LOGIC
     # ==========================================
     
     async def get_all_users(self):
         """Yields all users for the broadcast loop."""
         if not self.clients: return
         users = self.users.find({})
-        async for user in users:
-            yield user
+        async for user in users: yield user
 
     async def log_broadcast(self, batch_id: str, user_id: int, message_id: int):
         """Saves a message to the 48-Hour Recall Vault."""
         if not self.clients: return
-        await self.broadcast_logs.insert_one({
-            "batch_id": batch_id,
-            "user_id": user_id,
-            "message_id": message_id,
-            "timestamp": time.time()
-        })
+        await self.broadcast_logs.insert_one({"batch_id": batch_id, "user_id": user_id, "message_id": message_id, "timestamp": time.time()})
 
     async def get_broadcast_logs(self, batch_id: str):
         """Fetches all sent messages for a specific batch."""
@@ -272,10 +269,7 @@ class MultiDB:
     async def get_user_latest_broadcast(self, user_id: int):
         """Finds the most recent broadcast sent to a specific user."""
         if not self.clients: return None
-        return await self.broadcast_logs.find_one(
-            {"user_id": user_id}, 
-            sort=[("timestamp", -1)]
-        )
+        return await self.broadcast_logs.find_one({"user_id": user_id}, sort=[("timestamp", -1)])
 
     async def delete_single_broadcast_log(self, user_id: int, message_id: int):
         """Removes a single user's message from the vault."""
@@ -286,11 +280,24 @@ class MultiDB:
         """Gets unique batches from the last 48 hours for the Admin Menu."""
         if not self.clients: return []
         forty_eight_hours_ago = time.time() - (48 * 3600)
-        pipeline = [
-            {"$match": {"timestamp": {"$gte": forty_eight_hours_ago}}},
-            {"$group": {"_id": "$batch_id", "count": {"$sum": 1}}},
-            {"$sort": {"_id": -1}}
-        ]
+        pipeline = [{"$match": {"timestamp": {"$gte": forty_eight_hours_ago}}}, {"$group": {"_id": "$batch_id", "count": {"$sum": 1}}}, {"$sort": {"_id": -1}}]
         return self.broadcast_logs.aggregate(pipeline)
+
+    # --- THE SCHEDULING LOGIC ---
+    async def add_scheduled_broadcast(self, batch_id: str, admin_id: int, message_id: int, run_at: float, command_text: str):
+        if not self.clients: return
+        await self.scheduled_broadcasts.insert_one({
+            "batch_id": batch_id, "admin_id": admin_id, "message_id": message_id, 
+            "run_at": run_at, "command_text": command_text, "status": "pending"
+        })
+
+    async def get_due_broadcasts(self):
+        if not self.clients: return []
+        cursor = self.scheduled_broadcasts.find({"status": "pending", "run_at": {"$lte": time.time()}})
+        return await cursor.to_list(length=100)
+
+    async def mark_broadcast_complete(self, schedule_id):
+        if not self.clients: return
+        await self.scheduled_broadcasts.update_one({"_id": schedule_id}, {"$set": {"status": "completed"}})
 
 db = MultiDB(Config.DB_URIS, Config.DB_NAME)
