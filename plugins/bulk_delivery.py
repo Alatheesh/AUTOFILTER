@@ -30,17 +30,37 @@ async def handle_bulk_delivery(client: Client, message: Message):
         cmd = message.command[1]
         user_id = message.from_user.id
         
-        # 🚀 THE FIX: Intercept Group Redirects and serve the Web App button in PM!
         if cmd.startswith("bapp_"):
             short_id = cmd.split("_")[1]
             if short_id not in BULK_CACHE:
                 return await message.reply_text("⏳ **Session Expired!**\nPlease search for the movie again in the group.")
             
             web_app_url = BULK_CACHE[short_id][2]
-            return await message.reply_text(
-                "📱 **Your Multi-Select App is Ready!**\nClick the button below to open it and choose your files.",
+            
+            # 🚀 THE FIX: Fetch Auto-Delete Settings and apply to the Web App launcher
+            settings = await db.get_settings()
+            del_enabled = settings.get("filter_delete_enabled", False)
+            del_time = settings.get("filter_delete_time", 5)
+
+            msg_text = "📱 **Your Multi-Select App is Ready!**\nClick the button below to open it and choose your files."
+            if del_enabled:
+                msg_text += f"\n\n⏳ *Note: This message will automatically delete in {del_time} minutes.*"
+
+            app_msg = await message.reply_text(
+                msg_text,
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Launch Web App", web_app=WebAppInfo(url=web_app_url))]])
             )
+
+            # 🚀 THE FIX: Trigger Ghost Mode to delete BOTH the bot's reply and the user's /start command
+            if del_enabled:
+                try:
+                    from plugins.advanced import trigger_ghost_self_destruct
+                    trigger_ghost_self_destruct(client, user_id, app_msg.id, del_time * 60)
+                    trigger_ghost_self_destruct(client, user_id, message.id, del_time * 60)
+                except Exception as e:
+                    logger.error(f"Failed to ghost destruct bapp msg: {e}")
+
+            return
 
         if cmd.startswith("blk"):
             is_joined = await check_fsub_for_bulk(client, user_id)
@@ -89,7 +109,6 @@ async def handle_bulk_delivery(client: Client, message: Message):
             if short_id not in BULK_CACHE:
                 return await message.reply_text("⏳ **Session Expired!**\nYour search result has expired to save memory. Please search for the movie again in the group.")
                 
-            # 🚀 Safely unpack the updated cache tuple
             cached_time, cached_files, _ = BULK_CACHE[short_id]
             selected_indices = []
 
