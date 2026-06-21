@@ -11,9 +11,6 @@ logger = logging.getLogger(__name__)
 
 START_TIME = time.time()
 
-BROADCAST_QUEUE = asyncio.Queue()
-BROADCAST_STATUS = {"total": 0, "processed": 0, "success": 0, "failed": 0, "is_running": False}
-
 # 🧠 Upgraded State Machine: Now remembers message IDs for clean UI editing
 ADMIN_STATE = {}
 
@@ -354,21 +351,6 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         ADMIN_STATE[user_id] = {"state": "setup_filter_time", "msg_id": callback.message.id}
         await callback.message.edit_text("✏️ **Send the Search Result Auto-Delete time in MINUTES.**\n(e.g., `5` for 5 minutes).", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_autodelete")]]))
 
-
-async def process_broadcast_queue(client: Client):
-    global BROADCAST_STATUS
-    while not BROADCAST_QUEUE.empty():
-        msg_to_copy, target_user = await BROADCAST_QUEUE.get()
-        try:
-            await msg_to_copy.copy(chat_id=target_user)
-            BROADCAST_STATUS["success"] += 1
-        except Exception: BROADCAST_STATUS["failed"] += 1
-        finally:
-            BROADCAST_STATUS["processed"] += 1
-            BROADCAST_QUEUE.task_done()
-            await asyncio.sleep(0.05) 
-    BROADCAST_STATUS["is_running"] = False
-
 def format_bytes(size):
     power = 2**10
     n = 0
@@ -550,17 +532,6 @@ async def stats_callback_handler(client: Client, callback: CallbackQuery):
     except Exception as e:
         logger.error(f"Error handling stats inline navigation: {e}")
         await callback.answer("⚠️ Processing sync issue. Try running /stats again.", show_alert=True)
-
-@Client.on_message(filters.command("broadcast") & filters.user(Config.ADMINS))
-async def queue_broadcast_init(client: Client, message: Message):
-    if not message.reply_to_message: return await message.reply_text("❌ Reply to a message with `/broadcast`")
-    if BROADCAST_STATUS["is_running"]: return await message.reply_text("⚠️ A broadcast is running.")
-
-    subscribers = [message.from_user.id] 
-    BROADCAST_STATUS.update({"total": len(subscribers), "processed": 0, "success": 0, "failed": 0, "is_running": True})
-    for user_id in subscribers: await BROADCAST_QUEUE.put((message.reply_to_message, user_id))
-    asyncio.create_task(process_broadcast_queue(client))
-    await message.reply_text("🚀 **Broadcast initiated!**")
 
 @Client.on_message(filters.command("backup") & filters.user(Config.ADMINS))
 async def multi_shard_json_backup(client: Client, message: Message):
