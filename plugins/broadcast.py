@@ -55,8 +55,19 @@ def parse_inline_buttons(text: str):
 async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: Message, command_text: str, batch_id: str):
     skip_vips = "-novip" in command_text
     is_silent = "-silent" in command_text
-    ask_match = re.search(r'-ask\s+(\d+)h', command_text)
-    auto_delete_hours = int(ask_match.group(1)) if ask_match else 0
+    
+    # 🌟 UPDATED: Parse seconds (s), minutes (m), or hours (h)
+    ask_match = re.search(r'-ask\s+(\d+)([smh])', command_text)
+    auto_delete_seconds = 0
+    if ask_match:
+        val = int(ask_match.group(1))
+        unit = ask_match.group(2)
+        if unit == 's':
+            auto_delete_seconds = val
+        elif unit == 'm':
+            auto_delete_seconds = val * 60
+        elif unit == 'h':
+            auto_delete_seconds = val * 3600
 
     status_msg = await client.send_message(admin_chat_id, f"🔄 **Deploying Broadcast...**\nBatch ID: `{batch_id}`")
     
@@ -98,8 +109,9 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
             await db.log_broadcast(batch_id, user_id, sent_msg.id)
             sent += 1
             
-            if auto_delete_hours > 0:
-                asyncio.create_task(schedule_auto_delete(client, user_id, sent_msg.id, auto_delete_hours))
+            # 🌟 UPDATED: Use auto_delete_seconds
+            if auto_delete_seconds > 0:
+                asyncio.create_task(schedule_auto_delete(client, user_id, sent_msg.id, auto_delete_seconds))
                 
         except FloodWait as e:
             await asyncio.sleep(e.value)
@@ -133,8 +145,9 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
         f"*(Use `/broadcast_del {batch_id}` to recall)*"
     )
 
-async def schedule_auto_delete(client, user_id, msg_id, hours):
-    await asyncio.sleep(hours * 3600)
+# 🌟 UPDATED: Uses exact seconds calculated from the command
+async def schedule_auto_delete(client, user_id, msg_id, delay_seconds):
+    await asyncio.sleep(delay_seconds)
     try:
         await client.delete_messages(user_id, msg_id)
         await db.delete_single_broadcast_log(user_id, msg_id)
