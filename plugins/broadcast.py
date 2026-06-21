@@ -32,7 +32,11 @@ async def ultimate_broadcast(client: Client, message: Message):
     start_time = time.time()
 
     async for user in db.get_all_users():
-        user_id = user["id"]
+        # 🚀 THE FIX: Correctly mapping "user_id" instead of "id"
+        user_id = user.get("user_id")
+        if not user_id:
+            continue
+            
         first_name = user.get("first_name", "User")
         
         # VIP Exclusion Logic
@@ -71,7 +75,7 @@ async def ultimate_broadcast(client: Client, message: Message):
         except Exception:
             failed += 1
             
-        # Live Tracker Update (Every 20 messages to avoid flood)
+        # Live Tracker Update (Every 20 messages to avoid flood limits)
         if (sent + failed) % 20 == 0:
             elapsed = time.time() - start_time
             await status_msg.edit_text(
@@ -156,7 +160,6 @@ async def ghost_update(client: Client, message: Message):
     edited = 0
     async for log in await db.get_broadcast_logs(batch_id):
         try:
-            # Optional: Implement {first_name} replacing here again if needed
             await client.edit_message_text(log["user_id"], log["message_id"], new_text)
             edited += 1
         except FloodWait as e:
