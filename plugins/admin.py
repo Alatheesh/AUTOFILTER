@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import time
+import datetime  # 🚀 NEW: Required for converting timestamps into readable dates
 from pyrogram import Client, filters, ContinuePropagation
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from database.multi_db import db
@@ -382,6 +383,10 @@ def format_uptime(seconds):
     parts.append(f"{int(sec)}s")
     return " ".join(parts) if parts else "Just started"
 
+# ==========================================
+# 📊 STATS DASHBOARD GENERATORS
+# ==========================================
+
 async def get_stats_home_text_and_buttons():
     db_stats = await db.global_stats()
 
@@ -408,6 +413,9 @@ async def get_stats_home_text_and_buttons():
         [
             InlineKeyboardButton("⚙️ Worker 1: Indexing", callback_data="stats_worker1"),
             InlineKeyboardButton("⚙️ Worker 2: Metadata", callback_data="stats_worker2")
+        ],
+        [
+            InlineKeyboardButton("⚙️ Worker 3: Broadcast Engine", callback_data="stats_worker3_home")
         ],
         [InlineKeyboardButton("🔄 Refresh Data", callback_data="stats_refresh_home")]
     ]
@@ -467,7 +475,6 @@ async def get_worker1_text_and_buttons():
     ]
     return text, InlineKeyboardMarkup(buttons)
 
-
 async def get_worker2_text_and_buttons():
     db_stats = await db.global_stats()
     total_files = db_stats.get('total_files', 0)
@@ -501,6 +508,88 @@ async def get_worker2_text_and_buttons():
     ]
     return text, InlineKeyboardMarkup(buttons)
 
+# 🚀 NEW WORKER 3 DASHBOARD
+async def get_worker3_home_text_and_buttons():
+    pending_count = await db.scheduled_broadcasts.count_documents({"status": "pending"})
+    
+    forty_eight_hours_ago = time.time() - (48 * 3600)
+    vault_count = await db.broadcast_logs.count_documents({"timestamp": {"$gte": forty_eight_hours_ago}})
+    
+    text = (
+        f"⚙️ **WORKER 3: Broadcast & Scheduler Engine**\n"
+        f"🔄 **Status:** `Active & Monitoring`\n\n"
+        f"📊 **Engine Overview:**\n"
+        f"• **Pending Scheduled Jobs:** `{pending_count}`\n"
+        f"• **Messages in 48H Vault:** `{vault_count}`\n\n"
+        f"Select an option below to view detailed tracking analytics:"
+    )
+    buttons = [
+        [
+            InlineKeyboardButton("📅 Scheduled Queue", callback_data="stats_worker3_sched"),
+            InlineKeyboardButton("📡 Recent Batches", callback_data="stats_worker3_recent")
+        ],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="stats_home"),
+            InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w3_home")
+        ]
+    ]
+    return text, InlineKeyboardMarkup(buttons)
+
+async def get_worker3_sched_text_and_buttons():
+    cursor = db.scheduled_broadcasts.find({"status": "pending"}).sort("run_at", 1).limit(5)
+    schedules = await cursor.to_list(length=5)
+    
+    total_pending = await db.scheduled_broadcasts.count_documents({"status": "pending"})
+    
+    text = f"📅 **SCHEDULED BROADCAST QUEUE**\n\n**Total Pending Jobs:** `{total_pending}`\n\n"
+    
+    if not schedules:
+        text += "No broadcasts are currently scheduled."
+    else:
+        text += "**Next 5 Upcoming Broadcasts:**\n"
+        ist_timezone = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+        
+        for s in schedules:
+            dt = datetime.datetime.fromtimestamp(s["run_at"], ist_timezone)
+            time_str = dt.strftime('%Y-%m-%d %I:%M %p')
+            text += f"• `{s['batch_id']}` - ⏳ `{time_str}`\n"
+            
+    buttons = [
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="stats_worker3_home"),
+            InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w3_sched")
+        ]
+    ]
+    return text, InlineKeyboardMarkup(buttons)
+
+async def get_worker3_recent_text_and_buttons():
+    batches_cursor = await db.get_recent_batches()
+    
+    text = f"📡 **RECENT BROADCAST BATCHES (48H Vault)**\n\n"
+    has_batches = False
+    
+    async for batch in batches_cursor:
+        has_batches = True
+        b_id = batch["_id"]
+        count = batch["count"]
+        text += f"• **{b_id}**: `{count} messages sent`\n"
+        
+    if not has_batches:
+        text += "No broadcasts sent in the last 48 hours."
+    else:
+        text += "\n*(Use `/broadcast_del` to manage these)*"
+        
+    buttons = [
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="stats_worker3_home"),
+            InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w3_recent")
+        ]
+    ]
+    return text, InlineKeyboardMarkup(buttons)
+
+# ==========================================
+# 📊 STATS CALLBACK ROUTER
+# ==========================================
 @Client.on_message(filters.command("stats") & filters.user(Config.ADMINS))
 async def bot_stats_dashboard(client: Client, message: Message):
     status_msg = await message.reply_text("📊 **Querying core analytics engine...**")
@@ -520,19 +609,42 @@ async def stats_callback_handler(client: Client, callback: CallbackQuery):
         elif action == "stats_worker2":
             text, markup = await get_worker2_text_and_buttons()
             await callback.message.edit_text(text, reply_markup=markup)
-        elif action in ["stats_refresh_home", "stats_refresh_w1", "stats_refresh_w2"]:
+            
+        # 🚀 NEW WORKER 3 ROUTING
+        elif action == "stats_worker3_home":
+            text, markup = await get_worker3_home_text_and_buttons()
+            await callback.message.edit_text(text, reply_markup=markup)
+        elif action == "stats_worker3_sched":
+            text, markup = await get_worker3_sched_text_and_buttons()
+            await callback.message.edit_text(text, reply_markup=markup)
+        elif action == "stats_worker3_recent":
+            text, markup = await get_worker3_recent_text_and_buttons()
+            await callback.message.edit_text(text, reply_markup=markup)
+            
+        # REFRESH HANDLERS
+        elif action in ["stats_refresh_home", "stats_refresh_w1", "stats_refresh_w2", "stats_refresh_w3_home", "stats_refresh_w3_sched", "stats_refresh_w3_recent"]:
             await callback.answer("🔄 Metrics synchronized successfully!", show_alert=False)
             if action == "stats_refresh_home":
                 text, markup = await get_stats_home_text_and_buttons()
             elif action == "stats_refresh_w1":
                 text, markup = await get_worker1_text_and_buttons()
-            else:
+            elif action == "stats_refresh_w2":
                 text, markup = await get_worker2_text_and_buttons()
+            elif action == "stats_refresh_w3_home":
+                text, markup = await get_worker3_home_text_and_buttons()
+            elif action == "stats_refresh_w3_sched":
+                text, markup = await get_worker3_sched_text_and_buttons()
+            elif action == "stats_refresh_w3_recent":
+                text, markup = await get_worker3_recent_text_and_buttons()
+                
             await callback.message.edit_text(text, reply_markup=markup)
     except Exception as e:
         logger.error(f"Error handling stats inline navigation: {e}")
         await callback.answer("⚠️ Processing sync issue. Try running /stats again.", show_alert=True)
 
+# ==========================================
+# ⚙️ ADMIN COMMANDS
+# ==========================================
 @Client.on_message(filters.command("backup") & filters.user(Config.ADMINS))
 async def multi_shard_json_backup(client: Client, message: Message):
     progress = await message.reply_text("📥 **Connecting to database Shard 0...**")
