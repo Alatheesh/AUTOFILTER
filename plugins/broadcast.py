@@ -32,7 +32,6 @@ async def ultimate_broadcast(client: Client, message: Message):
     start_time = time.time()
 
     async for user in db.get_all_users():
-        # 🚀 THE FIX: Correctly mapping "user_id" instead of "id"
         user_id = user.get("user_id")
         if not user_id:
             continue
@@ -114,6 +113,25 @@ async def schedule_auto_delete(client, user_id, msg_id, hours):
 
 @Client.on_message(filters.command("broadcast_del") & filters.user(Config.ADMINS))
 async def recall_vault_menu(client: Client, message: Message):
+    # 🚀 THE UPGRADE: Allows direct manual entry like: /broadcast_del Batch_123ABC
+    if len(message.command) > 1:
+        batch_id = message.command[1].strip()
+        status = await message.reply_text(f"🧨 **Scrubbing Batch `{batch_id}`...**")
+        
+        deleted = 0
+        async for log in await db.get_broadcast_logs(batch_id):
+            try:
+                await client.delete_messages(log["user_id"], log["message_id"])
+                deleted += 1
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+            except:
+                pass
+                
+        await db.delete_broadcast_batch(batch_id)
+        return await status.edit_text(f"✅ **GHOST PROTOCOL COMPLETE**\n\n`{deleted}` messages from `{batch_id}` have been permanently erased from user chats.")
+
+    # Show the Interactive Menu if no batch ID is typed
     batches = await db.get_recent_batches()
     buttons = []
     
@@ -130,7 +148,9 @@ async def recall_vault_menu(client: Client, message: Message):
 
 @Client.on_callback_query(filters.regex(r"^delbatch_") & filters.user(Config.ADMINS))
 async def execute_batch_scrub(client: Client, query: CallbackQuery):
-    batch_id = query.data.split("_")[1]
+    # 🚀 THE FIX: Use replace() so the underscore inside Batch_ID doesn't break the string
+    batch_id = query.data.replace("delbatch_", "")
+    
     await query.message.edit_text(f"🧨 **Scrubbing Batch `{batch_id}`...**")
     
     deleted = 0
