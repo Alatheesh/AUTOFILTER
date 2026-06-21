@@ -11,6 +11,7 @@ from database.multi_db import db
 from config import Config
 from plugins.search import BULK_CACHE
 
+# 🚀 Importing the fixed shortlink engine from monetization
 from plugins.monetization import VERIFICATION_TOKENS, get_shortlink
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,10 @@ async def handle_bulk_delivery(client: Client, message: Message):
     if len(message.command) > 1:
         cmd = message.command[1]
         user_id = message.from_user.id
+
+        # 🚀 Instantly delete the user's /start command in PM to keep it clean!
+        try: await message.delete()
+        except Exception: pass
         
         if cmd.startswith("bapp_"):
             short_id = cmd.split("_")[1]
@@ -37,7 +42,6 @@ async def handle_bulk_delivery(client: Client, message: Message):
             
             web_app_url = BULK_CACHE[short_id][2]
             
-            # 🚀 THE FIX: Fetch Auto-Delete Settings and apply to the Web App launcher
             settings = await db.get_settings()
             del_enabled = settings.get("filter_delete_enabled", False)
             del_time = settings.get("filter_delete_time", 5)
@@ -51,12 +55,10 @@ async def handle_bulk_delivery(client: Client, message: Message):
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Launch Web App", web_app=WebAppInfo(url=web_app_url))]])
             )
 
-            # 🚀 THE FIX: Trigger Ghost Mode to delete BOTH the bot's reply and the user's /start command
             if del_enabled:
                 try:
                     from plugins.advanced import trigger_ghost_self_destruct
                     trigger_ghost_self_destruct(client, user_id, app_msg.id, del_time * 60)
-                    trigger_ghost_self_destruct(client, user_id, message.id, del_time * 60)
                 except Exception as e:
                     logger.error(f"Failed to ghost destruct bapp msg: {e}")
 
@@ -75,7 +77,7 @@ async def handle_bulk_delivery(client: Client, message: Message):
                 return await message.reply_text("🛑 **Lock Warning:**\nYou must join our official channels before downloading bulk files.", reply_markup=InlineKeyboardMarkup(buttons))
 
             settings = await db.get_settings()
-            if settings.get("shortener_enabled", False):
+            if settings.get("shortener_enabled", False) or settings.get("is_shortener", False):
                 u_sett = await db.get_user_settings(user_id)
                 pass_time = u_sett.get("shortener_pass", 0)
                 
@@ -84,20 +86,29 @@ async def handle_bulk_delivery(client: Client, message: Message):
                     VERIFICATION_TOKENS[token] = {"user_id": user_id, "pending_file": None}
                     bot_me = await client.get_me()
                     verify_link = f"https://t.me/{bot_me.username}?start=verify_{token}"
-                    api = settings.get("shortener_api", "")
-                    site = settings.get("shortener_url", "https://gplinks.in/api")
+                    
+                    api = settings.get("shortener_api") or settings.get("shortlink_api") or settings.get("api_key") or ""
+                    site = settings.get("shortener_url") or settings.get("shortlink_url") or settings.get("site_url") or "https://api.gplinks.com/api"
                     
                     if api: short_link = await get_shortlink(verify_link, api, site)
                     else: short_link = verify_link
                         
-                    return await message.reply_text(
-                        "🔒 **Verification Required for Bulk Downloads**\n\n"
-                        "To keep this bot alive, please verify your access. This will grant you **24 Hours of Unlimited Downloads!**\n\n"
-                        f"👉 [Click Here to Verify]({short_link})\n\n"
-                        "*(Once verified, just open your minimized Web App and click Send again!)*",
-                        disable_web_page_preview=True,
-                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Verify Access", url=short_link)]])
+                    del_enabled = settings.get("filter_delete_enabled", False)
+                    del_time = settings.get("filter_delete_time", 5)
+
+                    v_req_text = f"🔒 **Verification Required for Bulk Downloads**\n\nTo keep this bot alive, please verify your access. This will grant you **24 Hours of Unlimited Downloads!**\n\n👉 [Click Here to Verify]({short_link})\n\n*(Once verified, just open your minimized Web App and click Send again!)*"
+                    if del_enabled: v_req_text += f"\n\n⏳ *Note: This message will automatically delete in {del_time} minutes.*"
+
+                    req_msg = await message.reply_text(
+                        v_req_text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Verify Access", url=short_link)]])
                     )
+
+                    if del_enabled:
+                        try:
+                            from plugins.advanced import trigger_ghost_self_destruct
+                            trigger_ghost_self_destruct(client, user_id, req_msg.id, del_time * 60)
+                        except Exception: pass
+                    return
 
             parts = cmd.split("_")
             if len(parts) < 3: return await message.reply_text("❌ **Error:** Invalid bulk request format.")
