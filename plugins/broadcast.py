@@ -50,21 +50,19 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
     skip_vips = "-novip" in command_text
     is_silent = "-silent" in command_text
     
-    # 🌟 Smart Auto-Delete Delay (Seconds, Minutes, Hours)
+    allow_replies = "-reply" in command_text
+    reply_marker = "\n\n*(💬 Reply directly to this message to respond!)*"
+    
     ask_match = re.search(r'-ask\s+(\d+)([smh])', command_text)
     auto_delete_seconds = 0
     if ask_match:
         val = int(ask_match.group(1))
         unit = ask_match.group(2)
-        if unit == 's':
-            auto_delete_seconds = val
-        elif unit == 'm':
-            auto_delete_seconds = val * 60
-        elif unit == 'h':
-            auto_delete_seconds = val * 3600
+        if unit == 's': auto_delete_seconds = val
+        elif unit == 'm': auto_delete_seconds = val * 60
+        elif unit == 'h': auto_delete_seconds = val * 3600
 
     status_msg = await client.send_message(admin_chat_id, f"🔄 **Deploying Broadcast...**\nBatch ID: `{batch_id}`")
-    
     sent, failed, skipped = 0, 0, 0
     start_time = time.time()
 
@@ -80,7 +78,6 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
             skipped += 1
             continue
             
-        # 🌟 Live Smart Name Fallback System
         first_name = user.get("first_name")
         last_name = user.get("last_name", "")
         
@@ -100,10 +97,12 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
         try:
             if target_msg.text:
                 custom_text = parsed_text.replace("{first_name}", first_name).replace("{last_name}", last_name).replace("{full_name}", full_name)
+                if allow_replies: custom_text += reply_marker
                 sent_msg = await client.send_message(user_id, custom_text, disable_notification=is_silent, reply_markup=base_markup)
             
             elif target_msg.caption:
                 custom_caption = parsed_text.replace("{first_name}", first_name).replace("{last_name}", last_name).replace("{full_name}", full_name)
+                if allow_replies: custom_caption += reply_marker
                 sent_msg = await client.send_cached_media(user_id, file_id=target_msg.photo.file_id if target_msg.photo else target_msg.video.file_id, caption=custom_caption, disable_notification=is_silent, reply_markup=base_markup)
             
             else:
@@ -128,23 +127,12 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
         if (sent + failed) % 20 == 0:
             elapsed = time.time() - start_time
             await status_msg.edit_text(
-                f"🚀 **LIVE BROADCAST TRACKER**\n\n"
-                f"🏷 **Batch ID:** `{batch_id}`\n"
-                f"🟢 **Sent:** `{sent}`\n"
-                f"🔴 **Failed:** `{failed}`\n"
-                f"⏭ **Skipped:** `{skipped}`\n"
-                f"⏱ **Time:** `{round(elapsed, 1)}s`"
+                f"🚀 **LIVE BROADCAST TRACKER**\n\n🏷 **Batch ID:** `{batch_id}`\n🟢 **Sent:** `{sent}`\n🔴 **Failed:** `{failed}`\n⏭ **Skipped:** `{skipped}`\n⏱ **Time:** `{round(elapsed, 1)}s`"
             )
             
     total_time = round(time.time() - start_time, 1)
     await status_msg.edit_text(
-        f"✅ **BROADCAST COMPLETE**\n\n"
-        f"🏷 **Batch ID:** `{batch_id}`\n"
-        f"🟢 **Total Sent:** `{sent}`\n"
-        f"🔴 **Dead Accounts:** `{failed}`\n"
-        f"⏭ **Skipped:** `{skipped}`\n"
-        f"⏱ **Total Time:** `{total_time}s`\n\n"
-        f"*(Use `/broadcast_del {batch_id}` to recall)*"
+        f"✅ **BROADCAST COMPLETE**\n\n🏷 **Batch ID:** `{batch_id}`\n🟢 **Total Sent:** `{sent}`\n🔴 **Dead Accounts:** `{failed}`\n⏭ **Skipped:** `{skipped}`\n⏱ **Total Time:** `{total_time}s`\n\n*(Use `/broadcast_del {batch_id}` to recall)*"
     )
 
 async def schedule_auto_delete(client, user_id, msg_id, delay_seconds):
@@ -290,14 +278,22 @@ async def surgical_wipe(client: Client, message: Message):
 # ==========================================
 @Client.on_message(filters.private & filters.reply & ~filters.user(Config.ADMINS))
 async def handle_user_reply_to_broadcast(client: Client, message: Message):
-    """Catches user replies to broadcasts and forwards them to the primary admin."""
+    """Catches user replies ONLY if the broadcast explicitly asked for them."""
+    target_msg = message.reply_to_message
+    
+    is_reply_allowed = False
+    if target_msg.text and "💬 Reply directly to this message" in target_msg.text:
+        is_reply_allowed = True
+    elif target_msg.caption and "💬 Reply directly to this message" in target_msg.caption:
+        is_reply_allowed = True
+        
+    if not is_reply_allowed:
+        return 
+        
     admin_id = Config.ADMINS[0]  
     await client.send_message(
         chat_id=admin_id,
-        text=f"📩 **New Reply to Broadcast!**\n\n"
-             f"👤 **User:** {message.from_user.mention}\n"
-             f"🆔 **ID:** `{message.from_user.id}`\n"
-             f"👇 Their reply is below:"
+        text=f"📩 **New Reply to Broadcast!**\n\n👤 **User:** {message.from_user.mention}\n🆔 **ID:** `{message.from_user.id}`\n👇 Their reply is below:"
     )
     await message.forward(admin_id)
 
@@ -311,7 +307,10 @@ async def smart_admin_reply(client: Client, message: Message):
         match = re.search(r"🆔 \*\*ID:\*\* `(\d+)`", target_msg.text)
         if match:
             target_user = int(match.group(1))
-    elif target_msg.forward_from:
+    # 🌟 NEW UPDATE: Safely handle forward origin deprecation in Pyrogram 2.2+
+    elif getattr(target_msg, "forward_origin", None) and getattr(target_msg.forward_origin, "sender_user", None):
+        target_user = target_msg.forward_origin.sender_user.id
+    elif getattr(target_msg, "forward_from", None):
         target_user = target_msg.forward_from.id
         
     if not target_user:
@@ -322,9 +321,8 @@ async def smart_admin_reply(client: Client, message: Message):
         
     raw_text = message.text.split(" ", 1)[1]
     
-    # 🌟 Check for the auto-delete flag, DEFAULT TO 48 HOURS (172800 seconds)
     ask_match = re.search(r'-ask\s+(\d+)([smh])', raw_text)
-    auto_delete_seconds = 48 * 3600  # Default 48 hours
+    auto_delete_seconds = 48 * 3600 
     
     if ask_match:
         val = int(ask_match.group(1))
@@ -333,28 +331,19 @@ async def smart_admin_reply(client: Client, message: Message):
         elif unit == 'm': auto_delete_seconds = val * 60
         elif unit == 'h': auto_delete_seconds = val * 3600
         
-        # Remove the '-ask' command from the actual message payload
         raw_text = re.sub(r'-ask\s+\d+[smh]', '', raw_text).strip()
         
     if not raw_text:
         return await message.reply_text("⚠️ You cannot send an empty message.")
     
     try:
-        sent_msg = await client.send_message(
-            chat_id=target_user, 
-            text=f"👨‍💻 **Admin Reply:**\n\n{raw_text}"
-        )
+        sent_msg = await client.send_message(chat_id=target_user, text=f"👨‍💻 **Admin Reply:**\n\n{raw_text}")
         
         confirm_text = f"✅ **Reply successfully delivered to `{target_user}`.**"
-        
-        if ask_match:
-            confirm_text += f"\n*(Will auto-delete in {auto_delete_seconds}s as requested)*"
-        else:
-            confirm_text += f"\n*(Will auto-delete in 48h by default)*"
+        if ask_match: confirm_text += f"\n*(Will auto-delete in {auto_delete_seconds}s as requested)*"
+        else: confirm_text += f"\n*(Will auto-delete in 48h by default)*"
             
-        # Trigger the deletion timer
         asyncio.create_task(schedule_auto_delete(client, target_user, sent_msg.id, auto_delete_seconds))
-            
         await message.reply_text(confirm_text)
     except Exception as e:
         await message.reply_text(f"❌ **Failed to send reply:** `{e}`")
