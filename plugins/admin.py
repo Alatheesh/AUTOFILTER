@@ -14,6 +14,7 @@ START_TIME = time.time()
 BROADCAST_QUEUE = asyncio.Queue()
 BROADCAST_STATUS = {"total": 0, "processed": 0, "success": 0, "failed": 0, "is_running": False}
 
+# 🧠 Upgraded State Machine: Now remembers message IDs for clean UI editing
 ADMIN_STATE = {}
 
 @Client.on_message(filters.text & filters.private & filters.user(Config.ADMINS), group=0)
@@ -26,42 +27,96 @@ async def admin_input_catcher(client: Client, message: Message):
         del ADMIN_STATE[user_id]
         raise ContinuePropagation
 
-    state = ADMIN_STATE[user_id]
+    # Extract state and the original prompt message ID
+    state_data = ADMIN_STATE[user_id]
+    if isinstance(state_data, dict):
+        state = state_data["state"]
+        prompt_msg_id = state_data.get("msg_id")
+    else:
+        state = state_data
+        prompt_msg_id = None
+
     user_input = message.text.strip()
 
+    # 🚀 THE UX UPGRADE: Auto-delete user text and beautifully edit the prompt
+    async def finish_input(success_text, back_callback="set_home"):
+        del ADMIN_STATE[user_id]
+        try:
+            await message.delete() # Deletes the user's messy text reply!
+        except Exception:
+            pass
+        
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Settings", callback_data=back_callback)]])
+        if prompt_msg_id:
+            try:
+                await client.edit_message_text(chat_id=message.chat.id, message_id=prompt_msg_id, text=success_text, reply_markup=markup)
+            except Exception:
+                await message.reply_text(success_text, reply_markup=markup)
+        else:
+            await message.reply_text(success_text, reply_markup=markup)
+
+    # Apply the clean UX to all inputs
     if state == "setup_inside_words":
         words = [w.strip() for w in user_input.split() if w.strip()]
         await db.update_settings({"inside_words": words})
-        del ADMIN_STATE[user_id]
-        await message.reply_text(f"✅ **Words Saved!**\n`{words}`\nType `/admin` to view dashboard.")
+        await finish_input(f"✅ **Words Saved!**\n`{words}`", "set_inside")
 
     elif state == "setup_inside_times":
         if user_input.isdigit():
             await db.update_settings({"inside_times": int(user_input)})
-            del ADMIN_STATE[user_id]
-            await message.reply_text(f"✅ **Times Saved:** `{user_input}` per day.\nType `/admin` to view dashboard.")
+            await finish_input(f"✅ **Times Saved:** `{user_input}` per day.", "set_inside")
         else:
             await message.reply_text("❌ **Invalid Input!** Please send only a number (e.g., `4`).")
 
     elif state == "setup_inside_channels":
         channels = [c.strip() for c in user_input.split() if c.strip()]
         await db.update_settings({"inside_channels": channels})
-        del ADMIN_STATE[user_id]
-        await message.reply_text(f"✅ **Channels Saved!**\n`{channels}`\nType `/admin` to view dashboard.")
+        await finish_input(f"✅ **Channels Saved!**\n`{channels}`", "set_inside")
+
+    elif state == "setup_shortener_url":
+        await db.update_settings({"shortener_url": user_input})
+        ADMIN_STATE[user_id] = {"state": "setup_shortener_api", "msg_id": prompt_msg_id}
+        try: 
+            await message.delete() 
+        except Exception: 
+            pass
+        
+        text = "✅ **URL Saved!**\n\nNow, please send me your secret **API Key** for this shortener."
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_shortener")]])
+        
+        if prompt_msg_id:
+            try: 
+                await client.edit_message_text(chat_id=message.chat.id, message_id=prompt_msg_id, text=text, reply_markup=markup)
+            except Exception: 
+                msg = await message.reply_text(text, reply_markup=markup)
+                ADMIN_STATE[user_id]["msg_id"] = msg.id
+        else:
+            msg = await message.reply_text(text, reply_markup=markup)
+            ADMIN_STATE[user_id]["msg_id"] = msg.id
+
+    elif state == "setup_shortener_api":
+        await db.update_settings({"shortener_api": user_input, "shortener_enabled": True})
+        await finish_input("✅ **Success!** API Key saved and Shortener is now **🟢 ON**.", "set_shortener")
+
+    elif state == "waiting_for_api":
+        await db.update_settings({"shortener_api": user_input})
+        await finish_input("✅ **Success!** API Key updated in the database.", "set_shortener")
+
+    elif state == "waiting_for_url":
+        await db.update_settings({"shortener_url": user_input})
+        await finish_input("✅ **Success!** Shortener Link updated in the database.", "set_shortener")
 
     elif state == "setup_file_time":
         if user_input.isdigit():
             await db.update_settings({"file_delete_time": int(user_input)})
-            del ADMIN_STATE[user_id]
-            await message.reply_text(f"✅ **File Delete Time Saved:** `{user_input} Minutes`\nType `/admin` to view dashboard.")
+            await finish_input(f"✅ **File Delete Time Saved:** `{user_input} Minutes`", "set_autodelete")
         else:
             await message.reply_text("❌ **Invalid Input!** Please send only a number in minutes (e.g., `30`).")
 
     elif state == "setup_filter_time":
         if user_input.isdigit():
             await db.update_settings({"filter_delete_time": int(user_input)})
-            del ADMIN_STATE[user_id]
-            await message.reply_text(f"✅ **Filter Delete Time Saved:** `{user_input} Minutes`\nType `/admin` to view dashboard.")
+            await finish_input(f"✅ **Filter Delete Time Saved:** `{user_input} Minutes`", "set_autodelete")
         else:
             await message.reply_text("❌ **Invalid Input!** Please send only a number in minutes (e.g., `5`).")
 
@@ -76,7 +131,7 @@ async def send_settings_home(message_or_query):
         [InlineKeyboardButton("🔗 Shortener Settings", callback_data="set_shortener")],
         [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests")],
         [InlineKeyboardButton("🕵️‍♂️ Inside Settings", callback_data="set_inside")], 
-        [InlineKeyboardButton("⚙️ Filter & Bulk Settings", callback_data="set_filters")], 
+        [InlineKeyboardButton("🗑 Auto-Delete Filters", callback_data="set_autodelete")],
         [InlineKeyboardButton("🔙 Exit", callback_data="tier_root_fallback")]
     ]
 
@@ -90,7 +145,7 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
     action = callback.data
     user_id = callback.from_user.id
 
-    if action in ["set_home", "set_inside", "set_shortener", "set_requests", "set_filters"]:
+    if action in ["set_home", "set_inside", "set_shortener", "set_requests", "set_autodelete"]:
         if user_id in ADMIN_STATE:
             del ADMIN_STATE[user_id]
 
@@ -131,21 +186,21 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         await settings_callbacks(client, callback)
 
     elif action == "inside_words":
-        ADMIN_STATE[user_id] = "setup_inside_words"
+        ADMIN_STATE[user_id] = {"state": "setup_inside_words", "msg_id": callback.message.id}
         await callback.message.edit_text(
             "✏️ **Send the trigger words in the chat.**\nSeparate them with spaces (e.g., `#example1 #sponsor2`).",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_inside")]])
         )
 
     elif action == "inside_times":
-        ADMIN_STATE[user_id] = "setup_inside_times"
+        ADMIN_STATE[user_id] = {"state": "setup_inside_times", "msg_id": callback.message.id}
         await callback.message.edit_text(
             "✏️ **Send the number of verifications per day.**\n(Example: Send `4` to require verification every 6 hours).",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_inside")]])
         )
 
     elif action == "inside_channels":
-        ADMIN_STATE[user_id] = "setup_inside_channels"
+        ADMIN_STATE[user_id] = {"state": "setup_inside_channels", "msg_id": callback.message.id}
         await callback.message.edit_text(
             "✏️ **Send the Target Channel Usernames or IDs.**\nSeparate multiple with spaces (e.g., `-10012345 @MyChannel`).",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_inside")]])
@@ -176,11 +231,21 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
             f"🔗 **Shortener Configurations**\n\n"
             f"**Status:** {status}\n"
             f"**Current URL Template:** `{url}`\n"
-            f"**Current API Key:** `{api}`"
+            f"**Current API Key:** `{api}`\n\n"
+            f"📖 **How to Setup Your Shortener:**\n\n"
+            f"⚡ **Method 1: Auto-Setup (Recommended)**\n"
+            f"Just send `/setshort <your_full_link>` directly in the chat.\n"
+            f"*(The bot will extract your key and format the template!)*\n\n"
+            f"🛠 **Method 2: Manual Setup**\n"
+            f"1. Click **Toggle Shortener** to turn it ON/OFF.\n"
+            f"2. Click **Change API Key** and send your secret key.\n"
+            f"3. Click **Change Link** and send your exact URL format.\n"
+            f"⚠️ *Important: You must use `{{api}}` and `{{url}}` as placeholders in your manual link!*"
         )
         buttons = [
             [InlineKeyboardButton(f"Toggle Shortener {'OFF' if 'ON' in status else 'ON'}", callback_data="set_toggle")],
-            [InlineKeyboardButton("⚙️ Configure API & Link", callback_data="set_api_url_help")],
+            [InlineKeyboardButton("✏️ Change API Key", callback_data="set_api")],
+            [InlineKeyboardButton("✏️ Change Link", callback_data="set_url")],
             [InlineKeyboardButton("🔙 Back", callback_data="set_home")]
         ]
         await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
@@ -191,17 +256,32 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
 
         if current_state:
             await db.update_settings({"shortener_enabled": False})
-            callback.data = "set_shortener"
-            await settings_callbacks(client, callback)
         else:
-            # Tell them to use the /setshort command if it's currently OFF and they want to turn it on!
-            await callback.answer("⚠️ Please use the /setshort command to turn the shortener ON and configure your link!", show_alert=True)
+            ADMIN_STATE[user_id] = {"state": "setup_shortener_url", "msg_id": callback.message.id}
+            return await callback.message.edit_text(
+                "🛠 **Shortener Setup Wizard**\n\n"
+                "To enable the shortener, please send me the **Shortener URL** in the chat now.\n"
+                "(Example: `https://gplinks.in/api?api={api}&url={url}`)",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_shortener")]])
+            )
+            
+        callback.data = "set_shortener"
+        await settings_callbacks(client, callback)
 
-    elif action == "set_api_url_help":
-        # 🚀 THE UPGRADE: Instead of the old broken process, tell them to use the Live Tester!
-        await callback.answer(
-            "🛠 To change your shortener link, please exit the menu and send the /setshort command in the chat.\n\nExample:\n/setshort <API> <URL>", 
-            show_alert=True
+    elif action == "set_api":
+        ADMIN_STATE[user_id] = {"state": "waiting_for_api", "msg_id": callback.message.id}
+        await callback.message.edit_text(
+            "✏️ **Send the new API Key in the chat now.**",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_shortener")]])
+        )
+
+    elif action == "set_url":
+        ADMIN_STATE[user_id] = {"state": "waiting_for_url", "msg_id": callback.message.id}
+        await callback.message.edit_text(
+            "✏️ **Send the new URL Link template in the chat now.**\n\n"
+            "💡 *Tip: Use `{api}` and `{url}` as placeholders! The bot will automatically inject your key and the movie link here.*\n"
+            "(Example: `https://gplinks.in/api?api={api}&url={url}`)",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_shortener")]])
         )
 
     elif action == "set_requests":
@@ -226,24 +306,22 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         callback.data = "set_requests"
         await settings_callbacks(client, callback)
 
-    elif action == "set_filters":
+    elif action == "set_autodelete":
         settings = await db.get_settings()
         f_status = "🟢 ON" if settings.get("file_delete_enabled", False) else "🔴 OFF"
         m_status = "🟢 ON" if settings.get("filter_delete_enabled", False) else "🔴 OFF"
-        b_status = "🟢 ON" if settings.get("bulk_enabled", True) else "🔴 OFF"
         f_time = settings.get("file_delete_time", 10)
         m_time = settings.get("filter_delete_time", 5)
 
         text = (
-            f"⚙️ **Filter & Bulk Delivery Settings**\n\n"
-            f"📦 **Bulk Web App Delivery:** {b_status}\n"
-            f"*Shows the 'Select Multiple Movies' button.*\n\n"
-            f"🗑 **Auto-Delete (Ghost Mode):**\n"
+            f"🗑 **Auto-Delete (Ghost Mode) Settings**\n\n"
             f"📂 **File Deletion:** {f_status} `({f_time} mins)`\n"
-            f"🔍 **Search Filter Deletion:** {m_status} `({m_time} mins)`"
+            f"*Deletes actual movie files after delivery.*\n\n"
+            f"🔍 **Search Filter Deletion:** {m_status} `({m_time} mins)`\n"
+            f"*Deletes movie search result messages.*\n\n"
+            f"*(Note: Timers over 1440 mins/24 hrs may be interrupted by server restarts).* "
         )
         buttons = [
-            [InlineKeyboardButton(f"Toggle Bulk Delivery: {b_status}", callback_data="toggle_bulk_del")],
             [
                 InlineKeyboardButton(f"Files: {f_status}", callback_data="toggle_file_del"),
                 InlineKeyboardButton(f"Filters: {m_status}", callback_data="toggle_filter_del")
@@ -256,31 +334,25 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         ]
         await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
-    elif action == "toggle_bulk_del":
-        settings = await db.get_settings()
-        await db.update_settings({"bulk_enabled": not settings.get("bulk_enabled", True)})
-        callback.data = "set_filters"
-        await settings_callbacks(client, callback)
-
     elif action == "toggle_file_del":
         settings = await db.get_settings()
         await db.update_settings({"file_delete_enabled": not settings.get("file_delete_enabled", False)})
-        callback.data = "set_filters"
+        callback.data = "set_autodelete"
         await settings_callbacks(client, callback)
 
     elif action == "toggle_filter_del":
         settings = await db.get_settings()
         await db.update_settings({"filter_delete_enabled": not settings.get("filter_delete_enabled", False)})
-        callback.data = "set_filters"
+        callback.data = "set_autodelete"
         await settings_callbacks(client, callback)
 
     elif action == "time_file_del":
-        ADMIN_STATE[user_id] = "setup_file_time"
-        await callback.message.edit_text("✏️ **Send the File Auto-Delete time in MINUTES.**\n(e.g., `30` for 30 minutes).", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_filters")]]))
+        ADMIN_STATE[user_id] = {"state": "setup_file_time", "msg_id": callback.message.id}
+        await callback.message.edit_text("✏️ **Send the File Auto-Delete time in MINUTES.**\n(e.g., `30` for 30 minutes).", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_autodelete")]]))
 
     elif action == "time_filter_del":
-        ADMIN_STATE[user_id] = "setup_filter_time"
-        await callback.message.edit_text("✏️ **Send the Search Result Auto-Delete time in MINUTES.**\n(e.g., `5` for 5 minutes).", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_filters")]]))
+        ADMIN_STATE[user_id] = {"state": "setup_filter_time", "msg_id": callback.message.id}
+        await callback.message.edit_text("✏️ **Send the Search Result Auto-Delete time in MINUTES.**\n(e.g., `5` for 5 minutes).", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_autodelete")]]))
 
 
 async def process_broadcast_queue(client: Client):
@@ -413,11 +485,11 @@ async def get_worker1_text_and_buttons():
     ]
     return text, InlineKeyboardMarkup(buttons)
 
+
 async def get_worker2_text_and_buttons():
     db_stats = await db.global_stats()
     total_files = db_stats.get('total_files', 0)
     indexed_meta = db_stats.get('indexed_metadata', 0)
-    corrupted_files = db_stats.get('corrupted_files', 0)  
     pending_meta = total_files - indexed_meta
 
     meta_eta_seconds = pending_meta * 5.5 
@@ -428,7 +500,6 @@ async def get_worker2_text_and_buttons():
         f"⚙️ **WORKER 2: Language & Metadata Extraction**\n"
         f"🔄 **Status:** `Processing Database Shards...`\n\n"
         f"• **Extracted Files:** `{indexed_meta:,}` / `{total_files:,}`\n"
-        f"• **Corrupted / Skipped:** `{corrupted_files:,}` files\n" 
         f"• **Current Progress:** `{meta_pct:.1f}%` complete\n"
         f"• **Pending Migration Queue:** `{pending_meta:,}` files left\n"
         f"• **Estimated Completion Time (ETA):** `{meta_eta_string}`\n\n"
