@@ -3,6 +3,7 @@ import aiohttp
 import asyncio
 import urllib.parse
 import json
+import re
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from database.multi_db import db
@@ -10,11 +11,10 @@ from config import Config
 
 logger = logging.getLogger(__name__)
 
-# Shared memory for verification loops
 VERIFICATION_TOKENS = {}
 
 async def get_shortlink(url: str, api: str, site: str) -> str:
-    """🚀 The Ultimate Dynamic Shortener Engine with '|| Custom Key' Support"""
+    """🚀 Master Engine: Automatically parses literal developer links!"""
     try:
         custom_key = None
         if "||" in site:
@@ -28,7 +28,7 @@ async def get_shortlink(url: str, api: str, site: str) -> str:
         # 1. TINYURL ENGINE
         if "tinyurl.com" in site.lower():
             async with aiohttp.ClientSession() as session:
-                if api: 
+                if api and api != "default": 
                     headers = {"Authorization": f"Bearer {api}", "Content-Type": "application/json"}
                     async with session.post("https://api.tinyurl.com/create", headers=headers, json={"url": url}) as response:
                         try:
@@ -40,17 +40,18 @@ async def get_shortlink(url: str, api: str, site: str) -> str:
                         if response.status == 200: return await response.text()
             return url 
 
-        # 2. DYNAMIC TEMPLATE ENGINE
+        # 2. RAW DEVELOPER LINK AUTO-PARSER
         async with aiohttp.ClientSession() as session:
-            if "{url}" in site and "{api}" in site:
+            if "{url}" in site:
+                # Legacy template support (just in case)
                 api_url = site.replace("{api}", api).replace("{url}", safe_url)
             else:
-                if not site.startswith("http"): site = f"https://{site}"
-                if "gplinks.in" in site or "gplinks.com" in site: site = "https://api.gplinks.com/api"
-                api_url = f"{site}?api={api}&url={safe_url}&format=json"
+                # 🚀 THE FIX: User pasted the EXACT raw link (e.g. url=yourdestinationlink.com)
+                # This Regex finds "url=..." or "link=..." and replaces the fake URL with the real one!
+                api_url = re.sub(r"([?&](url|link)=)[^&]+", r"\g<1>" + safe_url, site, flags=re.IGNORECASE)
 
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
                 "Accept": "application/json, text/plain, */*"
             }
 
@@ -59,7 +60,6 @@ async def get_shortlink(url: str, api: str, site: str) -> str:
                 
                 try:
                     data = json.loads(text_response)
-                    # Hunt for the Custom Key first!
                     if custom_key and custom_key in data: return data[custom_key]
                     elif "shortenedUrl" in data: return data["shortenedUrl"]
                     elif "short" in data: return data["short"]
@@ -77,40 +77,44 @@ async def get_shortlink(url: str, api: str, site: str) -> str:
 
 @Client.on_message(filters.command("setshort") & filters.private & filters.user(Config.ADMINS))
 async def live_test_shortener(client: Client, message: Message):
-    """Admin command to dynamically test and save a shortener configuration."""
-    if len(message.command) < 3:
+    if len(message.command) < 2:
         return await message.reply_text(
-            "⚠️ **Format Error!**\nUse this format to test and set your shortener:\n\n"
-            "`/setshort [API_KEY] [URL_TEMPLATE] || [OPTIONAL_JSON_KEY]`\n\n"
-            "**Example 1 (Standard):**\n`/setshort 35d945... https://api.gplinks.com/api?api={api}&url={url}&format=text`\n\n"
-            "**Example 2 (Custom JSON Key):**\n`/setshort 12345xyz https://weirdsite.com/api?token={api}&link={url} || resulting_url`"
+            "⚠️ **Format Error!**\nJust paste the EXACT link from your shortener's API documentation!\n\n"
+            "**Example:**\n`/setshort https://api.gplinks.com/api?api=35d94...&url=yourdestinationlink.com&alias=CustomAlias`"
         )
     
-    api_key = message.command[1]
-    template_str = message.text.split(" ", 2)[2].strip()
+    # Grab whatever the user pasted after "/setshort "
+    raw_input = message.text.split(" ", 1)[1].strip()
     
-    status_msg = await message.reply_text("🔄 **Testing API Connection...**\nPlease wait, checking if your formula works...")
+    template_str = raw_input
+    if "||" in raw_input:
+        template_str = raw_input.split("||")[0].strip()
+        
+    # Automatically steal the API key from their string so we don't have to ask for it separately!
+    parsed = urllib.parse.urlparse(template_str)
+    qs = urllib.parse.parse_qs(parsed.query)
+    extracted_api_key = qs.get("api", [""])[0] or qs.get("token", [""])[0] or "default"
     
-    # Run a LIVE TEST using Google as the dummy link
-    test_link = await get_shortlink("https://google.com", api_key, template_str)
+    status_msg = await message.reply_text("🔄 **Testing exact developer link...**")
+    
+    # Test link
+    test_link = await get_shortlink("https://google.com", extracted_api_key, raw_input)
     
     if test_link and test_link != "https://google.com" and test_link.startswith("http"):
-        # Test Passed! Save to Database
         await db.update_settings({
-            "shortener_api": api_key,
-            "shortener_url": template_str,
+            "shortener_api": extracted_api_key,
+            "shortener_url": raw_input,
             "shortener_enabled": True
         })
         await status_msg.edit_text(
             f"✅ **TEST PASSED & SAVED!**\n\n"
             f"🌍 **Test Link Generated:**\n`{test_link}`\n\n"
-            f"⚙️ **Your Bot Configuration is now 🟢 ON and set to:**\n"
-            f"**API:** `{api_key}`\n"
-            f"**Template:** `{template_str}`"
+            f"⚙️ **Your Bot Configuration is now 🟢 ON.**\n"
+            f"I automatically extracted your API Key: `{extracted_api_key}` and configured the engine!"
         )
     else:
         await status_msg.edit_text(
             f"❌ **TEST FAILED! (Not Saved)**\n\n"
-            f"The server connected, but failed to return a valid shortlink. Check your formula or JSON key.\n\n"
-            f"Make sure you are using `{{api}}` and `{{url}}` exactly as written!"
+            f"The server connected, but failed to return a valid shortlink. Check your URL.\n\n"
+            f"Are you sure you pasted the complete string from the documentation?"
         )
