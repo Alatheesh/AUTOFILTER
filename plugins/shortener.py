@@ -77,16 +77,15 @@ async def get_shortlink(url: str, api: str, site: str) -> str:
 
 @Client.on_message(filters.command("setshort") & filters.private & filters.user(Config.ADMINS))
 async def live_test_shortener(client: Client, message: Message):
-    # 🚀 ROBUST FIX: Combine all command parts and clean up any potential "invisible" characters
     if len(message.command) < 2:
         return await message.reply_text("⚠️ **Format Error!** Usage: `/setshort <Your_Full_API_URL>`")
     
-    # Take everything after the command, and strip out any potential weird formatting
-    full_url = message.text.split(" ", 1)[1].strip().replace(" ", "").replace("\n", "")
+    # 🚀 THE FIX: .strip("'\"`") removes quotes and backticks automatically!
+    full_url = message.text.split(" ", 1)[1].strip().strip("'\"`").replace(" ", "")
     
     status_msg = await message.reply_text("🔄 **Testing exact developer link...**")
     
-    # 🛡️ THE FIX: Use the engine to verify
+    # Test link
     test_link = await get_shortlink("https://google.com", "dummy_api", full_url)
     
     if test_link and test_link != "https://google.com" and test_link.startswith("http"):
@@ -101,5 +100,4 @@ async def live_test_shortener(client: Client, message: Message):
         })
         await status_msg.edit_text(f"✅ **TEST PASSED!**\n\n⚙️ **API:** `{extracted_api_key}`\n🌍 **Template:** `{full_url}`")
     else:
-        # If it fails, report exactly what we received so we can debug
-        await status_msg.edit_text(f"❌ **TEST FAILED!**\n\nDid the bot receive the right URL?\nReceived: `{full_url}`\n\nEnsure there are NO spaces in your URL string.")
+        await status_msg.edit_text(f"❌ **TEST FAILED!**\n\nReceived: `{full_url}`\nEnsure there are NO spaces and it is a valid URL.")
