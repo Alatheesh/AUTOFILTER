@@ -157,7 +157,7 @@ def build_safe_webapp_url(client_username, short_id, data_url):
     bot_username = client_username or "Bot"
     return f"{base_link}?bot={bot_username}&id={short_id}&url={safe_url}"
 
-@Client.on_message((filters.group | filters.private) & filters.text & ~filters.command(["start", "help", "about", "source", "settings", "request", "plot", "history", "clear_history", "broadcast", "stats", "backup", "admin", "index", "batch", "migrate_db", "clear_job", "optimize_db", "connect", "disconnect"]))
+@Client.on_message((filters.group | filters.private) & filters.text & ~filters.command(["start", "help", "about", "source", "settings", "request", "plot", "history", "clear_history", "broadcast", "stats", "backup", "admin", "index", "batch", "migrate_db", "clear_job", "optimize_db", "connect", "disconnect", "setshort"]))
 async def auto_filter(client: Client, message: Message):
     query = message.text.strip()
     if len(query) < 3: return
