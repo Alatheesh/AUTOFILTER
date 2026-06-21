@@ -10,6 +10,46 @@ from database.multi_db import db
 from config import Config
 
 # ==========================================
+# 🛠️ THE BUTTON PARSER ENGINE
+# ==========================================
+def parse_inline_buttons(text: str):
+    """Converts [Text | Link] syntax into actual Telegram Inline Buttons."""
+    if not text:
+        return text, None
+        
+    markup = []
+    lines = text.split('\n')
+    final_lines = []
+    
+    for line in lines:
+        # Find all button patterns in the current line
+        buttons = re.findall(r'\[([^\|]+)\|([^\]]+)\]', line)
+        if buttons:
+            row = []
+            for btn_text, btn_link in buttons:
+                btn_text = btn_text.strip()
+                btn_link = btn_link.strip()
+                
+                # If it's a web URL
+                if btn_link.startswith('http://') or btn_link.startswith('https://'):
+                    row.append(InlineKeyboardButton(btn_text, url=btn_link))
+                # If it's a bot callback (like fuz_MovieName)
+                else:
+                    row.append(InlineKeyboardButton(btn_text, callback_data=btn_link))
+            markup.append(row)
+            # Remove the parsed text buttons from the message body
+            line = re.sub(r'\[([^\|]+)\|([^\]]+)\]', '', line).strip()
+            if line:
+                final_lines.append(line)
+        else:
+            final_lines.append(line)
+            
+    if not markup:
+        return text, None
+        
+    return '\n'.join(final_lines), InlineKeyboardMarkup(markup)
+
+# ==========================================
 # ⚙️ CORE EXECUTION LOOP
 # ==========================================
 async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: Message, command_text: str, batch_id: str):
@@ -23,6 +63,13 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
     sent, failed, skipped = 0, 0, 0
     start_time = time.time()
 
+    # Pre-Parse Text and Buttons outside the loop for maximum speed
+    base_text = target_msg.text or target_msg.caption or ""
+    parsed_text, parsed_markup = parse_inline_buttons(base_text)
+    
+    # If the user formatted buttons with [], use those. Otherwise, use natively attached buttons.
+    base_markup = parsed_markup if parsed_markup else target_msg.reply_markup
+
     async for user in db.get_all_users():
         user_id = user.get("user_id")
         if not user_id: continue
@@ -34,12 +81,19 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
             continue
             
         try:
+            # If it's a text message, replace variables and send
             if target_msg.text:
-                custom_text = target_msg.text.replace("{first_name}", first_name)
-                markup = target_msg.reply_markup if target_msg.reply_markup else None
-                sent_msg = await client.send_message(user_id, custom_text, disable_notification=is_silent, reply_markup=markup)
+                custom_text = parsed_text.replace("{first_name}", first_name)
+                sent_msg = await client.send_message(user_id, custom_text, disable_notification=is_silent, reply_markup=base_markup)
+            
+            # If it's an image/video with a caption
+            elif target_msg.caption:
+                custom_caption = parsed_text.replace("{first_name}", first_name)
+                sent_msg = await client.send_cached_media(user_id, file_id=target_msg.photo.file_id if target_msg.photo else target_msg.video.file_id, caption=custom_caption, disable_notification=is_silent, reply_markup=base_markup)
+            
+            # If it's a raw forward/poll
             else:
-                sent_msg = await target_msg.copy(user_id, disable_notification=is_silent)
+                sent_msg = await target_msg.copy(user_id, disable_notification=is_silent, reply_markup=base_markup)
                 
             await db.log_broadcast(batch_id, user_id, sent_msg.id)
             sent += 1
@@ -50,7 +104,7 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
         except FloodWait as e:
             await asyncio.sleep(e.value)
             try:
-                sent_msg = await target_msg.copy(user_id, disable_notification=is_silent)
+                sent_msg = await target_msg.copy(user_id, disable_notification=is_silent, reply_markup=base_markup)
                 await db.log_broadcast(batch_id, user_id, sent_msg.id)
                 sent += 1
             except: failed += 1
@@ -90,8 +144,7 @@ async def schedule_auto_delete(client, user_id, msg_id, hours):
 # ⏰ SCHEDULING WORKER
 # ==========================================
 async def schedule_worker(client: Client):
-    """Background worker that continuously monitors the database for queued broadcasts."""
-    await asyncio.sleep(10) # Let bot boot up safely
+    await asyncio.sleep(10)
     while True:
         try:
             due_jobs = await db.get_due_broadcasts()
@@ -111,7 +164,7 @@ async def schedule_worker(client: Client):
                 
                 await db.mark_broadcast_complete(job["_id"])
         except Exception: pass
-        await asyncio.sleep(60) # Checks the database every 1 minute
+        await asyncio.sleep(60)
 
 # ==========================================
 # ⚙️ THE COMMAND CENTER
@@ -122,21 +175,15 @@ async def ultimate_broadcast(client: Client, message: Message):
     command_text = message.text.lower()
     batch_id = f"Batch_{str(uuid.uuid4())[:6].upper()}"
     
-    # 🚀 Check for the Date Tag: Supports YYYY-MM-DD HH:MM or YYYY-MM-DD HH-MM
     schedule_match = re.search(r'(\d{4}-\d{2}-\d{2}\s+\d{2}[:\-]\d{2})', command_text)
     
     if schedule_match:
         raw_date = schedule_match.group(1)
-        # Normalize HH-MM to HH:MM if you used a hyphen
         if len(raw_date) == 16 and raw_date[13] == "-":
             raw_date = raw_date[:13] + ":" + raw_date[14:]
             
         try:
-            # 🇮🇳 THE IST TIMEZONE FIX
-            # Create a timezone object for IST (UTC + 5 hours and 30 minutes)
             ist_timezone = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
-            
-            # Parse the time and explicitly attach the IST timezone to it
             dt = datetime.datetime.strptime(raw_date, "%Y-%m-%d %H:%M").replace(tzinfo=ist_timezone)
             run_at_ts = dt.timestamp()
             
@@ -148,7 +195,6 @@ async def ultimate_broadcast(client: Client, message: Message):
         except ValueError:
             return await message.reply_text("❌ Invalid date format. Please use `YYYY-MM-DD HH:MM`.")
 
-    # If no date tag is found, run the broadcast immediately
     await execute_broadcast_run(client, message.chat.id, target_msg, command_text, batch_id)
 
 # ==========================================
