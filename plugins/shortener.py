@@ -77,44 +77,39 @@ async def get_shortlink(url: str, api: str, site: str) -> str:
 
 @Client.on_message(filters.command("setshort") & filters.private & filters.user(Config.ADMINS))
 async def live_test_shortener(client: Client, message: Message):
-    if len(message.command) < 2:
+    # 🚀 FIX: Accept text from either message.text or message.caption (in case it's a file)
+    raw_input = (message.text or message.caption).split(" ", 1)
+    
+    if len(raw_input) < 2:
         return await message.reply_text(
-            "⚠️ **Format Error!**\nJust paste the EXACT link from your shortener's API documentation!\n\n"
-            "**Example:**\n`/setshort https://api.gplinks.com/api?api=35d94...&url=yourdestinationlink.com&alias=CustomAlias`"
+            "⚠️ **Format Error!**\nUse this format:\n`/setshort <Your_Full_API_URL>`"
         )
     
-    # Grab whatever the user pasted after "/setshort "
-    raw_input = message.text.split(" ", 1)[1].strip()
-    
-    template_str = raw_input
-    if "||" in raw_input:
-        template_str = raw_input.split("||")[0].strip()
-        
-    # Automatically steal the API key from their string so we don't have to ask for it separately!
-    parsed = urllib.parse.urlparse(template_str)
-    qs = urllib.parse.parse_qs(parsed.query)
-    extracted_api_key = qs.get("api", [""])[0] or qs.get("token", [""])[0] or "default"
-    
+    template_str = raw_input[1].strip()
     status_msg = await message.reply_text("🔄 **Testing exact developer link...**")
     
-    # Test link
-    test_link = await get_shortlink("https://google.com", extracted_api_key, raw_input)
+    # Test link with a dummy URL
+    test_link = await get_shortlink("https://google.com", "dummy_api", template_str)
     
     if test_link and test_link != "https://google.com" and test_link.startswith("http"):
+        # Extract API key directly from the user's string
+        parsed = urllib.parse.urlparse(template_str)
+        qs = urllib.parse.parse_qs(parsed.query)
+        extracted_api_key = qs.get("api", [""])[0] or qs.get("token", [""])[0] or "default"
+        
         await db.update_settings({
             "shortener_api": extracted_api_key,
-            "shortener_url": raw_input,
+            "shortener_url": template_str,
             "shortener_enabled": True
         })
         await status_msg.edit_text(
             f"✅ **TEST PASSED & SAVED!**\n\n"
             f"🌍 **Test Link Generated:**\n`{test_link}`\n\n"
-            f"⚙️ **Your Bot Configuration is now 🟢 ON.**\n"
-            f"I automatically extracted your API Key: `{extracted_api_key}` and configured the engine!"
+            f"⚙️ **Your Bot Configuration is now 🟢 ON.**"
         )
     else:
         await status_msg.edit_text(
-            f"❌ **TEST FAILED! (Not Saved)**\n\n"
-            f"The server connected, but failed to return a valid shortlink. Check your URL.\n\n"
-            f"Are you sure you pasted the complete string from the documentation?"
+            f"❌ **TEST FAILED!**\n\n"
+            f"The server failed to return a link. Ensure you pasted the URL *exactly* as it appears in your API documentation. "
+            f"If it's a JSON response, ensure the shortener isn't returning an error."
         )
