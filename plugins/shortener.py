@@ -5,6 +5,7 @@ import urllib.parse
 import json
 import re
 from pyrogram import Client, filters
+from pyrogram.types import Message
 from database.multi_db import db
 from config import Config
 
@@ -42,11 +43,10 @@ async def get_shortlink(url: str, api: str, site: str) -> str:
 
         # 2. Dynamic Template Engine
         async with aiohttp.ClientSession() as session:
-            # If the user provided a full raw API link, perform the template injection
             if "{url}" in site:
                 api_url = site.replace("{api}", api).replace("{url}", safe_url)
             else:
-                # Fallback to regex injection for user-provided raw links (e.g. url=...)
+                # Regex injection for raw links
                 api_url = re.sub(r"([?&](url|link)=)[^&]+", r"\g<1>" + safe_url, site, flags=re.IGNORECASE)
 
             headers = {
@@ -70,12 +70,15 @@ async def get_shortlink(url: str, api: str, site: str) -> str:
 
 @Client.on_message(filters.command("setshort") & filters.private & filters.user(Config.ADMINS))
 async def live_test_shortener(client: Client, message: Message):
-    # Strip quotes, backticks, and whitespace aggressively
+    if len(message.command) < 2:
+        return await message.reply_text("⚠️ **Format Error!** Usage: `/setshort <Your_Full_API_URL>`")
+    
+    # 1. Clean the input
     raw_input = message.text.split(" ", 1)[1].strip().strip("'\"`")
     
     status_msg = await message.reply_text("🔄 **Running bulletproof test...**")
     
-    # FORCE TEST: Use google.com so GPLinks API doesn't error out on dummy URLs
+    # 2. FORCE TEST: Use google.com so GPLinks API doesn't error out on dummy URLs
     test_template = re.sub(r"(url|link)=[^&]+", r"\1=https://google.com", raw_input, flags=re.IGNORECASE)
     test_link = await get_shortlink("https://google.com", "dummy", test_template)
     
