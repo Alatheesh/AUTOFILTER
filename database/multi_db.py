@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from bson.objectid import ObjectId
 from motor.motor_asyncio import AsyncIOMotorClient
 from typing import List, Dict, Any, Optional
@@ -29,6 +30,7 @@ class MultiDB:
             self.users = self.clients[0][db_name]["users"]
             self.groups = self.clients[0][db_name]["groups"]
             self.jobs = self.clients[0][db_name]["indexing_jobs"]
+            self.broadcast_logs = self.clients[0][db_name]["broadcast_logs"]
 
     async def ensure_indexes(self):
         """Builds MongoDB Text Indexes for lightning-fast searching."""
@@ -201,7 +203,7 @@ class MultiDB:
             "total_files": 0, 
             "total_size_bytes": 0, 
             "indexed_metadata": 0,
-            "corrupted_files": 0,  # <--- NEW CORRUPTED COUNTER
+            "corrupted_files": 0,  
             "shard_distribution": []
         }
         
@@ -217,7 +219,6 @@ class MultiDB:
                 processed = await coll.count_documents({"language": {"$exists": True, "$ne": "pending"}})
                 stats["indexed_metadata"] += processed
 
-                # Count how many files were specifically tagged as corrupted
                 corrupted = await coll.count_documents({"language": "corrupted"})
                 stats["corrupted_files"] += corrupted
             except Exception:
@@ -236,5 +237,60 @@ class MultiDB:
         avg_obj_size = stats["total_size_bytes"] / stats["total_files"] if stats["total_files"] > 0 else 300
         stats["estimated_files_left"] = int(stats["space_left_bytes"] / avg_obj_size) if avg_obj_size > 0 else 0
         return stats
+
+    # ==========================================
+    # 📢 BROADCAST ENGINE DATABASE LOGIC
+    # ==========================================
+    
+    async def get_all_users(self):
+        """Yields all users for the broadcast loop."""
+        if not self.clients: return
+        users = self.users.find({})
+        async for user in users:
+            yield user
+
+    async def log_broadcast(self, batch_id: str, user_id: int, message_id: int):
+        """Saves a message to the 48-Hour Recall Vault."""
+        if not self.clients: return
+        await self.broadcast_logs.insert_one({
+            "batch_id": batch_id,
+            "user_id": user_id,
+            "message_id": message_id,
+            "timestamp": time.time()
+        })
+
+    async def get_broadcast_logs(self, batch_id: str):
+        """Fetches all sent messages for a specific batch."""
+        if not self.clients: return []
+        return self.broadcast_logs.find({"batch_id": batch_id})
+
+    async def delete_broadcast_batch(self, batch_id: str):
+        """Wipes an entire batch from the database vault."""
+        if not self.clients: return
+        await self.broadcast_logs.delete_many({"batch_id": batch_id})
+
+    async def get_user_latest_broadcast(self, user_id: int):
+        """Finds the most recent broadcast sent to a specific user."""
+        if not self.clients: return None
+        return await self.broadcast_logs.find_one(
+            {"user_id": user_id}, 
+            sort=[("timestamp", -1)]
+        )
+
+    async def delete_single_broadcast_log(self, user_id: int, message_id: int):
+        """Removes a single user's message from the vault."""
+        if not self.clients: return
+        await self.broadcast_logs.delete_one({"user_id": user_id, "message_id": message_id})
+        
+    async def get_recent_batches(self):
+        """Gets unique batches from the last 48 hours for the Admin Menu."""
+        if not self.clients: return []
+        forty_eight_hours_ago = time.time() - (48 * 3600)
+        pipeline = [
+            {"$match": {"timestamp": {"$gte": forty_eight_hours_ago}}},
+            {"$group": {"_id": "$batch_id", "count": {"$sum": 1}}},
+            {"$sort": {"_id": -1}}
+        ]
+        return self.broadcast_logs.aggregate(pipeline)
 
 db = MultiDB(Config.DB_URIS, Config.DB_NAME)
