@@ -2,59 +2,26 @@ import logging
 import time
 import string
 import random
-import aiohttp
 import asyncio
-import urllib.parse
 from pyrogram import Client, filters
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import UserIsBlocked, PeerIdInvalid
 from database.multi_db import db
 from config import Config
 
+# 🚀 Import our new isolated engine!
+from plugins.shortener import VERIFICATION_TOKENS, get_shortlink
+
 logger = logging.getLogger(__name__)
 
-VERIFICATION_TOKENS = {}
-
 async def check_double_fsub(client: Client, user_id: int) -> bool:
-    if not Config.FSUB_CHANNELS:
-        return True
+    if not Config.FSUB_CHANNELS: return True
     for channel in Config.FSUB_CHANNELS:
         try:
             member = await client.get_chat_member(channel, user_id)
-            if member.status.value in ["left", "kicked", "banned", "restricted"]:
-                return False
-        except Exception:
-            return False
+            if member.status.value in ["left", "kicked", "banned", "restricted"]: return False
+        except Exception: return False
     return True
-
-async def get_shortlink(url: str, api: str, site: str) -> str:
-    """🚀 Uses the exact GPLinks Developer API format & Auto-Corrects Domains."""
-    try:
-        site = site.strip()
-        if not site.startswith("http"):
-            site = f"https://{site}"
-            
-        # 🚀 AUTO-CORRECT: GPLinks recently changed their API domain!
-        if "gplinks.in" in site or "gplinks.com" in site:
-            site = "https://api.gplinks.com/api"
-            
-        async with aiohttp.ClientSession() as session:
-            safe_url = urllib.parse.quote(url)
-            api_url = f"{site}?api={api}&url={safe_url}"
-            
-            async with session.get(api_url) as response:
-                try:
-                    data = await response.json()
-                    if "shortenedUrl" in data: return data["shortenedUrl"]
-                    elif "short" in data: return data["short"]
-                    elif "url" in data: return data["url"]
-                    elif data.get("status") == "error":
-                        logger.error(f"Shortener API Error Message: {data.get('message')}")
-                except Exception:
-                    logger.error(f"Shortener API failed (Not JSON). Raw Response: {await response.text()}")
-    except Exception as e:
-        logger.error(f"Shortener Network Error: {e}")
-    return url
 
 async def execute_file_delivery(client: Client, chat_id: int, file_id: str):
     try:
@@ -121,13 +88,11 @@ async def direct_send_callback(client: Client, callback: CallbackQuery):
                 trigger_ghost_self_destruct(client, chat_id, alert_msg.id, 120)
             except Exception: pass
 
-
 @Client.on_message(filters.command("start") & filters.private, group=1)
 async def deep_link_start(client: Client, message: Message):
     if len(message.command) > 1:
         cmd = message.command[1]
 
-        # 🚀 Instantly delete the user's /start command in PM to keep it clean!
         try: await message.delete()
         except Exception: pass
 
@@ -192,8 +157,8 @@ async def deep_link_start(client: Client, message: Message):
                     bot_me = await client.get_me()
                     verify_link = f"https://t.me/{bot_me.username}?start=verify_{token}"
                     
-                    api = settings.get("shortener_api") or settings.get("shortlink_api") or settings.get("api_key") or ""
-                    site = settings.get("shortener_url") or settings.get("shortlink_url") or settings.get("site_url") or "https://api.gplinks.com/api"
+                    api = settings.get("shortener_api") or ""
+                    site = settings.get("shortener_url") or "https://api.gplinks.com/api"
                     
                     if api: short_link = await get_shortlink(verify_link, api, site)
                     else: short_link = verify_link
@@ -201,7 +166,14 @@ async def deep_link_start(client: Client, message: Message):
                     del_enabled = settings.get("filter_delete_enabled", False)
                     del_time = settings.get("filter_delete_time", 5)
 
-                    v_req_text = f"🔒 **Verification Required**\n\nTo keep this bot alive, please verify your access. This will grant you **24 Hours of Unlimited Downloads!**\n\n👉 [Click Here to Verify]({short_link})"
+                    v_req_text = (
+                        "🔒 **Verification Required**\n\n"
+                        "To keep this bot alive, please verify your access. This will grant you **24 Hours of Unlimited Downloads!**\n\n"
+                        f"👉 [Click Here to Verify]({short_link})\n\n"
+                        "➖➖➖➖➖➖➖➖➖➖\n"
+                        "🛠 **Admin Note (If links are broken):**\n"
+                        "Use `/setshort <API_KEY> <URL_TEMPLATE>` to test and fix your configuration!"
+                    )
                     if del_enabled: v_req_text += f"\n\n⏳ *Note: This message will automatically delete in {del_time} minutes.*"
 
                     req_msg = await message.reply_text(
