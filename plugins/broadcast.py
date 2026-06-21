@@ -303,7 +303,7 @@ async def handle_user_reply_to_broadcast(client: Client, message: Message):
 
 @Client.on_message(filters.command("replybroadcast") & filters.user(Config.ADMINS) & filters.reply)
 async def smart_admin_reply(client: Client, message: Message):
-    """Allows admin to reply directly with optional auto-delete (-ask)."""
+    """Allows admin to reply directly to the forwarded message with default 48h auto-delete."""
     target_msg = message.reply_to_message
     target_user = None
     
@@ -320,12 +320,12 @@ async def smart_admin_reply(client: Client, message: Message):
     if len(message.command) < 2:
         return await message.reply_text("⚠️ **Format:** `/replybroadcast [-ask 10s] <your message>`")
         
-    # Get the raw text you typed
     raw_text = message.text.split(" ", 1)[1]
     
-    # 🌟 Check for the auto-delete flag
+    # 🌟 Check for the auto-delete flag, DEFAULT TO 48 HOURS (172800 seconds)
     ask_match = re.search(r'-ask\s+(\d+)([smh])', raw_text)
-    auto_delete_seconds = 0
+    auto_delete_seconds = 48 * 3600  # Default 48 hours
+    
     if ask_match:
         val = int(ask_match.group(1))
         unit = ask_match.group(2)
@@ -333,25 +333,27 @@ async def smart_admin_reply(client: Client, message: Message):
         elif unit == 'm': auto_delete_seconds = val * 60
         elif unit == 'h': auto_delete_seconds = val * 3600
         
-        # Remove the '-ask 10s' part from the actual message!
+        # Remove the '-ask' command from the actual message payload
         raw_text = re.sub(r'-ask\s+\d+[smh]', '', raw_text).strip()
         
     if not raw_text:
         return await message.reply_text("⚠️ You cannot send an empty message.")
     
     try:
-        # Send the message
         sent_msg = await client.send_message(
             chat_id=target_user, 
             text=f"👨‍💻 **Admin Reply:**\n\n{raw_text}"
         )
         
-        # Confirm to admin
         confirm_text = f"✅ **Reply successfully delivered to `{target_user}`.**"
-        if auto_delete_seconds > 0:
-            confirm_text += f"\n*(Will auto-delete in {auto_delete_seconds}s)*"
-            # Trigger the deletion timer
-            asyncio.create_task(schedule_auto_delete(client, target_user, sent_msg.id, auto_delete_seconds))
+        
+        if ask_match:
+            confirm_text += f"\n*(Will auto-delete in {auto_delete_seconds}s as requested)*"
+        else:
+            confirm_text += f"\n*(Will auto-delete in 48h by default)*"
+            
+        # Trigger the deletion timer
+        asyncio.create_task(schedule_auto_delete(client, target_user, sent_msg.id, auto_delete_seconds))
             
         await message.reply_text(confirm_text)
     except Exception as e:
