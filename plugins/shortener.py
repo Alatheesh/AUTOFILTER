@@ -44,6 +44,7 @@ async def get_shortlink(url: str, api: str, site: str) -> str:
         # 2. Dynamic Template Engine
         async with aiohttp.ClientSession() as session:
             if "{url}" in site:
+                # Replace both {api} and {url} seamlessly
                 api_url = site.replace("{api}", api).replace("{url}", safe_url)
             else:
                 # Regex injection for raw links
@@ -73,22 +74,51 @@ async def live_test_shortener(client: Client, message: Message):
     if len(message.command) < 2:
         return await message.reply_text("⚠️ **Format Error!** Usage: `/setshort <Your_Full_API_URL>`")
     
-    # 1. Clean the input
     raw_input = message.text.split(" ", 1)[1].strip().strip("'\"`")
+    status_msg = await message.reply_text("🔄 **Analyzing and cleaning API link...**")
     
-    status_msg = await message.reply_text("🔄 **Running bulletproof test...**")
+    # 🚀 --- THE URL AUTO-CLEANER ENGINE ---
+    parsed = urllib.parse.urlparse(raw_input)
+    qs = urllib.parse.parse_qs(parsed.query)
     
-    # 2. FORCE TEST: Use google.com so GPLinks API doesn't error out on dummy URLs
-    test_template = re.sub(r"(url|link)=[^&]+", r"\1=https://google.com", raw_input, flags=re.IGNORECASE)
-    test_link = await get_shortlink("https://google.com", "dummy", test_template)
+    extracted_api_key = "default"
+    has_url = False
     
-    if test_link and test_link.startswith("http") and ("google" in test_link.lower() or "gplink" in test_link.lower()):
-        # Save valid config
-        parsed = urllib.parse.urlparse(raw_input)
-        qs = urllib.parse.parse_qs(parsed.query)
-        extracted_api_key = qs.get("api", [""])[0] or qs.get("token", [""])[0] or "default"
+    # 1. Standardize Query Parameters
+    for key in list(qs.keys()):
+        key_lower = key.lower()
         
-        await db.update_settings({"shortener_api": extracted_api_key, "shortener_url": raw_input, "shortener_enabled": True})
-        await status_msg.edit_text(f"✅ **SUCCESS!**\n\nConfig saved. The bot will now use this template.")
+        # Lock the API Key parameter safely
+        if key_lower in ['api', 'token']:
+            extracted_api_key = qs[key][0]
+            qs[key] = ['{api}']
+            
+        # Lock the Target URL parameter seamlessly
+        elif key_lower in ['url', 'link']:
+            qs[key] = ['{url}']
+            has_url = True
+            
+        # Purge dangerous parameters (Like the hardcoded Alias!)
+        elif key_lower in ['alias', 'format']:
+            del qs[key]
+            
+    # 2. Ensure URL placeholder exists if it was totally missing
+    if not has_url:
+        qs['url'] = ['{url}']
+        
+    # 3. Rebuild the pristine template
+    clean_query = urllib.parse.urlencode(qs, doseq=True).replace("%7Bapi%7D", "{api}").replace("%7Burl%7D", "{url}")
+    clean_template = urllib.parse.urlunparse((
+        parsed.scheme, parsed.netloc, parsed.path, parsed.params, clean_query, parsed.fragment
+    ))
+    
+    # 🚀 --- LIVE TEST THE CLEANED TEMPLATE ---
+    await status_msg.edit_text(f"🧪 **Testing Auto-Cleaned Template:**\n`{clean_template}`\n\nPlease wait...")
+    
+    test_link = await get_shortlink("https://google.com", extracted_api_key, clean_template)
+    
+    if test_link and test_link.startswith("http") and ("google" in test_link.lower() or "gplink" in test_link.lower() or "short" in test_link.lower()):
+        await db.update_settings({"shortener_api": extracted_api_key, "shortener_url": clean_template, "shortener_enabled": True})
+        await status_msg.edit_text(f"✅ **SUCCESS!**\n\nThe bot perfectly cleaned your link, stripped bad tags (like alias), and isolated your API key.\n\n**API Key:** `{extracted_api_key}`\n**Template:** `{clean_template}`\n\n🟢 **Shortener is now ACTIVE!**")
     else:
-        await status_msg.edit_text(f"❌ **FAILED.**\n\nThe API did not return a valid link. Ensure your key is correct and valid.\n\nInput received: `{raw_input}`")
+        await status_msg.edit_text(f"❌ **FAILED.**\n\nThe API did not return a valid link. Ensure your domain is correct.\n\nCleaned Template Tested:\n`{clean_template}`\n\nResponse Received:\n`{test_link}`")
