@@ -10,16 +10,15 @@ logger = logging.getLogger(__name__)
 
 class MultiDB:
     def __init__(self):
-        # Parse comma-separated URIs from environment/config
-        raw_uris = getattr(Config, "DB_URIS", "") or getattr(Config, "DATABASE_URI", "")
-        if not raw_uris:
+        # 🚀 FIX: Config.DB_URIS is already a list! No need to split()
+        self.uris = getattr(Config, "DB_URIS", [])
+        
+        if not self.uris:
             raise ValueError("❌ No database URIs found in configuration (DB_URIS is empty)!")
             
-        self.uris = [uri.strip() for uri in raw_uris.split(",") if uri.strip()]
         self.clients: List[AsyncIOMotorClient] = []
         self.collections: List[Any] = []
         
-        # Extract database name from the first URI or default to 'AutoFilter'
         match = re.search(r"mongodb\+srv://[^/]+/([^?]+)", self.uris[0])
         db_name = match.group(1) if match else "AutoFilter"
         
@@ -41,6 +40,8 @@ class MultiDB:
         master_db = self.clients[0][db_name]
         self.users = master_db["users"]
         self.settings = master_db["settings"]
+        self.groups = master_db["groups"]
+        self.jobs = master_db["indexing_jobs"]  # Worker 1 State Memory
         self.broadcast_logs = master_db["broadcast_logs"]
         self.batch_stats = master_db["batch_stats"]
         self.scheduled_broadcasts = master_db["scheduled_broadcasts"]
@@ -75,7 +76,6 @@ class MultiDB:
                 physical_used = db_stats.get("storageSize", 0) + db_stats.get("indexSize", 0)
                 doc_count = await coll.estimated_document_count()
                 
-                # Check if this shard has hit the 800,000 file limit
                 is_full_for_indexing = doc_count >= self.MAX_FILES_PER_SHARD
                 
                 new_metrics.append({
@@ -105,15 +105,12 @@ class MultiDB:
         
         await self._update_shard_metrics()
         
-        # Filter out shards that hit the 800k document limit
         available_shards = [s for s in self.shard_metrics if not s["is_full_for_indexing"]]
         
         if not available_shards:
             logger.critical(f"🚨 ALL MONGO SHARDS HAVE REACHED THE {self.MAX_FILES_PER_SHARD} FILE LIMIT!")
-            # Fallback to the one with the lowest count anyway to prevent bot crash
             target_shard = min(self.shard_metrics, key=lambda x: x["doc_count"])["index"]
         else:
-            # Route directly to the shard with the absolute lowest document count
             target_shard = min(available_shards, key=lambda x: x["doc_count"])["index"]
             
         try:
@@ -141,11 +138,11 @@ class MultiDB:
     # ==========================================
     # 🔍 PARALLEL SEARCH ENGINE (DIVIDE & CONQUER)
     # ==========================================
-    async def search_files(self, query: str, skip: int = 0, limit: int = 10) -> Tuple[List[Dict[str, Any]], int]:
+    async def search_files(self, query: str, skip: int = 0, limit: int = 10, exact: bool = False) -> Tuple[List[Dict[str, Any]], int]:
         """Queries all database shards simultaneously in parallel and merges results seamlessly."""
         if not self.collections: return [], 0
         
-        text_filter = {"$text": {"$search": query}}
+        text_filter = {"$text": {"$search": f"\"{query}\"" if exact else query}}
         
         async def _safe_search(coll, filter_query):
             try:
@@ -153,7 +150,8 @@ class MultiDB:
                 return await cursor.to_list(length=limit + skip)
             except Exception:
                 try:
-                    reg_filter = {"file_name": {"$regex": query, "$options": "i"}}
+                    regex_pattern = f".*{'.*'.join(query.split())}.*"
+                    reg_filter = {"title": {"$regex": regex_pattern, "$options": "i"}}
                     cursor = coll.find(reg_filter).limit(limit + skip)
                     return await cursor.to_list(length=limit + skip)
                 except Exception:
@@ -176,7 +174,7 @@ class MultiDB:
         total_found = len(unique_files)
         paginated_files = unique_files[skip:skip + limit]
         
-        return paginated_files, total_found
+        return paginated_files
 
     # ==========================================
     # 💾 THE PERFECT ANALYTICS SYSTEM
@@ -197,12 +195,10 @@ class MultiDB:
         else:
             estimated_capacity_left = 0
 
-        # Build clean distribution report for the UI
         distribution = []
         for s in self.shard_metrics:
             distribution.append(s["doc_count"])
 
-        # Fetch indexed metadata (Worker 2 progress)
         indexed_meta = 0
         corrupted_files = 0
         for coll in self.collections:
@@ -311,15 +307,31 @@ class MultiDB:
         return res.deleted_count > 0
 
     # ==========================================
-    # 📝 OTHER HELPERS
+    # 📝 OTHER HELPERS & WORKER 1 MEMORY
     # ==========================================
     async def get_active_job(self):
-        if not self.clients: return None
-        return await self.clients[0][self.users.database.name]["indexing_jobs"].find_one({"status": {"$in": ["pending", "processing"]}})
+        return await self.jobs.find_one({"status": {"$in": ["pending", "processing"]}})
 
     async def update_job(self, job_id: str, updates: dict):
-        if not self.clients: return
-        await self.clients[0][self.users.database.name]["indexing_jobs"].update_one({"_id": job_id}, {"$set": updates})
+        await self.jobs.update_one({"_id": job_id}, {"$set": updates})
+
+    async def add_index_job(self, chat_id, chat_name, last_msg_id):
+        job_id = f"job_{chat_id}"
+        await self.jobs.update_one(
+            {"_id": job_id},
+            {"$set": {
+                "_id": job_id,
+                "chat_id": chat_id,
+                "chat_name": chat_name,
+                "current_id": last_msg_id,
+                "status": "pending",
+                "scanned": 0,
+                "saved": 0,
+                "duplicates": 0
+            }},
+            upsert=True
+        )
+        return True
 
     async def check_exists(self, crypto_hash: str) -> bool:
         if not self.collections: return False
@@ -327,9 +339,14 @@ class MultiDB:
         results = await asyncio.gather(*tasks)
         return any(res is not None for res in results)
 
-    async def get_file(self, file_id: str) -> Optional[Dict[str, Any]]:
+    async def get_file(self, db_id: str) -> Optional[Dict[str, Any]]:
         if not self.collections: return None
-        tasks = [coll.find_one({"_id": file_id}) for coll in self.collections]
+        try:
+            from bson.objectid import ObjectId
+            obj_id = ObjectId(db_id)
+        except Exception: return None
+        
+        tasks = [coll.find_one({"_id": obj_id}) for coll in self.collections]
         results = await asyncio.gather(*tasks)
         for res in results:
             if res: return res
@@ -347,19 +364,23 @@ class MultiDB:
         await self.users.update_one({"user_id": user_id}, {"$set": {key: value}}, upsert=True)
 
     async def get_group_settings(self, chat_id: int):
-        group = await self.clients[0][self.users.database.name]["groups"].find_one({"chat_id": chat_id})
+        group = await self.groups.find_one({"chat_id": chat_id})
         if not group:
             default = {
                 "chat_id": chat_id, "search_mode": "let_members_choose",
                 "quality_lock": "none", "language_lock": "none", "size_lock": "none", 
                 "admins": [], "connected_by": None
             }
-            await self.clients[0][self.users.database.name]["groups"].insert_one(default)
+            await self.groups.insert_one(default)
             return default
         return group
 
     async def update_group_setting(self, chat_id: int, key: str, value: Any):
-        await self.clients[0][self.users.database.name]["groups"].update_one({"chat_id": chat_id}, {"$set": {key: value}}, upsert=True)
+        await self.groups.update_one({"chat_id": chat_id}, {"$set": {key: value}}, upsert=True)
+
+    async def get_connected_groups(self, user_id: int):
+        cursor = self.groups.find({"connected_by": user_id})
+        return await cursor.to_list(length=50)
 
     async def get_settings(self) -> Dict[str, Any]:
         settings = await self.settings.find_one({"_id": "bot_settings"})
