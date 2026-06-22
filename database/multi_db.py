@@ -1,82 +1,341 @@
-import asyncio
 import logging
 import time
-from bson.objectid import ObjectId
+import asyncio
+import re
+from typing import List, Dict, Any, Optional, Tuple
 from motor.motor_asyncio import AsyncIOMotorClient
-from typing import List, Dict, Any, Optional
 from config import Config
 
 logger = logging.getLogger(__name__)
 
 class MultiDB:
-    def __init__(self, uris: List[str], db_name: str):
+    def __init__(self):
+        # Parse comma-separated URIs from environment/config
+        raw_uris = getattr(Config, "DB_URIS", "") or getattr(Config, "DATABASE_URI", "")
+        if not raw_uris:
+            raise ValueError("❌ No database URIs found in configuration (DB_URIS is empty)!")
+            
+        self.uris = [uri.strip() for uri in raw_uris.split(",") if uri.strip()]
         self.clients: List[AsyncIOMotorClient] = []
-        self.collections = []
+        self.collections: List[Any] = []
         
-        for uri in uris:
+        # Extract database name from the first URI or default to 'AutoFilter'
+        match = re.search(r"mongodb\+srv://[^/]+/([^?]+)", self.uris[0])
+        db_name = match.group(1) if match else "AutoFilter"
+        
+        logger.info(f"⚙️ Initializing MultiDB Cluster with {len(self.uris)} shards...")
+        
+        for idx, uri in enumerate(self.uris):
             try:
                 client = AsyncIOMotorClient(uri)
-                client.get_io_loop = asyncio.get_running_loop
                 self.clients.append(client)
                 self.collections.append(client[db_name]["files"])
+                logger.info(f"✅ Successfully linked Shard {idx}")
             except Exception as e:
-                logger.error(f"Failed to connect to Mongo Shard URI: {e}")
-
+                logger.error(f"❌ Failed to connect to Shard {idx}: {e}")
+                
         if not self.collections:
-            logger.warning("No database collections active. Bot features will fail.")
-            
-        if self.clients:
-            self.settings = self.clients[0][db_name]["settings"]
-            self.users = self.clients[0][db_name]["users"]
-            self.groups = self.clients[0][db_name]["groups"]
-            self.jobs = self.clients[0][db_name]["indexing_jobs"]
-            self.broadcast_logs = self.clients[0][db_name]["broadcast_logs"]
-            self.scheduled_broadcasts = self.clients[0][db_name]["scheduled_broadcasts"]
-            self.batch_stats = self.clients[0][db_name]["batch_stats"]  # 🚀 NEW: Tracks engagement
+            raise RuntimeError("❌ MultiDB failed to connect to any active shards!")
+
+        # 👑 Core Administration Collections (Locked strictly to Shard 0)
+        master_db = self.clients[0][db_name]
+        self.users = master_db["users"]
+        self.settings = master_db["settings"]
+        self.broadcast_logs = master_db["broadcast_logs"]
+        self.batch_stats = master_db["batch_stats"]
+        self.scheduled_broadcasts = master_db["scheduled_broadcasts"]
+        
+        # Shared system cache for load balancer
+        self.shard_metrics: List[Dict[str, Any]] = []
+        self.last_metrics_update = 0
+        
+        # 🚨 THE HARD CAP FOR INDEXING (Worker 1 Only)
+        self.MAX_FILES_PER_SHARD = 800000 
+        self.MAX_SHARD_CAPACITY_BYTES = 512 * 1024 * 1024  # 512 MB for accurate /stats
 
     async def ensure_indexes(self):
-        """Builds MongoDB Text Indexes for lightning-fast searching."""
-        if not self.collections: return
-        for coll in self.collections:
+        """Ensures high-performance text indexing across all connected shards."""
+        for idx, coll in enumerate(self.collections):
             try:
-                await coll.create_index(
-                    [("title", "text")], 
-                    background=True,
-                    language_override="dummy_bot_lang"
-                )
-                await coll.create_index("language", background=True)
+                await coll.create_index([("file_name", "text"), ("caption", "text")])
+                logger.info(f"🔍 Text Index optimized for Shard {idx}")
             except Exception as e:
-                logger.error(f"Index creation error: {e}")
-        return True
+                logger.error(f"❌ Indexing failed on Shard {idx}: {e}")
 
-    async def add_index_job(self, chat_id, chat_name, last_msg_id):
-        job_id = f"job_{chat_id}"
-        await self.jobs.update_one(
-            {"_id": job_id},
-            {"$set": {
-                "_id": job_id,
-                "chat_id": chat_id,
-                "chat_name": chat_name,
-                "current_id": last_msg_id,
-                "status": "pending",
-                "scanned": 0,
-                "saved": 0,
-                "duplicates": 0
-            }},
+    async def _update_shard_metrics(self, force: bool = False):
+        """Queries the actual MongoDB storage engine to pull true physical disk metrics."""
+        now = time.time()
+        if not force and self.shard_metrics and (now - self.last_metrics_update < 60):
+            return  
+            
+        new_metrics = []
+        for idx, coll in enumerate(self.collections):
+            try:
+                db_stats = await coll.database.command("dbStats")
+                physical_used = db_stats.get("storageSize", 0) + db_stats.get("indexSize", 0)
+                doc_count = await coll.estimated_document_count()
+                
+                # Check if this shard has hit the 800,000 file limit
+                is_full_for_indexing = doc_count >= self.MAX_FILES_PER_SHARD
+                
+                new_metrics.append({
+                    "index": idx,
+                    "doc_count": doc_count,
+                    "physical_used": physical_used,
+                    "is_full_for_indexing": is_full_for_indexing
+                })
+            except Exception as e:
+                logger.error(f"⚠️ Could not pull real-time stats for Shard {idx}: {e}")
+                new_metrics.append({
+                    "index": idx,
+                    "doc_count": 0,
+                    "physical_used": 0,
+                    "is_full_for_indexing": False
+                })
+                
+        self.shard_metrics = new_metrics
+        self.last_metrics_update = now
+
+    # ==========================================
+    # ⚙️ WORKER 1: AUTO-ROUTING LOAD BALANCER
+    # ==========================================
+    async def insert_file(self, file_data: Dict[str, Any]) -> bool:
+        """Routes new files to the emptiest shard. Stops indexing into shards with >= 800,000 files."""
+        if not self.collections: return False
+        
+        await self._update_shard_metrics()
+        
+        # Filter out shards that hit the 800k document limit
+        available_shards = [s for s in self.shard_metrics if not s["is_full_for_indexing"]]
+        
+        if not available_shards:
+            logger.critical(f"🚨 ALL MONGO SHARDS HAVE REACHED THE {self.MAX_FILES_PER_SHARD} FILE LIMIT!")
+            # Fallback to the one with the lowest count anyway to prevent bot crash
+            target_shard = min(self.shard_metrics, key=lambda x: x["doc_count"])["index"]
+        else:
+            # Route directly to the shard with the absolute lowest document count
+            target_shard = min(available_shards, key=lambda x: x["doc_count"])["index"]
+            
+        try:
+            await self.collections[target_shard].insert_one(file_data)
+            self.shard_metrics[target_shard]["doc_count"] += 1
+            return True
+        except Exception as e:
+            logger.error(f"❌ Failed writing file to Shard {target_shard}: {e}")
+            return False
+
+    # ==========================================
+    # ⚙️ WORKER 2: SAFE CROSS-SHARD UPDATER
+    # ==========================================
+    async def update_file_metadata(self, file_id: str, update_data: Dict[str, Any]) -> bool:
+        """Updates language and subtitle tags. This runs freely regardless of shard limits."""
+        for idx, coll in enumerate(self.collections):
+            try:
+                result = await coll.update_one({"file_id": file_id}, {"$set": update_data})
+                if result.modified_count > 0:
+                    return True
+            except Exception as e:
+                logger.error(f"⚠️ Worker 2 Error updating Shard {idx}: {e}")
+        return False
+
+    # ==========================================
+    # 🔍 PARALLEL SEARCH ENGINE (DIVIDE & CONQUER)
+    # ==========================================
+    async def search_files(self, query: str, skip: int = 0, limit: int = 10) -> Tuple[List[Dict[str, Any]], int]:
+        """Queries all database shards simultaneously in parallel and merges results seamlessly."""
+        if not self.collections: return [], 0
+        
+        text_filter = {"$text": {"$search": query}}
+        
+        async def _safe_search(coll, filter_query):
+            try:
+                cursor = coll.find(filter_query).limit(limit + skip)
+                return await cursor.to_list(length=limit + skip)
+            except Exception:
+                try:
+                    reg_filter = {"file_name": {"$regex": query, "$options": "i"}}
+                    cursor = coll.find(reg_filter).limit(limit + skip)
+                    return await cursor.to_list(length=limit + skip)
+                except Exception:
+                    return []
+
+        tasks = [_safe_search(c, text_filter) for c in self.collections]
+        all_shard_results = await asyncio.gather(*tasks)
+        
+        merged_files = []
+        for shard_files in all_shard_results:
+            merged_files.extend(shard_files)
+            
+        seen_ids = set()
+        unique_files = []
+        for f in merged_files:
+            if f["file_id"] not in seen_ids:
+                unique_files.append(f)
+                seen_ids.add(f["file_id"])
+                
+        total_found = len(unique_files)
+        paginated_files = unique_files[skip:skip + limit]
+        
+        return paginated_files, total_found
+
+    # ==========================================
+    # 💾 THE PERFECT ANALYTICS SYSTEM
+    # ==========================================
+    async def global_stats(self) -> Dict[str, Any]:
+        """Calculates precise system analytics matching your MongoDB web portal exactly."""
+        await self._update_shard_metrics(force=True)
+        
+        total_physical_used = sum(s["physical_used"] for s in self.shard_metrics)
+        total_indexed_files = sum(s["doc_count"] for s in self.shard_metrics)
+        total_cluster_capacity = len(self.collections) * self.MAX_SHARD_CAPACITY_BYTES
+        
+        space_remaining = max(0, total_cluster_capacity - total_physical_used)
+        
+        if total_indexed_files > 0 and total_physical_used > 0:
+            avg_file_size = total_physical_used / total_indexed_files
+            estimated_capacity_left = int(space_remaining / avg_file_size)
+        else:
+            estimated_capacity_left = 0
+
+        # Build clean distribution report for the UI
+        distribution = []
+        for s in self.shard_metrics:
+            distribution.append(s["doc_count"])
+
+        # Fetch indexed metadata (Worker 2 progress)
+        indexed_meta = 0
+        corrupted_files = 0
+        for coll in self.collections:
+            indexed_meta += await coll.count_documents({"language": {"$exists": True, "$ne": "pending", "$ne": "corrupted"}})
+            corrupted_files += await coll.count_documents({"language": "corrupted"})
+
+        return {
+            "total_files": total_indexed_files,
+            "total_size_bytes": total_physical_used,
+            "space_left_bytes": space_remaining,
+            "estimated_files_left": estimated_capacity_left,
+            "shard_distribution": distribution,
+            "indexed_metadata": indexed_meta,
+            "corrupted_files": corrupted_files
+        }
+
+    # ==========================================
+    # 🧹 VAULT SYSTEM & BROADCAST MANAGER
+    # ==========================================
+    async def get_all_users(self):
+        return self.users.find({})
+
+    async def log_broadcast(self, batch_id: str, user_id: int, message_id: int):
+        await self.broadcast_logs.insert_one({
+            "batch_id": batch_id,
+            "user_id": user_id,
+            "message_id": message_id,
+            "timestamp": time.time()
+        })
+
+    async def get_broadcast_logs(self, batch_id: str):
+        return self.broadcast_logs.find({"batch_id": batch_id})
+
+    async def delete_broadcast_batch(self, batch_id: str):
+        await self.broadcast_logs.delete_many({"batch_id": batch_id})
+        await self.batch_stats.delete_one({"batch_id": batch_id})
+
+    async def get_recent_batches(self):
+        forty_eight_hours_ago = time.time() - (48 * 3600)
+        pipeline = [
+            {"$match": {"timestamp": {"$gte": forty_eight_hours_ago}}},
+            {"$group": {"_id": "$batch_id", "count": {"$sum": 1}}},
+            {"$sort": {"_id": -1}},
+            {"$limit": 5}
+        ]
+        return self.broadcast_logs.aggregate(pipeline)
+
+    async def get_user_latest_broadcast(self, user_id: int):
+        cursor = self.broadcast_logs.find({"user_id": user_id}).sort("timestamp", -1).limit(1)
+        logs = await cursor.to_list(length=1)
+        return logs[0] if logs else None
+
+    async def delete_single_broadcast_log(self, user_id: int, message_id: int):
+        await self.broadcast_logs.delete_one({"user_id": user_id, "message_id": message_id})
+
+    # ==========================================
+    # 📊 BATCH ENGAGEMENT TRACKING
+    # ==========================================
+    async def add_batch_reaction(self, batch_id: str, emoji: str, user_id: int) -> bool:
+        existing = await self.batch_stats.find_one({"batch_id": batch_id, "user_reacted": user_id})
+        if existing: return False
+        await self.batch_stats.update_one(
+            {"batch_id": batch_id},
+            {"$inc": {f"reactions.{emoji}": 1}, "$addToSet": {"user_reacted": user_id}},
             upsert=True
         )
         return True
 
+    async def get_batch_engagement(self, batch_id: str) -> Dict[str, Any]:
+        doc = await self.batch_stats.find_one({"batch_id": batch_id})
+        if not doc: return {"reactions": {}, "replies": 0, "followups": 0}
+        return {
+            "reactions": {k: v for k, v in doc.get("reactions", {}).items() if not isinstance(v, list)},
+            "replies": len(doc.get("replies", [])),
+            "followups": doc.get("followup_count", 0)
+        }
+
+    async def add_batch_reply(self, batch_id: str, user_id: int):
+        await self.batch_stats.update_one({"batch_id": batch_id}, {"$addToSet": {"replies": user_id}}, upsert=True)
+
+    async def increment_batch_followup(self, batch_id: str):
+        await self.batch_stats.update_one({"batch_id": batch_id}, {"$inc": {"followup_count": 1}}, upsert=True)
+
+    # ==========================================
+    # ⏰ SCHEDULER SYSTEM
+    # ==========================================
+    async def add_scheduled_broadcast(self, batch_id: str, admin_id: int, message_id: int, run_at: float, command_text: str):
+        await self.scheduled_broadcasts.insert_one({
+            "batch_id": batch_id,
+            "admin_id": admin_id,
+            "message_id": message_id,
+            "run_at": run_at,
+            "command_text": command_text,
+            "status": "pending"
+        })
+
+    async def get_due_broadcasts(self):
+        cursor = self.scheduled_broadcasts.find({"status": "pending", "run_at": {"$lte": time.time()}})
+        return await cursor.to_list(length=100)
+
+    async def mark_broadcast_complete(self, schedule_id):
+        await self.scheduled_broadcasts.update_one({"_id": schedule_id}, {"$set": {"status": "completed"}})
+
+    async def cancel_scheduled_broadcast(self, batch_id: str) -> bool:
+        res = await self.scheduled_broadcasts.delete_one({"batch_id": batch_id, "status": "pending"})
+        return res.deleted_count > 0
+
+    # ==========================================
+    # 📝 OTHER HELPERS
+    # ==========================================
     async def get_active_job(self):
         if not self.clients: return None
-        return await self.jobs.find_one({"status": {"$in": ["pending", "processing"]}})
+        return await self.clients[0][self.users.database.name]["indexing_jobs"].find_one({"status": {"$in": ["pending", "processing"]}})
 
     async def update_job(self, job_id: str, updates: dict):
         if not self.clients: return
-        await self.jobs.update_one({"_id": job_id}, {"$set": updates})
+        await self.clients[0][self.users.database.name]["indexing_jobs"].update_one({"_id": job_id}, {"$set": updates})
 
+    async def check_exists(self, crypto_hash: str) -> bool:
+        if not self.collections: return False
+        tasks = [coll.find_one({"crypto_hash": crypto_hash}) for coll in self.collections]
+        results = await asyncio.gather(*tasks)
+        return any(res is not None for res in results)
+
+    async def get_file(self, file_id: str) -> Optional[Dict[str, Any]]:
+        if not self.collections: return None
+        tasks = [coll.find_one({"_id": file_id}) for coll in self.collections]
+        results = await asyncio.gather(*tasks)
+        for res in results:
+            if res: return res
+        return None
+        
     async def get_user_settings(self, user_id: int):
-        if not self.clients: return {}
         user = await self.users.find_one({"user_id": user_id})
         if not user:
             default = {"user_id": user_id, "search_mode": "default", "quality": "all", "language": "all", "size": "all"}
@@ -85,287 +344,33 @@ class MultiDB:
         return user
 
     async def update_user_setting(self, user_id: int, key: str, value: Any):
-        if not self.clients: return
         await self.users.update_one({"user_id": user_id}, {"$set": {key: value}}, upsert=True)
 
     async def get_group_settings(self, chat_id: int):
-        if not self.clients: return {}
-        group = await self.groups.find_one({"chat_id": chat_id})
+        group = await self.clients[0][self.users.database.name]["groups"].find_one({"chat_id": chat_id})
         if not group:
             default = {
                 "chat_id": chat_id, "search_mode": "let_members_choose",
                 "quality_lock": "none", "language_lock": "none", "size_lock": "none", 
-                "admins": [],
-                "connected_by": None
+                "admins": [], "connected_by": None
             }
-            await self.groups.insert_one(default)
+            await self.clients[0][self.users.database.name]["groups"].insert_one(default)
             return default
         return group
 
     async def update_group_setting(self, chat_id: int, key: str, value: Any):
-        if not self.clients: return
-        await self.groups.update_one({"chat_id": chat_id}, {"$set": {key: value}}, upsert=True)
-
-    async def get_admin_groups(self, user_id: int):
-        if not self.clients: return []
-        cursor = self.groups.find({"admins": user_id})
-        return await cursor.to_list(length=50)
-
-    async def get_connected_groups(self, user_id: int):
-        if not self.clients: return []
-        cursor = self.groups.find({"connected_by": user_id})
-        return await cursor.to_list(length=50)
+        await self.clients[0][self.users.database.name]["groups"].update_one({"chat_id": chat_id}, {"$set": {key: value}}, upsert=True)
 
     async def get_settings(self) -> Dict[str, Any]:
-        if not self.clients: return {}
         settings = await self.settings.find_one({"_id": "bot_settings"})
         if not settings:
-            default = {
-                "_id": "bot_settings", 
-                "shortener_enabled": Config.USE_SHORTENERS, 
-                "shortener_api": "", 
-                "shortener_url": "https://gplinks.in/api", 
-                "requests_enabled": True,
-                "inside_enabled": False,
-                "inside_words": [],
-                "inside_times": 5,
-                "inside_channels": [],
-                "inside_placement": "movie",
-                "file_delete_enabled": False,
-                "file_delete_time": 10,
-                "filter_delete_enabled": False,
-                "filter_delete_time": 5,
-                "bulk_enabled": True
-            }
+            default = {"_id": "bot_settings"}
             await self.settings.insert_one(default)
             return default
         return settings
 
     async def update_settings(self, updates: Dict[str, Any]) -> bool:
-        if not self.clients: return False
         await self.settings.update_one({"_id": "bot_settings"}, {"$set": updates}, upsert=True)
         return True
 
-    async def insert_file(self, file_data: Dict[str, Any], shard_index: Optional[int] = None) -> bool:
-        if not self.collections: return False
-        target_shard = shard_index % len(self.collections) if shard_index is not None else 0
-        try:
-            await self.collections[target_shard].insert_one(file_data)
-            return True
-        except Exception: return False
-
-    async def check_exists(self, crypto_hash: str) -> bool:
-        if not self.collections: return False
-        tasks = [coll.find_one({"crypto_hash": crypto_hash}) for coll in self.collections]
-        results = await asyncio.gather(*tasks)
-        return any(res is not None for res in results)
-
-    async def get_file(self, db_id: str) -> Optional[Dict[str, Any]]:
-        if not self.collections: return None
-        try: obj_id = ObjectId(db_id)
-        except Exception: return None
-        tasks = [coll.find_one({"_id": obj_id}) for coll in self.collections]
-        results = await asyncio.gather(*tasks)
-        for res in results:
-            if res: return res
-        return None
-
-    async def _safe_search(self, collection, query_filter: dict, skip: int, limit: int) -> List[Dict[str, Any]]:
-        cursor = collection.find(query_filter).skip(skip).limit(limit)
-        return await cursor.to_list(length=limit)
-
-    async def search_files(self, query: str, skip: int = 0, limit: int = 10, exact: bool = False) -> List[Dict[str, Any]]:
-        if not self.collections: return []
-        
-        combined_results = []
-        
-        try:
-            text_filter = {"$text": {"$search": f"\"{query}\"" if exact else query}}
-            tasks = [self._safe_search(coll, text_filter, skip, limit) for coll in self.collections]
-            results = await asyncio.gather(*tasks)
-            for result_group in results: combined_results.extend(result_group)
-        except Exception:
-            pass 
-            
-        if not combined_results and not exact:
-            try:
-                regex_pattern = f".*{'.*'.join(query.split())}.*"
-                regex_filter = {"title": {"$regex": regex_pattern, "$options": "i"}}
-                tasks_regex = [self._safe_search(coll, regex_filter, skip, limit) for coll in self.collections]
-                results_regex = await asyncio.gather(*tasks_regex)
-                for result_group in results_regex: combined_results.extend(result_group)
-            except Exception as e:
-                logger.error(f"Regex Fallback Error: {e}")
-                
-        return combined_results[:limit]
-
-    async def global_stats(self) -> Dict[str, Any]:
-        stats = {
-            "shards_active": len(self.collections), 
-            "total_files": 0, 
-            "total_size_bytes": 0, 
-            "indexed_metadata": 0,
-            "corrupted_files": 0,
-            "shard_distribution": []
-        }
-        
-        for client, coll in zip(self.clients, self.collections):
-            try:
-                db_obj = client[Config.DB_NAME]
-                coll_stats = await db_obj.command("collStats", "files")
-                count = coll_stats.get("count", 0)
-                stats["shard_distribution"].append(count)
-                stats["total_files"] += count
-                stats["total_size_bytes"] += coll_stats.get("storageSize", 0)
-                
-                processed = await coll.count_documents({"language": {"$exists": True, "$ne": "pending"}})
-                stats["indexed_metadata"] += processed
-
-                corrupted = await coll.count_documents({"language": "corrupted"})
-                stats["corrupted_files"] += corrupted
-            except Exception:
-                count = await coll.count_documents({})
-                stats["shard_distribution"].append(count)
-                stats["total_files"] += count
-
-                processed = await coll.count_documents({"language": {"$exists": True, "$ne": "pending"}})
-                stats["indexed_metadata"] += processed
-
-                corrupted = await coll.count_documents({"language": "corrupted"})
-                stats["corrupted_files"] += corrupted
-                
-        total_capacity_bytes = len(self.collections) * 512 * 1024 * 1024
-        stats["space_left_bytes"] = max(0, total_capacity_bytes - stats["total_size_bytes"])
-        avg_obj_size = stats["total_size_bytes"] / stats["total_files"] if stats["total_files"] > 0 else 300
-        stats["estimated_files_left"] = int(stats["space_left_bytes"] / avg_obj_size) if avg_obj_size > 0 else 0
-        return stats
-
-    # ==========================================
-    # 📢 BROADCAST & SCHEDULER ENGINE LOGIC
-    # ==========================================
-    
-    async def get_all_users(self):
-        """Yields all users for the broadcast loop."""
-        if not self.clients: return
-        users = self.users.find({})
-        async for user in users: yield user
-
-    async def log_broadcast(self, batch_id: str, user_id: int, message_id: int):
-        """Saves a message to the 48-Hour Recall Vault."""
-        if not self.clients: return
-        await self.broadcast_logs.insert_one({
-            "batch_id": batch_id, 
-            "user_id": user_id, 
-            "message_id": message_id, 
-            "timestamp": time.time()
-        })
-
-    async def get_broadcast_logs(self, batch_id: str):
-        """Fetches all sent messages for a specific batch."""
-        if not self.clients: return []
-        return self.broadcast_logs.find({"batch_id": batch_id})
-
-    async def delete_broadcast_batch(self, batch_id: str):
-        """Wipes an entire batch from the database vault."""
-        if not self.clients: return
-        await self.broadcast_logs.delete_many({"batch_id": batch_id})
-
-    async def get_user_latest_broadcast(self, user_id: int):
-        """Finds the most recent broadcast sent to a specific user."""
-        if not self.clients: return None
-        return await self.broadcast_logs.find_one(
-            {"user_id": user_id}, 
-            sort=[("timestamp", -1)]
-        )
-
-    async def delete_single_broadcast_log(self, user_id: int, message_id: int):
-        """Removes a single user's message from the vault."""
-        if not self.clients: return
-        await self.broadcast_logs.delete_one({"user_id": user_id, "message_id": message_id})
-        
-    async def get_recent_batches(self):
-        """Gets unique batches from the last 48 hours for the Admin Menu."""
-        if not self.clients: return []
-        forty_eight_hours_ago = time.time() - (48 * 3600)
-        pipeline = [
-            {"$match": {"timestamp": {"$gte": forty_eight_hours_ago}}}, 
-            {"$group": {"_id": "$batch_id", "count": {"$sum": 1}}}, 
-            {"$sort": {"_id": -1}}
-        ]
-        return self.broadcast_logs.aggregate(pipeline)
-
-    async def add_scheduled_broadcast(self, batch_id: str, admin_id: int, message_id: int, run_at: float, command_text: str):
-        """Schedules a broadcast for the future."""
-        if not self.clients: return
-        await self.scheduled_broadcasts.insert_one({
-            "batch_id": batch_id, 
-            "admin_id": admin_id, 
-            "message_id": message_id, 
-            "run_at": run_at, 
-            "command_text": command_text, 
-            "status": "pending"
-        })
-
-    async def get_due_broadcasts(self):
-        """Fetches broadcasts that are ready to run."""
-        if not self.clients: return []
-        cursor = self.scheduled_broadcasts.find({"status": "pending", "run_at": {"$lte": time.time()}})
-        return await cursor.to_list(length=100)
-
-    async def mark_broadcast_complete(self, schedule_id):
-        """Marks a scheduled broadcast as done."""
-        if not self.clients: return
-        await self.scheduled_broadcasts.update_one({"_id": schedule_id}, {"$set": {"status": "completed"}})
-        
-    async def cancel_scheduled_broadcast(self, batch_id: str) -> bool:
-        """Deletes a scheduled broadcast from the queue before it runs."""
-        if not self.clients: return False
-        res = await self.scheduled_broadcasts.delete_one({"batch_id": batch_id, "status": "pending"})
-        return res.deleted_count > 0
-
-    # ==========================================
-    # 📊 BATCH ENGAGEMENT TRACKING
-    # ==========================================
-    
-    async def add_batch_reaction(self, batch_id: str, emoji: str, user_id: int):
-        """Records a user reaction and prevents duplicate votes."""
-        if not self.clients: return False
-        res = await self.batch_stats.update_one(
-            {"batch_id": batch_id}, 
-            {"$addToSet": {f"reactions.{emoji}": user_id}}, 
-            upsert=True
-        )
-        return res.modified_count > 0
-
-    async def add_batch_reply(self, batch_id: str, user_id: int):
-        """Records that a specific user replied to this broadcast batch."""
-        if not self.clients: return False
-        res = await self.batch_stats.update_one(
-            {"batch_id": batch_id}, 
-            {"$addToSet": {"replies": user_id}}, 
-            upsert=True
-        )
-        return res.modified_count > 0
-
-    async def increment_batch_followup(self, batch_id: str):
-        """Increments the counter showing how many times an admin sent a followup to this batch."""
-        if not self.clients: return
-        await self.batch_stats.update_one(
-            {"batch_id": batch_id}, 
-            {"$inc": {"followup_count": 1}}, 
-            upsert=True
-        )
-
-    async def get_batch_engagement(self, batch_id: str):
-        """Fetches all engagement metrics (reactions, replies, followups) for the admin dashboard."""
-        if not self.clients: return {"reactions": {}, "replies": 0, "followups": 0}
-        doc = await self.batch_stats.find_one({"batch_id": batch_id})
-        if not doc: return {"reactions": {}, "replies": 0, "followups": 0}
-        
-        return {
-            "reactions": {k: len(v) for k, v in doc.get("reactions", {}).items()},
-            "replies": len(doc.get("replies", [])),
-            "followups": doc.get("followup_count", 0)
-        }
-
-db = MultiDB(Config.DB_URIS, Config.DB_NAME)
+db = MultiDB()
