@@ -32,6 +32,7 @@ class MultiDB:
             self.jobs = self.clients[0][db_name]["indexing_jobs"]
             self.broadcast_logs = self.clients[0][db_name]["broadcast_logs"]
             self.scheduled_broadcasts = self.clients[0][db_name]["scheduled_broadcasts"]
+            self.batch_stats = self.clients[0][db_name]["batch_stats"]  # 🚀 NEW: Tracks engagement
 
     async def ensure_indexes(self):
         """Builds MongoDB Text Indexes for lightning-fast searching."""
@@ -169,7 +170,6 @@ class MultiDB:
             if res: return res
         return None
 
-    # THE ORIGINAL SAFE SEARCH
     async def _safe_search(self, collection, query_filter: dict, skip: int, limit: int) -> List[Dict[str, Any]]:
         cursor = collection.find(query_filter).skip(skip).limit(limit)
         return await cursor.to_list(length=limit)
@@ -199,7 +199,6 @@ class MultiDB:
                 
         return combined_results[:limit]
 
-    # THE ORIGINAL GLOBAL STATS
     async def global_stats(self) -> Dict[str, Any]:
         stats = {
             "shards_active": len(self.collections), 
@@ -254,7 +253,12 @@ class MultiDB:
     async def log_broadcast(self, batch_id: str, user_id: int, message_id: int):
         """Saves a message to the 48-Hour Recall Vault."""
         if not self.clients: return
-        await self.broadcast_logs.insert_one({"batch_id": batch_id, "user_id": user_id, "message_id": message_id, "timestamp": time.time()})
+        await self.broadcast_logs.insert_one({
+            "batch_id": batch_id, 
+            "user_id": user_id, 
+            "message_id": message_id, 
+            "timestamp": time.time()
+        })
 
     async def get_broadcast_logs(self, batch_id: str):
         """Fetches all sent messages for a specific batch."""
@@ -269,7 +273,10 @@ class MultiDB:
     async def get_user_latest_broadcast(self, user_id: int):
         """Finds the most recent broadcast sent to a specific user."""
         if not self.clients: return None
-        return await self.broadcast_logs.find_one({"user_id": user_id}, sort=[("timestamp", -1)])
+        return await self.broadcast_logs.find_one(
+            {"user_id": user_id}, 
+            sort=[("timestamp", -1)]
+        )
 
     async def delete_single_broadcast_log(self, user_id: int, message_id: int):
         """Removes a single user's message from the vault."""
@@ -280,24 +287,85 @@ class MultiDB:
         """Gets unique batches from the last 48 hours for the Admin Menu."""
         if not self.clients: return []
         forty_eight_hours_ago = time.time() - (48 * 3600)
-        pipeline = [{"$match": {"timestamp": {"$gte": forty_eight_hours_ago}}}, {"$group": {"_id": "$batch_id", "count": {"$sum": 1}}}, {"$sort": {"_id": -1}}]
+        pipeline = [
+            {"$match": {"timestamp": {"$gte": forty_eight_hours_ago}}}, 
+            {"$group": {"_id": "$batch_id", "count": {"$sum": 1}}}, 
+            {"$sort": {"_id": -1}}
+        ]
         return self.broadcast_logs.aggregate(pipeline)
 
-    # --- THE SCHEDULING LOGIC ---
     async def add_scheduled_broadcast(self, batch_id: str, admin_id: int, message_id: int, run_at: float, command_text: str):
+        """Schedules a broadcast for the future."""
         if not self.clients: return
         await self.scheduled_broadcasts.insert_one({
-            "batch_id": batch_id, "admin_id": admin_id, "message_id": message_id, 
-            "run_at": run_at, "command_text": command_text, "status": "pending"
+            "batch_id": batch_id, 
+            "admin_id": admin_id, 
+            "message_id": message_id, 
+            "run_at": run_at, 
+            "command_text": command_text, 
+            "status": "pending"
         })
 
     async def get_due_broadcasts(self):
+        """Fetches broadcasts that are ready to run."""
         if not self.clients: return []
         cursor = self.scheduled_broadcasts.find({"status": "pending", "run_at": {"$lte": time.time()}})
         return await cursor.to_list(length=100)
 
     async def mark_broadcast_complete(self, schedule_id):
+        """Marks a scheduled broadcast as done."""
         if not self.clients: return
         await self.scheduled_broadcasts.update_one({"_id": schedule_id}, {"$set": {"status": "completed"}})
+        
+    async def cancel_scheduled_broadcast(self, batch_id: str) -> bool:
+        """Deletes a scheduled broadcast from the queue before it runs."""
+        if not self.clients: return False
+        res = await self.scheduled_broadcasts.delete_one({"batch_id": batch_id, "status": "pending"})
+        return res.deleted_count > 0
+
+    # ==========================================
+    # 📊 BATCH ENGAGEMENT TRACKING
+    # ==========================================
+    
+    async def add_batch_reaction(self, batch_id: str, emoji: str, user_id: int):
+        """Records a user reaction and prevents duplicate votes."""
+        if not self.clients: return False
+        res = await self.batch_stats.update_one(
+            {"batch_id": batch_id}, 
+            {"$addToSet": {f"reactions.{emoji}": user_id}}, 
+            upsert=True
+        )
+        return res.modified_count > 0
+
+    async def add_batch_reply(self, batch_id: str, user_id: int):
+        """Records that a specific user replied to this broadcast batch."""
+        if not self.clients: return False
+        res = await self.batch_stats.update_one(
+            {"batch_id": batch_id}, 
+            {"$addToSet": {"replies": user_id}}, 
+            upsert=True
+        )
+        return res.modified_count > 0
+
+    async def increment_batch_followup(self, batch_id: str):
+        """Increments the counter showing how many times an admin sent a followup to this batch."""
+        if not self.clients: return
+        await self.batch_stats.update_one(
+            {"batch_id": batch_id}, 
+            {"$inc": {"followup_count": 1}}, 
+            upsert=True
+        )
+
+    async def get_batch_engagement(self, batch_id: str):
+        """Fetches all engagement metrics (reactions, replies, followups) for the admin dashboard."""
+        if not self.clients: return {"reactions": {}, "replies": 0, "followups": 0}
+        doc = await self.batch_stats.find_one({"batch_id": batch_id})
+        if not doc: return {"reactions": {}, "replies": 0, "followups": 0}
+        
+        return {
+            "reactions": {k: len(v) for k, v in doc.get("reactions", {}).items()},
+            "replies": len(doc.get("replies", [])),
+            "followups": doc.get("followup_count", 0)
+        }
 
 db = MultiDB(Config.DB_URIS, Config.DB_NAME)
