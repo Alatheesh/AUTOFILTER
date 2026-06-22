@@ -68,34 +68,14 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
         elif unit == 'h':
             auto_delete_seconds = val * 3600
 
-    # 🎯 2. Countdown Parser (STATIC EXACT TIME)
-    countdown_match = re.search(r'-countdown\s+(\d+)([smh])', command_text)
-    countdown_seconds = 0
-    time_string = ""
-    if countdown_match:
-        val = int(countdown_match.group(1))
-        unit = countdown_match.group(2)
-        if unit == 's':
-            countdown_seconds = val
-        elif unit == 'm':
-            countdown_seconds = val * 60
-        elif unit == 'h':
-            countdown_seconds = val * 3600
-        
-        ist_timezone = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
-        expire_dt = datetime.datetime.now(ist_timezone) + datetime.timedelta(seconds=countdown_seconds)
-        expire_str = expire_dt.strftime('%d-%b %I:%M %p').upper()
-        
-        time_string = f"\n\n⏳ **Expires at:** `{expire_str}` (IST)"
-
-    # 🎯 3. Follow-Up Parser
+    # 🎯 2. Follow-Up Parser
     followup_match = re.search(r'-followup\s+(Batch_[A-Z0-9]+)', command_text, re.IGNORECASE)
     followup_batch = followup_match.group(1).upper() if followup_match else None
     
     if followup_batch:
         await db.increment_batch_followup(followup_batch)
 
-    # 🎯 4. Reaction Parser
+    # 🎯 3. Reaction Parser
     reaction_match = re.search(r'-reaction\s+([^\n\-]+)', command_text)
     reactions = []
     if reaction_match:
@@ -161,7 +141,7 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
             
         try:
             has_tags = "{first_name}" in parsed_text or "{last_name}" in parsed_text or "{full_name}" in parsed_text
-            has_appends = allow_replies or countdown_seconds > 0
+            has_appends = allow_replies
             
             # PERFECT FORMATTING LOGIC: Copy strictly if no variables are used.
             if has_tags or has_appends:
@@ -169,15 +149,11 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
                     custom_text = parsed_text.replace("{first_name}", first_name).replace("{last_name}", last_name).replace("{full_name}", full_name)
                     if allow_replies:
                         custom_text += reply_marker
-                    if countdown_seconds > 0:
-                        custom_text += time_string
                     sent_msg = await client.send_message(user_id, custom_text, disable_notification=is_silent, reply_markup=base_markup, reply_to_message_id=reply_to_id)
                 elif target_msg.caption:
                     custom_caption = parsed_text.replace("{first_name}", first_name).replace("{last_name}", last_name).replace("{full_name}", full_name)
                     if allow_replies:
                         custom_caption += reply_marker
-                    if countdown_seconds > 0:
-                        custom_caption += time_string
                     sent_msg = await client.send_cached_media(user_id, file_id=target_msg.photo.file_id if target_msg.photo else target_msg.video.file_id, caption=custom_caption, disable_notification=is_silent, reply_markup=base_markup, reply_to_message_id=reply_to_id)
                 else:
                     sent_msg = await target_msg.copy(user_id, disable_notification=is_silent, reply_markup=base_markup, reply_to_message_id=reply_to_id)
