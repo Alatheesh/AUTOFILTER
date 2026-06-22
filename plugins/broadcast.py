@@ -13,35 +13,25 @@ from config import Config
 # 🛠️ THE BUTTON PARSER ENGINE
 # ==========================================
 def parse_inline_buttons(text: str):
-    """Converts [Text | Link] syntax into actual Telegram Inline Buttons."""
-    if not text:
-        return text, None
-        
+    if not text: return text, None
     markup = []
     lines = text.split('\n')
     final_lines = []
-    
     for line in lines:
         buttons = re.findall(r'\[([^\|]+)\|([^\]]+)\]', line)
         if buttons:
             row = []
             for btn_text, btn_link in buttons:
-                btn_text = btn_text.strip()
-                btn_link = btn_link.strip()
+                btn_text, btn_link = btn_text.strip(), btn_link.strip()
                 if btn_link.startswith('http://') or btn_link.startswith('https://'):
                     row.append(InlineKeyboardButton(btn_text, url=btn_link))
                 else:
                     row.append(InlineKeyboardButton(btn_text, callback_data=btn_link))
             markup.append(row)
             line = re.sub(r'\[([^\|]+)\|([^\]]+)\]', '', line).strip()
-            if line:
-                final_lines.append(line)
-        else:
-            final_lines.append(line)
-            
-    if not markup:
-        return text, None
-    return '\n'.join(final_lines), InlineKeyboardMarkup(markup)
+            if line: final_lines.append(line)
+        else: final_lines.append(line)
+    return '\n'.join(final_lines), InlineKeyboardMarkup(markup) if markup else None
 
 # ==========================================
 # ⚙️ CORE EXECUTION LOOP
@@ -49,10 +39,10 @@ def parse_inline_buttons(text: str):
 async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: Message, command_text: str, batch_id: str):
     skip_vips = "-novip" in command_text
     is_silent = "-silent" in command_text
-    
     allow_replies = "-reply" in command_text
     reply_marker = "\n\n*(💬 Reply directly to this message to respond!)*"
     
+    # 🎯 1. Auto-Delete Parser
     ask_match = re.search(r'-ask\s+(\d+)([smh])', command_text)
     auto_delete_seconds = 0
     if ask_match:
@@ -62,51 +52,89 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
         elif unit == 'm': auto_delete_seconds = val * 60
         elif unit == 'h': auto_delete_seconds = val * 3600
 
+    # 🎯 2. Countdown Parser (NATIVE TELEGRAM TIMESTAMP)
+    countdown_match = re.search(r'-countdown\s+(\d+)([smh])', command_text)
+    countdown_seconds = 0
+    time_string = ""
+    if countdown_match:
+        val = int(countdown_match.group(1))
+        unit = countdown_match.group(2)
+        if unit == 's': countdown_seconds = val
+        elif unit == 'm': countdown_seconds = val * 60
+        elif unit == 'h': countdown_seconds = val * 3600
+        
+        target_ts = int(time.time()) + countdown_seconds
+        time_string = f"\n\n⏳ **Expires:** <t:{target_ts}:R>"
+
+    # 🎯 3. Follow-Up Parser
+    followup_match = re.search(r'-followup\s+(Batch_[A-Z0-9]+)', command_text, re.IGNORECASE)
+    followup_batch = followup_match.group(1).upper() if followup_match else None
+    
+    if followup_batch:
+        await db.increment_batch_followup(followup_batch)
+
+    # 🎯 4. Reaction Parser
+    reaction_match = re.search(r'-reaction\s+([^\n\-]+)', command_text)
+    reactions = [e for e in reaction_match.group(1).split() if e] if reaction_match else []
+
     status_msg = await client.send_message(admin_chat_id, f"🔄 **Deploying Broadcast...**\nBatch ID: `{batch_id}`")
     sent, failed, skipped = 0, 0, 0
     start_time = time.time()
 
     base_text = target_msg.text or target_msg.caption or ""
     parsed_text, parsed_markup = parse_inline_buttons(base_text)
-    base_markup = parsed_markup if parsed_markup else target_msg.reply_markup
+    
+    # Generate Reaction Buttons
+    final_markup = []
+    if parsed_markup: final_markup.extend(parsed_markup.inline_keyboard)
+    elif target_msg.reply_markup: final_markup.extend(target_msg.reply_markup.inline_keyboard)
+        
+    if reactions:
+        reaction_row = [InlineKeyboardButton(text=emoji, callback_data=f"breact_{batch_id}_{emoji}") for emoji in reactions]
+        final_markup.append(reaction_row)
+        
+    base_markup = InlineKeyboardMarkup(final_markup) if final_markup else None
 
-    async for user in db.get_all_users():
-        user_id = user.get("user_id")
+    # 🔄 Determine Target Audience
+    target_audience = db.get_broadcast_logs(followup_batch) if followup_batch else db.get_all_users()
+
+    async for item in target_audience:
+        user_id = item.get("user_id")
+        reply_to_id = item.get("message_id") if followup_batch else None
+        
         if not user_id: continue
         
-        if skip_vips and user.get("is_vip", False):
+        user_data = await db.users.find_one({"user_id": user_id}) if followup_batch else item
+        if not user_data: user_data = {}
+        
+        if skip_vips and user_data.get("is_vip", False):
             skipped += 1
             continue
             
-        first_name = user.get("first_name")
-        last_name = user.get("last_name", "")
-        
-        if not first_name or first_name == "User":
-            try:
-                tg_user = await client.get_users(user_id)
-                first_name = tg_user.first_name or "User"
-                last_name = tg_user.last_name or ""
-            except Exception:
-                first_name = "User"
-                last_name = ""
-        else:
-            last_name = last_name or ""
-            
+        first_name = user_data.get("first_name", "User")
+        last_name = user_data.get("last_name", "")
         full_name = f"{first_name} {last_name}".strip()
             
         try:
-            if target_msg.text:
-                custom_text = parsed_text.replace("{first_name}", first_name).replace("{last_name}", last_name).replace("{full_name}", full_name)
-                if allow_replies: custom_text += reply_marker
-                sent_msg = await client.send_message(user_id, custom_text, disable_notification=is_silent, reply_markup=base_markup)
+            has_tags = "{first_name}" in parsed_text or "{last_name}" in parsed_text or "{full_name}" in parsed_text
+            has_appends = allow_replies or countdown_seconds > 0
             
-            elif target_msg.caption:
-                custom_caption = parsed_text.replace("{first_name}", first_name).replace("{last_name}", last_name).replace("{full_name}", full_name)
-                if allow_replies: custom_caption += reply_marker
-                sent_msg = await client.send_cached_media(user_id, file_id=target_msg.photo.file_id if target_msg.photo else target_msg.video.file_id, caption=custom_caption, disable_notification=is_silent, reply_markup=base_markup)
-            
+            # PERFECT FORMATTING LOGIC: Copy strictly if no variables are used.
+            if has_tags or has_appends:
+                if target_msg.text:
+                    custom_text = parsed_text.replace("{first_name}", first_name).replace("{last_name}", last_name).replace("{full_name}", full_name)
+                    if allow_replies: custom_text += reply_marker
+                    if countdown_seconds > 0: custom_text += time_string
+                    sent_msg = await client.send_message(user_id, custom_text, disable_notification=is_silent, reply_markup=base_markup, reply_to_message_id=reply_to_id)
+                elif target_msg.caption:
+                    custom_caption = parsed_text.replace("{first_name}", first_name).replace("{last_name}", last_name).replace("{full_name}", full_name)
+                    if allow_replies: custom_caption += reply_marker
+                    if countdown_seconds > 0: custom_caption += time_string
+                    sent_msg = await client.send_cached_media(user_id, file_id=target_msg.photo.file_id if target_msg.photo else target_msg.video.file_id, caption=custom_caption, disable_notification=is_silent, reply_markup=base_markup, reply_to_message_id=reply_to_id)
+                else:
+                    sent_msg = await target_msg.copy(user_id, disable_notification=is_silent, reply_markup=base_markup, reply_to_message_id=reply_to_id)
             else:
-                sent_msg = await target_msg.copy(user_id, disable_notification=is_silent, reply_markup=base_markup)
+                sent_msg = await target_msg.copy(user_id, disable_notification=is_silent, reply_markup=base_markup, reply_to_message_id=reply_to_id)
                 
             await db.log_broadcast(batch_id, user_id, sent_msg.id)
             sent += 1
@@ -117,7 +145,7 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
         except FloodWait as e:
             await asyncio.sleep(e.value)
             try:
-                sent_msg = await target_msg.copy(user_id, disable_notification=is_silent, reply_markup=base_markup)
+                sent_msg = await target_msg.copy(user_id, disable_notification=is_silent, reply_markup=base_markup, reply_to_message_id=reply_to_id)
                 await db.log_broadcast(batch_id, user_id, sent_msg.id)
                 sent += 1
             except: failed += 1
@@ -126,14 +154,15 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
             
         if (sent + failed) % 20 == 0:
             elapsed = time.time() - start_time
-            await status_msg.edit_text(
-                f"🚀 **LIVE BROADCAST TRACKER**\n\n🏷 **Batch ID:** `{batch_id}`\n🟢 **Sent:** `{sent}`\n🔴 **Failed:** `{failed}`\n⏭ **Skipped:** `{skipped}`\n⏱ **Time:** `{round(elapsed, 1)}s`"
-            )
+            await status_msg.edit_text(f"🚀 **LIVE TRACKER**\n🏷 `{batch_id}`\n🟢 Sent: `{sent}`\n🔴 Failed: `{failed}`\n⏱ Time: `{round(elapsed, 1)}s`")
             
     total_time = round(time.time() - start_time, 1)
-    await status_msg.edit_text(
-        f"✅ **BROADCAST COMPLETE**\n\n🏷 **Batch ID:** `{batch_id}`\n🟢 **Total Sent:** `{sent}`\n🔴 **Dead Accounts:** `{failed}`\n⏭ **Skipped:** `{skipped}`\n⏱ **Total Time:** `{total_time}s`\n\n*(Use `/broadcast_del {batch_id}` to recall)*"
-    )
+    
+    tracker_buttons = []
+    if reactions: tracker_buttons.append([InlineKeyboardButton("🔄 Refresh Reactions", callback_data=f"trk_{batch_id}_{sent}_{failed}_{skipped}")])
+    tracker_markup = InlineKeyboardMarkup(tracker_buttons) if tracker_buttons else None
+    
+    await status_msg.edit_text(f"✅ **BROADCAST COMPLETE**\n\n🏷 **Batch ID:** `{batch_id}`\n🟢 **Total Sent:** `{sent}`\n🔴 **Dead Accounts:** `{failed}`\n⏭ **Skipped:** `{skipped}`\n⏱ **Total Time:** `{total_time}s`\n\n*(Use `/broadcast_del {batch_id}` to recall)*", reply_markup=tracker_markup)
 
 async def schedule_auto_delete(client, user_id, msg_id, delay_seconds):
     await asyncio.sleep(delay_seconds)
@@ -141,6 +170,33 @@ async def schedule_auto_delete(client, user_id, msg_id, delay_seconds):
         await client.delete_messages(user_id, msg_id)
         await db.delete_single_broadcast_log(user_id, msg_id)
     except: pass
+
+# ==========================================
+# ⏰ REACTION & TRACKER CALLBACKS
+# ==========================================
+@Client.on_callback_query(filters.regex(r"^breact_([^_]+)_(.+)$"))
+async def handle_broadcast_reaction(client: Client, callback: CallbackQuery):
+    parts = callback.data.split("_", 3)
+    batch_id = f"{parts[1]}_{parts[2]}" 
+    emoji = parts[3]
+    
+    is_new = await db.add_batch_reaction(batch_id, emoji, callback.from_user.id)
+    if is_new: await callback.answer(f"You reacted with {emoji}!", show_alert=False)
+    else: await callback.answer("You already reacted!", show_alert=False)
+
+@Client.on_callback_query(filters.regex(r"^trk_([^_]+)_(.+)"))
+async def refresh_admin_tracker(client: Client, callback: CallbackQuery):
+    parts = callback.data.split("_")
+    batch_id = f"{parts[1]}_{parts[2]}"
+    sent, failed, skipped = parts[3], parts[4], parts[5]
+    
+    reaction_stats = await db.get_batch_engagement(batch_id)
+    react_text = "\n\n📊 **Reaction Engagement:**\n" if reaction_stats["reactions"] else ""
+    for emoji, count in reaction_stats["reactions"].items():
+        react_text += f"{emoji} `{count}`\n"
+        
+    await callback.message.edit_text(f"✅ **BROADCAST COMPLETE**\n\n🏷 **Batch ID:** `{batch_id}`\n🟢 **Total Sent:** `{sent}`\n🔴 **Dead Accounts:** `{failed}`\n⏭ **Skipped:** `{skipped}`{react_text}\n*(Use `/broadcast_del {batch_id}` to recall)*", reply_markup=callback.message.reply_markup)
+    await callback.answer("Stats Refreshed!", show_alert=False)
 
 # ==========================================
 # ⏰ SCHEDULING WORKER
@@ -187,11 +243,19 @@ async def ultimate_broadcast(client: Client, message: Message):
             if run_at_ts <= time.time():
                 return await message.reply_text("❌ Scheduled time must be in the future.")
             await db.add_scheduled_broadcast(batch_id, message.chat.id, target_msg.id, run_at_ts, command_text)
-            return await message.reply_text(f"⏳ **Broadcast Scheduled!**\n\nBatch ID: `{batch_id}`\nWill auto-deploy at: `{raw_date}` (IST)")
+            return await message.reply_text(f"⏳ **Broadcast Scheduled!**\n\nBatch ID: `{batch_id}`\nWill auto-deploy at: `{raw_date}` (IST)\n*(Use `/cancel_followup {batch_id}` to cancel)*")
         except ValueError:
             return await message.reply_text("❌ Invalid date format. Please use `YYYY-MM-DD HH:MM`.")
 
     await execute_broadcast_run(client, message.chat.id, target_msg, command_text, batch_id)
+
+@Client.on_message(filters.command(["cancel_followup", "cancel_schedule"]) & filters.user(Config.ADMINS))
+async def cancel_scheduled_job(client: Client, message: Message):
+    if len(message.command) < 2: return await message.reply_text("⚠️ **Format:** `/cancel_followup <Batch_ID>`")
+    batch_id = message.command[1].strip()
+    success = await db.cancel_scheduled_broadcast(batch_id)
+    if success: await message.reply_text(f"✅ **Cancelled!** Scheduled broadcast `{batch_id}` has been deleted from the queue.")
+    else: await message.reply_text(f"❌ **Failed:** Could not find a pending scheduled broadcast with ID `{batch_id}`.")
 
 @Client.on_message(filters.command("broadcast_del") & filters.user(Config.ADMINS))
 async def recall_vault_menu(client: Client, message: Message):
@@ -239,8 +303,7 @@ async def ghost_update(client: Client, message: Message):
         parts = message.text.split(" ", 2)
         batch_id = parts[1]
         new_text = parts[2]
-    except IndexError:
-        return await message.reply_text("⚠️ Format: `/broadcast_edit <Batch_ID> <New Text>`")
+    except IndexError: return await message.reply_text("⚠️ Format: `/broadcast_edit <Batch_ID> <New Text>`")
         
     status = await message.reply_text(f"👻 **Deploying Ghost Update to `{batch_id}`...**")
     edited = 0
@@ -258,8 +321,7 @@ async def direct_support(client: Client, message: Message):
         target_user = int(message.command[1])
         await message.reply_to_message.copy(target_user)
         await message.reply_text(f"✅ Securely dropped into `{target_user}`'s PMs.")
-    except Exception as e:
-        await message.reply_text(f"❌ Failed: `{e}`")
+    except Exception as e: await message.reply_text(f"❌ Failed: `{e}`")
 
 @Client.on_message(filters.command("delbroadcastuser") & filters.user(Config.ADMINS))
 async def surgical_wipe(client: Client, message: Message):
@@ -270,57 +332,46 @@ async def surgical_wipe(client: Client, message: Message):
         await client.delete_messages(target_user, latest_log["message_id"])
         await db.delete_single_broadcast_log(target_user, latest_log["message_id"])
         await message.reply_text(f"✅ **SURGICAL WIPE COMPLETE**\nThe last ad was scrubbed from `{target_user}`'s chat.")
-    except Exception as e:
-        await message.reply_text(f"❌ Failed: `{e}`")
+    except Exception as e: await message.reply_text(f"❌ Failed: `{e}`")
 
 # ==========================================
 # 💬 TWO-WAY BROADCAST COMMUNICATION
 # ==========================================
 @Client.on_message(filters.private & filters.reply & ~filters.user(Config.ADMINS))
 async def handle_user_reply_to_broadcast(client: Client, message: Message):
-    """Catches user replies ONLY if the broadcast explicitly asked for them."""
     target_msg = message.reply_to_message
     
-    is_reply_allowed = False
-    if target_msg.text and "💬 Reply directly to this message" in target_msg.text:
-        is_reply_allowed = True
-    elif target_msg.caption and "💬 Reply directly to this message" in target_msg.caption:
-        is_reply_allowed = True
+    # 🚀 INTELLIGENT DB LOOKUP: Matches the replied message directly to the broadcast batch!
+    log = await db.broadcast_logs.find_one({"user_id": message.from_user.id, "message_id": target_msg.id})
+    if not log: return 
         
-    if not is_reply_allowed:
-        return 
-        
+    batch_id = log["batch_id"]
+    await db.add_batch_reply(batch_id, message.from_user.id)
+    
     admin_id = Config.ADMINS[0]  
     await client.send_message(
         chat_id=admin_id,
-        text=f"📩 **New Reply to Broadcast!**\n\n👤 **User:** {message.from_user.mention}\n🆔 **ID:** `{message.from_user.id}`\n👇 Their reply is below:"
+        text=f"📩 **New Reply to Broadcast!**\n\n👤 **User:** {message.from_user.mention}\n🆔 **ID:** `{message.from_user.id}`\n🏷 **Batch:** `{batch_id}`\n👇 Their reply is below:"
     )
     await message.forward(admin_id)
 
 @Client.on_message(filters.command("replybroadcast") & filters.user(Config.ADMINS) & filters.reply)
 async def smart_admin_reply(client: Client, message: Message):
-    """Allows admin to reply directly to the forwarded message with default 48h auto-delete."""
     target_msg = message.reply_to_message
     target_user = None
     
     if target_msg.text and "🆔 **ID:** `" in target_msg.text:
         match = re.search(r"🆔 \*\*ID:\*\* `(\d+)`", target_msg.text)
-        if match:
-            target_user = int(match.group(1))
-    # 🌟 NEW UPDATE: Safely handle forward origin deprecation in Pyrogram 2.2+
+        if match: target_user = int(match.group(1))
     elif getattr(target_msg, "forward_origin", None) and getattr(target_msg.forward_origin, "sender_user", None):
         target_user = target_msg.forward_origin.sender_user.id
     elif getattr(target_msg, "forward_from", None):
         target_user = target_msg.forward_from.id
         
-    if not target_user:
-        return await message.reply_text("❌ **Could not detect User ID.**\nPlease make sure you are replying to the '📩 New Reply' header message.")
-        
-    if len(message.command) < 2:
-        return await message.reply_text("⚠️ **Format:** `/replybroadcast [-ask 10s] <your message>`")
+    if not target_user: return await message.reply_text("❌ **Could not detect User ID.**\nPlease reply to the '📩 New Reply' header.")
+    if len(message.command) < 2: return await message.reply_text("⚠️ **Format:** `/replybroadcast [-ask 10s] <your message>`")
         
     raw_text = message.text.split(" ", 1)[1]
-    
     ask_match = re.search(r'-ask\s+(\d+)([smh])', raw_text)
     auto_delete_seconds = 48 * 3600 
     
@@ -330,20 +381,15 @@ async def smart_admin_reply(client: Client, message: Message):
         if unit == 's': auto_delete_seconds = val
         elif unit == 'm': auto_delete_seconds = val * 60
         elif unit == 'h': auto_delete_seconds = val * 3600
-        
         raw_text = re.sub(r'-ask\s+\d+[smh]', '', raw_text).strip()
         
-    if not raw_text:
-        return await message.reply_text("⚠️ You cannot send an empty message.")
+    if not raw_text: return await message.reply_text("⚠️ You cannot send an empty message.")
     
     try:
         sent_msg = await client.send_message(chat_id=target_user, text=f"👨‍💻 **Admin Reply:**\n\n{raw_text}")
-        
         confirm_text = f"✅ **Reply successfully delivered to `{target_user}`.**"
-        if ask_match: confirm_text += f"\n*(Will auto-delete in {auto_delete_seconds}s as requested)*"
-        else: confirm_text += f"\n*(Will auto-delete in 48h by default)*"
-            
+        if ask_match: confirm_text += f"\n*(Will auto-delete in {auto_delete_seconds}s)*"
+        else: confirm_text += f"\n*(Will auto-delete in 48h)*"
         asyncio.create_task(schedule_auto_delete(client, target_user, sent_msg.id, auto_delete_seconds))
         await message.reply_text(confirm_text)
-    except Exception as e:
-        await message.reply_text(f"❌ **Failed to send reply:** `{e}`")
+    except Exception as e: await message.reply_text(f"❌ **Failed to send reply:** `{e}`")
