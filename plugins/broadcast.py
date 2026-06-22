@@ -68,7 +68,7 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
         elif unit == 'h':
             auto_delete_seconds = val * 3600
 
-    # 🎯 2. Countdown Parser (NATIVE TELEGRAM TIMESTAMP)
+    # 🎯 2. Countdown Parser (STATIC EXACT TIME)
     countdown_match = re.search(r'-countdown\s+(\d+)([smh])', command_text)
     countdown_seconds = 0
     time_string = ""
@@ -82,8 +82,11 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
         elif unit == 'h':
             countdown_seconds = val * 3600
         
-        target_ts = int(time.time()) + countdown_seconds
-        time_string = f"\n\n⏳ **Expires:** <t:{target_ts}:R>"
+        ist_timezone = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+        expire_dt = datetime.datetime.now(ist_timezone) + datetime.timedelta(seconds=countdown_seconds)
+        expire_str = expire_dt.strftime('%d-%b %I:%M %p').upper()
+        
+        time_string = f"\n\n⏳ **Expires at:** `{expire_str}` (IST)"
 
     # 🎯 3. Follow-Up Parser
     followup_match = re.search(r'-followup\s+(Batch_[A-Z0-9]+)', command_text, re.IGNORECASE)
@@ -262,7 +265,6 @@ async def refresh_admin_tracker(client: Client, callback: CallbackQuery):
         await callback.message.edit_text(f"✅ **BROADCAST COMPLETE**\n\n🏷 **Batch ID:** `{batch_id}`\n🟢 **Total Sent:** `{sent}`\n🔴 **Dead Accounts:** `{failed}`\n⏭ **Skipped:** `{skipped}`{react_text}\n*(Use `/broadcast_del {batch_id}` to recall)*", reply_markup=callback.message.reply_markup)
         await callback.answer("Stats Refreshed!", show_alert=False)
     except MessageNotModified:
-        # Silently catch the 400 error when stats haven't changed yet
         await callback.answer("No new reactions yet!", show_alert=False)
 
 # ==========================================
