@@ -554,6 +554,8 @@ async def get_worker3_sched_text_and_buttons():
             time_str = dt.strftime('%Y-%m-%d %I:%M %p')
             text += f"• `{s['batch_id']}` - ⏳ `{time_str}`\n"
             
+        text += "\n*(Use `/cancel_followup Batch_ID` to delete a job)*"
+            
     buttons = [
         [
             InlineKeyboardButton("🔙 Back", callback_data="stats_worker3_home"),
@@ -572,7 +574,13 @@ async def get_worker3_recent_text_and_buttons():
         has_batches = True
         b_id = batch["_id"]
         count = batch["count"]
-        text += f"• **{b_id}**: `{count} messages sent`\n"
+        
+        # 🚀 THE FIX: Fetch Live Engagement Stats
+        eng = await db.get_batch_engagement(b_id)
+        replies = eng["replies"]
+        followups = eng["followups"]
+        
+        text += f"• **{b_id}**: `{count} sent` | 💬 `{replies} replies` | 🔄 `{followups} follows`\n"
         
     if not has_batches:
         text += "No broadcasts sent in the last 48 hours."
