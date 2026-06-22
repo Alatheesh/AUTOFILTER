@@ -13,25 +13,41 @@ from config import Config
 # 🛠️ THE BUTTON PARSER ENGINE
 # ==========================================
 def parse_inline_buttons(text: str):
-    if not text: return text, None
+    """Converts [Text | Link] syntax into actual Telegram Inline Buttons."""
+    if not text:
+        return text, None
+        
     markup = []
     lines = text.split('\n')
     final_lines = []
+    
     for line in lines:
+        # Find all button patterns in the current line
         buttons = re.findall(r'\[([^\|]+)\|([^\]]+)\]', line)
         if buttons:
             row = []
             for btn_text, btn_link in buttons:
-                btn_text, btn_link = btn_text.strip(), btn_link.strip()
+                btn_text = btn_text.strip()
+                btn_link = btn_link.strip()
+                
+                # If it's a web URL
                 if btn_link.startswith('http://') or btn_link.startswith('https://'):
                     row.append(InlineKeyboardButton(btn_text, url=btn_link))
+                # If it's a bot callback (like fuz_MovieName)
                 else:
                     row.append(InlineKeyboardButton(btn_text, callback_data=btn_link))
             markup.append(row)
+            # Remove the parsed text buttons from the message body
             line = re.sub(r'\[([^\|]+)\|([^\]]+)\]', '', line).strip()
-            if line: final_lines.append(line)
-        else: final_lines.append(line)
-    return '\n'.join(final_lines), InlineKeyboardMarkup(markup) if markup else None
+            if line:
+                final_lines.append(line)
+        else:
+            final_lines.append(line)
+            
+    if not markup:
+        return text, None
+        
+    return '\n'.join(final_lines), InlineKeyboardMarkup(markup)
 
 # ==========================================
 # ⚙️ CORE EXECUTION LOOP
@@ -228,8 +244,18 @@ async def schedule_worker(client: Client):
 async def ultimate_broadcast(client: Client, message: Message):
     target_msg = message.reply_to_message
     command_text = message.text.lower()
-    batch_id = f"Batch_{str(uuid.uuid4())[:6].upper()}"
     
+    # 🚀 Check for cancellation flags directly in the /broadcast tag!
+    stop_match = re.search(r'-(?:stop|cancel)followup\s+(Batch_[A-Z0-9]+)', command_text, re.IGNORECASE)
+    if stop_match:
+        batch_id_to_cancel = stop_match.group(1).upper()
+        success = await db.cancel_scheduled_broadcast(batch_id_to_cancel)
+        if success:
+            return await message.reply_text(f"✅ **Cancelled!** Scheduled broadcast `{batch_id_to_cancel}` has been deleted from the queue.")
+        else:
+            return await message.reply_text(f"❌ **Failed:** Could not find a pending scheduled broadcast with ID `{batch_id_to_cancel}`.")
+
+    batch_id = f"Batch_{str(uuid.uuid4())[:6].upper()}"
     schedule_match = re.search(r'(\d{4}-\d{2}-\d{2}\s+\d{2}[:\-]\d{2})', command_text)
     
     if schedule_match:
@@ -243,15 +269,15 @@ async def ultimate_broadcast(client: Client, message: Message):
             if run_at_ts <= time.time():
                 return await message.reply_text("❌ Scheduled time must be in the future.")
             await db.add_scheduled_broadcast(batch_id, message.chat.id, target_msg.id, run_at_ts, command_text)
-            return await message.reply_text(f"⏳ **Broadcast Scheduled!**\n\nBatch ID: `{batch_id}`\nWill auto-deploy at: `{raw_date}` (IST)\n*(Use `/cancel_followup {batch_id}` to cancel)*")
+            return await message.reply_text(f"⏳ **Broadcast Scheduled!**\n\nBatch ID: `{batch_id}`\nWill auto-deploy at: `{raw_date}` (IST)\n*(Use `/cancelfollowup {batch_id}` to cancel)*")
         except ValueError:
             return await message.reply_text("❌ Invalid date format. Please use `YYYY-MM-DD HH:MM`.")
 
     await execute_broadcast_run(client, message.chat.id, target_msg, command_text, batch_id)
 
-@Client.on_message(filters.command(["cancel_followup", "cancel_schedule"]) & filters.user(Config.ADMINS))
+@Client.on_message(filters.command(["cancel_followup", "cancel_schedule", "stopfollowup", "cancelfollowup"]) & filters.user(Config.ADMINS))
 async def cancel_scheduled_job(client: Client, message: Message):
-    if len(message.command) < 2: return await message.reply_text("⚠️ **Format:** `/cancel_followup <Batch_ID>`")
+    if len(message.command) < 2: return await message.reply_text("⚠️ **Format:** `/stopfollowup <Batch_ID>`")
     batch_id = message.command[1].strip()
     success = await db.cancel_scheduled_broadcast(batch_id)
     if success: await message.reply_text(f"✅ **Cancelled!** Scheduled broadcast `{batch_id}` has been deleted from the queue.")
