@@ -70,26 +70,28 @@ def is_creator(user_id: int) -> bool:
 # --- HANDLERS ---
 # ==========================================
 
-# Removed 'filters.private' so /start works everywhere (Group AND PM)
-@Client.on_message(filters.command("start"), group=2)
+# STRIPPED THE HEAVY ROUTING: Now it simply catches /start everywhere.
+@Client.on_message(filters.command("start"))
 async def start_menu_handler(client: Client, message: Message):
+    
+    # Catch Appeals smoothly
     if len(message.command) > 1: 
         cmd = message.command[1]
-        # Handle global appeals safely
         if cmd.startswith("appeal_"):
             p_type = cmd.split("_")[1]
             btn = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Formal Appeal", callback_data=f"appeal_global_{p_type}")]])
             return await message.reply_text(f"⚖️ **Global {p_type.upper()} Appeal Center**\n\nClick the button below to officially submit your appeal to the Creator.", reply_markup=btn)
         
-        # If it's a file link (like getfile_1234), we exit this handler quietly 
-        # so your actual file delivery code can process it without sending the welcome menu.
+        # Exits quietly so your file delivery code handles the download links
         return 
-        
+
+    # Send loading sticker safely
     try:
         loading_msg = await message.reply_sticker(random.choice(START_STICKERS))
-        await asyncio.sleep(3)
+        await asyncio.sleep(1)
         await loading_msg.delete()
-    except Exception: pass
+    except Exception: 
+        pass
         
     current_hour = datetime.now().hour
     if 5 <= current_hour < 12: greeting = "🌅 Good Morning"
@@ -98,11 +100,6 @@ async def start_menu_handler(client: Client, message: Message):
     else: greeting = "🌃 Good Night"
 
     first_name = message.from_user.first_name if message.from_user else "User"
-    username = message.from_user.username or "None"
-    
-    # Send directly to your Log Channel (only if they are in PM to prevent group spam)
-    if message.chat and message.chat.type == ChatType.PRIVATE:
-        await log_to_channel(client, f"#new_user\n👤 Name: `{first_name}`\n🆔 ID: `{message.from_user.id}`\n🔗 Username: @{username}")
 
     welcome_text = (
         f"**{greeting}, {first_name}!**\n\n"
@@ -110,19 +107,23 @@ async def start_menu_handler(client: Client, message: Message):
         f"✨ **Use the interactive buttons below to explore my built-in commands:**"
     )
     
-    # Failsafe: If photo fails to send, send text instead of crashing
+    # GUARANTEED REPLY: Sends photo, falls back to text if Telegram acts up
     try:
         await message.reply_photo(
             photo=random.choice(START_BANNER_IMAGES),
             caption=welcome_text,
             reply_markup=get_start_markup()
         )
-    except Exception as e:
-        logger.error(f"Failed to send start image: {e}")
+    except Exception:
         await message.reply_text(
             text=welcome_text,
             reply_markup=get_start_markup()
         )
+
+    # LOGGING MOVED TO THE END so it never delays or breaks your PM reply
+    if message.chat.type == ChatType.PRIVATE:
+        username = message.from_user.username or "None"
+        asyncio.create_task(log_to_channel(client, f"#new_user\n👤 Name: `{first_name}`\n🆔 ID: `{message.from_user.id}`\n🔗 Username: @{username}"))
 
 @Client.on_message(filters.command("help") & filters.private)
 async def help_command_handler(client: Client, message: Message):
