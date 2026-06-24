@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+import re
 from bson.objectid import ObjectId
 from motor.motor_asyncio import AsyncIOMotorClient
 from typing import List, Dict, Any, Optional
@@ -13,12 +14,16 @@ class MultiDB:
         self.clients: List[AsyncIOMotorClient] = []
         self.collections = []
         
+        # Safely extract DB name even if connection pooling queries like ?maxPoolSize=500 are attached
+        match = re.search(r"mongodb\+srv://[^/]+/([^?]+)", uris[0]) if uris else None
+        resolved_db_name = match.group(1) if match else db_name
+        
         for uri in uris:
             try:
                 client = AsyncIOMotorClient(uri)
                 client.get_io_loop = asyncio.get_running_loop
                 self.clients.append(client)
-                self.collections.append(client[db_name]["files"])
+                self.collections.append(client[resolved_db_name]["files"])
             except Exception as e:
                 logger.error(f"Failed to connect to Mongo Shard URI: {e}")
 
@@ -26,13 +31,21 @@ class MultiDB:
             logger.warning("No database collections active. Bot features will fail.")
             
         if self.clients:
-            self.settings = self.clients[0][db_name]["settings"]
-            self.users = self.clients[0][db_name]["users"]
-            self.groups = self.clients[0][db_name]["groups"]
-            self.jobs = self.clients[0][db_name]["indexing_jobs"]
-            self.broadcast_logs = self.clients[0][db_name]["broadcast_logs"]
-            self.scheduled_broadcasts = self.clients[0][db_name]["scheduled_broadcasts"]
-            self.batch_stats = self.clients[0][db_name]["batch_stats"]  # 🚀 NEW: Tracks engagement
+            self.settings = self.clients[0][resolved_db_name]["settings"]
+            self.users = self.clients[0][resolved_db_name]["users"]
+            self.groups = self.clients[0][resolved_db_name]["groups"]
+            self.jobs = self.clients[0][resolved_db_name]["indexing_jobs"]
+            self.broadcast_logs = self.clients[0][resolved_db_name]["broadcast_logs"]
+            self.scheduled_broadcasts = self.clients[0][resolved_db_name]["scheduled_broadcasts"]
+            self.batch_stats = self.clients[0][resolved_db_name]["batch_stats"]  
+
+        # ==========================================
+        # ⚙️ MULTI-SHARD CAPACITY CONSTANTS
+        # ==========================================
+        self.MAX_FILES_PER_SHARD = 800000 
+        self.MAX_SHARD_CAPACITY_BYTES = 512 * 1024 * 1024
+        # 160MB Constant for Atlas Free Tier system metrics (admin/local DB overhead)
+        self.SYSTEM_OVERHEAD = 160 * 1024 * 1024 
 
     async def ensure_indexes(self):
         """Builds MongoDB Text Indexes for lightning-fast searching."""
@@ -146,13 +159,28 @@ class MultiDB:
         await self.settings.update_one({"_id": "bot_settings"}, {"$set": updates}, upsert=True)
         return True
 
+    # ==========================================
+    # ⚙️ WORKER 1: AUTO-ROUTING LOAD BALANCER
+    # ==========================================
     async def insert_file(self, file_data: Dict[str, Any], shard_index: Optional[int] = None) -> bool:
         if not self.collections: return False
-        target_shard = shard_index % len(self.collections) if shard_index is not None else 0
+        
+        # Smart load balancer routing to stay under 800,000 files per shard
+        counts = [await coll.estimated_document_count() for coll in self.collections]
+        available_shards = [(idx, count) for idx, count in enumerate(counts) if count < self.MAX_FILES_PER_SHARD]
+        
+        if not available_shards:
+            logger.warning("🚨 All MongoDB Shards have hit 800k limit! Defaulting to emptiest shard.")
+            target_shard = counts.index(min(counts))
+        else:
+            target_shard = min(available_shards, key=lambda x: x[1])[0]
+            
         try:
             await self.collections[target_shard].insert_one(file_data)
             return True
-        except Exception: return False
+        except Exception as e: 
+            logger.error(f"❌ Failed writing file: {e}")
+            return False
 
     async def check_exists(self, crypto_hash: str) -> bool:
         if not self.collections: return False
@@ -199,45 +227,48 @@ class MultiDB:
                 
         return combined_results[:limit]
 
+    # ==========================================
+    # 💾 THE PERFECT ANALYTICS SYSTEM
+    # ==========================================
     async def global_stats(self) -> Dict[str, Any]:
+        """Calculates precise cluster metrics including Atlas system overhead."""
         stats = {
             "shards_active": len(self.collections), 
             "total_files": 0, 
-            "total_size_bytes": 0, 
+            "total_size_bytes": self.SYSTEM_OVERHEAD,  # Added 160MB Atlas Overhead natively
             "indexed_metadata": 0,
             "corrupted_files": 0,
             "shard_distribution": []
         }
         
-        for client, coll in zip(self.clients, self.collections):
+        for coll in self.collections:
             try:
-                db_obj = client[Config.DB_NAME]
-                coll_stats = await db_obj.command("collStats", "files")
-                count = coll_stats.get("count", 0)
+                # Accurately measure physical bytes used by data and text indexes
+                db_stats = await coll.database.command("dbStats")
+                stats["total_size_bytes"] += db_stats.get("storageSize", 0) + db_stats.get("indexSize", 0)
+                
+                count = await coll.estimated_document_count()
                 stats["shard_distribution"].append(count)
                 stats["total_files"] += count
-                stats["total_size_bytes"] += coll_stats.get("storageSize", 0)
                 
                 processed = await coll.count_documents({"language": {"$exists": True, "$ne": "pending"}})
                 stats["indexed_metadata"] += processed
 
                 corrupted = await coll.count_documents({"language": "corrupted"})
                 stats["corrupted_files"] += corrupted
-            except Exception:
-                count = await coll.count_documents({})
-                stats["shard_distribution"].append(count)
-                stats["total_files"] += count
-
-                processed = await coll.count_documents({"language": {"$exists": True, "$ne": "pending"}})
-                stats["indexed_metadata"] += processed
-
-                corrupted = await coll.count_documents({"language": "corrupted"})
-                stats["corrupted_files"] += corrupted
+            except Exception as e:
+                logger.error(f"Stats Error: {e}")
                 
-        total_capacity_bytes = len(self.collections) * 512 * 1024 * 1024
+        total_capacity_bytes = len(self.collections) * self.MAX_SHARD_CAPACITY_BYTES
         stats["space_left_bytes"] = max(0, total_capacity_bytes - stats["total_size_bytes"])
-        avg_obj_size = stats["total_size_bytes"] / stats["total_files"] if stats["total_files"] > 0 else 300
-        stats["estimated_files_left"] = int(stats["space_left_bytes"] / avg_obj_size) if avg_obj_size > 0 else 0
+        
+        true_data_size = stats["total_size_bytes"] - self.SYSTEM_OVERHEAD
+        if stats["total_files"] > 0 and true_data_size > 0:
+            avg_obj_size = true_data_size / stats["total_files"]
+            stats["estimated_files_left"] = int(stats["space_left_bytes"] / avg_obj_size)
+        else:
+            stats["estimated_files_left"] = 0
+            
         return stats
 
     # ==========================================
