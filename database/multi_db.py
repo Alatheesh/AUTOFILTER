@@ -38,6 +38,8 @@ class MultiDB:
             self.broadcast_logs = self.clients[0][resolved_db_name]["broadcast_logs"]
             self.scheduled_broadcasts = self.clients[0][resolved_db_name]["scheduled_broadcasts"]
             self.batch_stats = self.clients[0][resolved_db_name]["batch_stats"]  
+            # 🛡️ NEW: Centralized Moderation Database
+            self.punishments = self.clients[0][resolved_db_name]["punishments"]
 
         # ==========================================
         # ⚙️ MULTI-SHARD CAPACITY CONSTANTS
@@ -398,5 +400,58 @@ class MultiDB:
             "replies": len(doc.get("replies", [])),
             "followups": doc.get("followup_count", 0)
         }
+
+    # ==========================================
+    # ⚖️ DUAL-LAYER MODERATION ENGINE
+    # ==========================================
+    
+    async def add_punishment(self, user_id: int, chat_id: str, p_type: str, duration_secs: int=0, expiry_ts: float=0, reason: str=""):
+        """Adds or updates a global/local punishment block."""
+        if not self.clients: return 1
+        doc_id = f"{user_id}_{chat_id}"
+        
+        if p_type == "warn":
+            await self.punishments.update_one({"_id": doc_id}, {"$inc": {"warns": 1}, "$set": {"type": "warn"}}, upsert=True)
+            doc = await self.punishments.find_one({"_id": doc_id})
+            return doc.get("warns", 1)
+            
+        else: # Mute or Ban
+            payload = {"type": p_type, "reason": reason}
+            if expiry_ts > 0: payload["expires_at"] = expiry_ts
+            await self.punishments.update_one({"_id": doc_id}, {"$set": payload}, upsert=True)
+            return 1
+
+    async def remove_punishment(self, user_id: int, chat_id: str, p_type: str):
+        """Removes a specific punishment based on the user and scope."""
+        if not self.clients: return
+        doc_id = f"{user_id}_{chat_id}"
+        await self.punishments.delete_one({"_id": doc_id})
+
+    async def check_punishment(self, user_id: int, chat_id: str):
+        """Lazy Evaluation Engine: Returns (type, reason, expiry, scope) or None"""
+        if not self.clients: return None, None, 0, None
+        
+        # 1. Check Global Punishments First
+        global_doc = await self.punishments.find_one({"_id": f"{user_id}_global"})
+        if global_doc and global_doc.get("type") in ["mute", "ban"]:
+            if global_doc.get("expires_at", 0) > 0 and time.time() > global_doc["expires_at"]:
+                await self.remove_punishment(user_id, "global", global_doc["type"]) # Auto-Unmute Lazy Eval
+            else:
+                return global_doc["type"], global_doc.get("reason", ""), global_doc.get("expires_at", 0), "global"
+
+        # 2. Check Local Group Punishments
+        local_doc = await self.punishments.find_one({"_id": f"{user_id}_{chat_id}"})
+        if local_doc and local_doc.get("type") in ["mute", "ban"]:
+            if local_doc.get("expires_at", 0) > 0 and time.time() > local_doc["expires_at"]:
+                await self.remove_punishment(user_id, chat_id, local_doc["type"]) # Auto-Unmute Lazy Eval
+            else:
+                return local_doc["type"], local_doc.get("reason", ""), local_doc.get("expires_at", 0), "local"
+                
+        return None, None, 0, None
+
+    async def add_search_count(self, user_id: int):
+        """Tracks the overall usage history of the bot per user."""
+        if not self.clients: return
+        await self.users.update_one({"user_id": user_id}, {"$inc": {"total_searches": 1}}, upsert=True)
 
 db = MultiDB(Config.DB_URIS, Config.DB_NAME)
