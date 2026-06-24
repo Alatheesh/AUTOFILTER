@@ -70,44 +70,44 @@ def is_creator(user_id: int) -> bool:
 # --- HANDLERS ---
 # ==========================================
 
-# STRIPPED THE HEAVY ROUTING: Now it simply catches /start everywhere.
-@Client.on_message(filters.command("start"))
+@Client.on_message(filters.command("start"), group=2)
 async def start_menu_handler(client: Client, message: Message):
-    
-    # Catch Appeals smoothly
     if len(message.command) > 1: 
         cmd = message.command[1]
         if cmd.startswith("appeal_"):
             p_type = cmd.split("_")[1]
             btn = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Formal Appeal", callback_data=f"appeal_global_{p_type}")]])
             return await message.reply_text(f"⚖️ **Global {p_type.upper()} Appeal Center**\n\nClick the button below to officially submit your appeal to the Creator.", reply_markup=btn)
-        
-        # Exits quietly so your file delivery code handles the download links
         return 
 
-    # Send loading sticker safely
+    # 1. CHECK IF USER IS NEW
+    user_id = message.from_user.id
+    user_exists = await db.users.find_one({"user_id": user_id})
+    
+    # 2. ONLY LOG IF NEW
+    if not user_exists:
+        first_name = message.from_user.first_name
+        username = message.from_user.username or "None"
+        await log_to_channel(client, f"#new_user\n👤 Name: `{first_name}`\n🆔 ID: `{user_id}`\n🔗 Username: @{username}")
+        # Add them to DB so they aren't 'new' next time
+        await db.update_user_setting(user_id, "user_id", user_id)
+
+    # 3. REPLY MESSAGE (Sent only to the chat that triggered the command)
     try:
         loading_msg = await message.reply_sticker(random.choice(START_STICKERS))
         await asyncio.sleep(1)
         await loading_msg.delete()
-    except Exception: 
-        pass
+    except Exception: pass
         
     current_hour = datetime.now().hour
-    if 5 <= current_hour < 12: greeting = "🌅 Good Morning"
-    elif 12 <= current_hour < 17: greeting = "☀️ Good Afternoon"
-    elif 17 <= current_hour < 21: greeting = "🌆 Good Evening"
-    else: greeting = "🌃 Good Night"
-
-    first_name = message.from_user.first_name if message.from_user else "User"
-
+    greeting = "🌅 Good Morning" if 5 <= current_hour < 12 else "☀️ Good Afternoon" if 12 <= current_hour < 17 else "🌆 Good Evening" if 17 <= current_hour < 21 else "🌃 Good Night"
+    
     welcome_text = (
-        f"**{greeting}, {first_name}!**\n\n"
-        f"Welcome to the **Cloud Auto-Filter Bot**. I am your personal, lightning-fast database assistant.\n\n"
-        f"✨ **Use the interactive buttons below to explore my built-in commands:**"
+        f"**{greeting}, {message.from_user.first_name}!**\n\n"
+        f"Welcome to the **Cloud Auto-Filter Bot**.\n\n"
+        f"✨ **Use the buttons below to explore my commands:**"
     )
     
-    # GUARANTEED REPLY: Sends photo, falls back to text if Telegram acts up
     try:
         await message.reply_photo(
             photo=random.choice(START_BANNER_IMAGES),
@@ -115,10 +115,7 @@ async def start_menu_handler(client: Client, message: Message):
             reply_markup=get_start_markup()
         )
     except Exception:
-        await message.reply_text(
-            text=welcome_text,
-            reply_markup=get_start_markup()
-        )
+        await message.reply_text(text=welcome_text, reply_markup=get_start_markup())
 
     # LOGGING MOVED TO THE END so it never delays or breaks your PM reply
     if message.chat.type == ChatType.PRIVATE:
