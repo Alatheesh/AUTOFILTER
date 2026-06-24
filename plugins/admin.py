@@ -703,3 +703,26 @@ async def clear_active_job(client: Client, message: Message):
         await message.reply_text("✅ **Stuck indexing job marked as completed.** The loop will now stop.")
     else:
         await message.reply_text("⚠️ **No active job found.**")
+
+@Client.on_message(filters.command("userstats") & filters.user(Config.ADMINS))
+async def get_user_stats(client: Client, message: Message):
+    # Fetching counts from the database collections
+    total_users = await db.users.count_documents({})
+    total_muted = await db.punishments.count_documents({"type": "mute"})
+    total_banned = await db.punishments.count_documents({"type": "ban"})
+    
+    # Calculate active users (Total - Banned)
+    active_users = total_users - total_banned
+    
+    stats_text = (
+        f"📊 **Bot User Statistics**\n\n"
+        f"👥 Total Users: `{total_users}`\n"
+        f"🟢 Active Users: `{active_users}`\n"
+        f"🔇 Total Muted: `{total_muted}`\n"
+        f"🚫 Total Banned: `{total_banned}`\n\n"
+        f"⚙️ **Admin Shortcuts:**\n"
+        f"/mute <id> [time] - Mute a user\n"
+        f"/ban <id> [reason] - Ban a user"
+    )
+    
+    await message.reply_text(stats_text)
