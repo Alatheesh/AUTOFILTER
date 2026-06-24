@@ -28,20 +28,22 @@ async def live_channel_listener(client: Client, message: Message):
                 private_id = str(message.chat.id).replace("-100", "")
                 url = f"https://t.me/c/{private_id}/{message.id}"
             
-            # 🚨 THE UPGRADE: Save to permanent MongoDB instead of temporary memory!
             await db.update_settings({"inside_target_url": url})
             logger.info(f"✅ Successfully cached new target post to Database: {url}")
 
 async def get_target_post(client: Client, settings: dict) -> str:
-    # Fetch directly from MongoDB
     return settings.get("inside_target_url")
 
 @Client.on_message(filters.private & filters.forwarded, group=3)
 async def catch_forwarded_verification(client: Client, message: Message):
     settings = await db.get_settings()
-    
     if not settings.get("inside_enabled", False):
         return
+        
+    # 🚨 THE STRICT BUG FIX: Only check forwarded messages if the user is ACTUALLY locked out!
+    user_data = await db.get_user_settings(message.from_user.id)
+    if time.time() < user_data.get("inside_pass_expires", 0):
+        return # They don't need a pass right now, ignore their forward completely!
         
     user_text = message.text or message.caption or ""
     words = [w.lower().strip(',.') for w in settings.get("inside_words", [])]
@@ -54,6 +56,7 @@ async def catch_forwarded_verification(client: Client, message: Message):
         expires_at = time.time() + pass_duration_seconds
         await db.update_user_setting(message.from_user.id, "inside_pass_expires", expires_at)
         
+        # Restored your detailed, multi-line success message
         await message.reply_text(
             f"✅ **Human Verification Passed!**\n\n"
             f"Thank you for completing the task! You have been granted a **Free Pass** for the next **{hours_per_pass:.1f} Hours**.\n\n"
@@ -61,6 +64,7 @@ async def catch_forwarded_verification(client: Client, message: Message):
         )
     else:
         target_url = settings.get("inside_target_url", "")
+        # Restored your detailed, multi-line failure message
         await message.reply_text(
             f"❌ **Verification Failed!**\n\n"
             f"That is not the correct post. Please find the exact post with our secret words and forward it directly to me.\n\n"
