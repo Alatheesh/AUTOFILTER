@@ -1,4 +1,3 @@
-
 import random
 import logging
 import asyncio
@@ -8,6 +7,7 @@ from pyrogram.enums import ChatType
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from config import Config
 from database.multi_db import db
+from plugins.moderation import log_to_channel
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +69,15 @@ def is_creator(user_id: int) -> bool:
 # ==========================================
 # --- HANDLERS ---
 # ==========================================
-@Client.on_message(filters.command("start") & filters.private, group=2)
+@Client.on_message(filters.command("start"), group=2)
 async def start_menu_handler(client: Client, message: Message):
-    if len(message.command) > 1: return
+    if len(message.command) > 1: 
+        cmd = message.command[1]
+        if cmd.startswith("appeal_"):
+            p_type = cmd.split("_")[1]
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Formal Appeal", callback_data=f"appeal_global_{p_type}")]])
+            return await message.reply_text(f"⚖️ **Global {p_type.upper()} Appeal Center**\n\nClick the button below to officially submit your appeal to the Creator.", reply_markup=btn)
+        return # Let monetization handle getfile and verification deep links!
         
     try:
         loading_msg = await message.reply_sticker(random.choice(START_STICKERS))
@@ -86,6 +92,12 @@ async def start_menu_handler(client: Client, message: Message):
     else: greeting = "🌃 Good Night"
 
     first_name = message.from_user.first_name if message.from_user else "User"
+    username = message.from_user.username or "None"
+    
+    # Send directly to your Log Channel (only if they are in PM to prevent group spam)
+    if message.chat.type == ChatType.PRIVATE:
+        await log_to_channel(client, f"#new_user\n👤 Name: `{first_name}`\n🆔 ID: `{message.from_user.id}`\n🔗 Username: @{username}")
+
     welcome_text = (
         f"**{greeting}, {first_name}!**\n\n"
         f"Welcome to the **Cloud Auto-Filter Bot**. I am your personal, lightning-fast database assistant.\n\n"
