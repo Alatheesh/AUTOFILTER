@@ -7,6 +7,7 @@ import aiohttp
 import json
 import urllib.parse
 import hashlib
+import asyncio
 from pyrogram import Client, filters
 from pyrogram.enums import ChatType
 from pyrogram.types import (
@@ -15,6 +16,7 @@ from pyrogram.types import (
 )
 from database.multi_db import db
 from config import Config
+from plugins.moderation import SCRAPER_TRACKER
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +159,7 @@ def build_safe_webapp_url(client_username, short_id, data_url):
     bot_username = client_username or "Bot"
     return f"{base_link}?bot={bot_username}&id={short_id}&url={safe_url}"
 
-@Client.on_message((filters.group | filters.private) & filters.text & ~filters.command(["start", "help", "about", "source", "settings", "request", "plot", "history", "clear_history", "broadcast", "stats", "backup", "admin", "index", "batch", "migrate_db", "clear_job", "optimize_db", "connect", "disconnect", "setshort"]))
+@Client.on_message((filters.group | filters.private) & filters.text & ~filters.command(["start", "help", "about", "source", "settings", "request", "plot", "history", "clear_history", "broadcast", "stats", "backup", "admin", "index", "batch", "migrate_db", "clear_job", "optimize_db", "connect", "disconnect", "setshort", "warn", "mute", "ban", "unwarn", "unmute", "unban", "id", "info"]))
 async def auto_filter(client: Client, message: Message):
     query = message.text.strip()
     if len(query) < 3: return
@@ -165,6 +167,34 @@ async def auto_filter(client: Client, message: Message):
     user_id = message.from_user.id
     chat_id = message.chat.id
     current_time = time.time()
+    
+    # 🚨 1. Scraper Protection Layer (50 searches / 1 minute)
+    if user_id not in SCRAPER_TRACKER: SCRAPER_TRACKER[user_id] = []
+    SCRAPER_TRACKER[user_id].append(current_time)
+    SCRAPER_TRACKER[user_id] = [t for t in SCRAPER_TRACKER[user_id] if current_time - t < 60]
+    
+    if len(SCRAPER_TRACKER[user_id]) > 50:
+        await db.add_punishment(user_id, "global", "ban", reason="Automated Scraper Detection.")
+        return await message.reply_text("🚫 **SECURITY LOCK:** You have been permanently banned globally for API scraping.")
+
+    # ⚖️ 2. Lazy Evaluation Interception
+    p_type, p_reason, p_expiry, p_scope = await db.check_punishment(user_id, str(chat_id))
+    if p_type:
+        lock_msg = f"🚫 You are **{p_type.upper()}ED** " + ("globally." if p_scope == "global" else "in this group.")
+        lock_msg += f"\nReason: {p_reason}"
+        if p_type == "mute" and p_expiry > 0: lock_msg += f"\nUnlocks: <t:{int(p_expiry)}:R>"
+        
+        # Deep Link Appeal back to PM if they are globally banned but searching in a group
+        if p_scope == "global" and message.chat.type != ChatType.PRIVATE:
+            bot_me = await client.get_me()
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Appeal in PM", url=f"https://t.me/{bot_me.username}?start=appeal_{p_type}")]])
+        else:
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Appeal", callback_data=f"appeal_{p_scope}_{p_type}")]])
+            
+        return await message.reply_text(lock_msg, reply_markup=btn)
+
+    # Track usage stats
+    await asyncio.create_task(db.add_search_count(user_id))
     
     if user_id in SPAM_TRACKER and current_time - SPAM_TRACKER[user_id] < SPAM_COOLDOWN: return 
     SPAM_TRACKER[user_id] = current_time
@@ -231,12 +261,10 @@ async def auto_filter(client: Client, message: Message):
         if data_url:
             web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url)
             
-            # 🚀 THE FIX: Store the web_app_url inside the cache so the PM redirect can find it!
             BULK_CACHE[short_id] = (time.time(), web_app_results, web_app_url)
             for k in list(BULK_CACHE.keys()):
                 if time.time() - BULK_CACHE[k][0] > BULK_CACHE_TTL: del BULK_CACHE[k]
 
-            # 🚀 THE FIX: Route WebApp buttons to PM if triggered in a Group
             if chat_type == ChatType.PRIVATE:
                 buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)})", web_app=WebAppInfo(url=web_app_url))])
             else:
@@ -332,7 +360,6 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
             for k in list(BULK_CACHE.keys()):
                 if time.time() - BULK_CACHE[k][0] > BULK_CACHE_TTL: del BULK_CACHE[k]
 
-            # 🚀 THE FIX: Dynamic Routing in Pagination too
             if chat_type == ChatType.PRIVATE:
                 buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)})", web_app=WebAppInfo(url=web_app_url))])
             else:
