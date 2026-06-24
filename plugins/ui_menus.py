@@ -69,15 +69,19 @@ def is_creator(user_id: int) -> bool:
 # ==========================================
 # --- HANDLERS ---
 # ==========================================
-@Client.on_message(filters.command("start"), group=2)
+@Client.on_message(filters.command("start") & filters.private, group=2)
 async def start_menu_handler(client: Client, message: Message):
+    # Process Appeals without breaking other deep links
     if len(message.command) > 1: 
         cmd = message.command[1]
         if cmd.startswith("appeal_"):
             p_type = cmd.split("_")[1]
             btn = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Formal Appeal", callback_data=f"appeal_global_{p_type}")]])
             return await message.reply_text(f"⚖️ **Global {p_type.upper()} Appeal Center**\n\nClick the button below to officially submit your appeal to the Creator.", reply_markup=btn)
-        return # Let monetization handle getfile and verification deep links!
+        
+        # If it is NOT an appeal (e.g. file delivery link), we exit this handler 
+        # so your original file-delivery logic can take over perfectly.
+        return 
         
     try:
         loading_msg = await message.reply_sticker(random.choice(START_STICKERS))
@@ -94,9 +98,8 @@ async def start_menu_handler(client: Client, message: Message):
     first_name = message.from_user.first_name if message.from_user else "User"
     username = message.from_user.username or "None"
     
-    # Send directly to your Log Channel (only if they are in PM to prevent group spam)
-    if message.chat.type == ChatType.PRIVATE:
-        await log_to_channel(client, f"#new_user\n👤 Name: `{first_name}`\n🆔 ID: `{message.from_user.id}`\n🔗 Username: @{username}")
+    # Send Log Channel Update
+    await log_to_channel(client, f"#new_user\n👤 Name: `{first_name}`\n🆔 ID: `{message.from_user.id}`\n🔗 Username: @{username}")
 
     welcome_text = (
         f"**{greeting}, {first_name}!**\n\n"
