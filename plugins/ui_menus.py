@@ -70,7 +70,7 @@ def is_creator(user_id: int) -> bool:
 # --- HANDLERS ---
 # ==========================================
 
-@Client.on_message(filters.command("start"), group=2)
+@Client.on_message(filters.command("start"))
 async def start_menu_handler(client: Client, message: Message):
     if len(message.command) > 1: 
         cmd = message.command[1]
