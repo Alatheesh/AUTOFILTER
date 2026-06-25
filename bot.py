@@ -63,15 +63,14 @@ async def main():
         asyncio.create_task(start_background_language_indexer(app))
         asyncio.create_task(schedule_worker(app))  # 🚀 NEW LOOP STARTED!
 
-        if Config.ADMINS:
-            for admin in Config.ADMINS:
-                try:
-                    await app.send_message(
-                        chat_id=admin,
-                        text=f"🚀 **System Alert:**\n\n{me.first_name} (`@{me.username}`) has successfully started on Hugging Face!\n⚙️ Background Workers Active."
-                    )
-                except Exception as e:
-                    logger.warning(f"⚠️ Could not send startup ping to Admin {admin}. Error: {e}")
+        if Config.LOG_CHANNEL:
+            try:
+                await self.send_message(
+                    Config.LOG_CHANNEL, 
+                    "🚀 **System Alert:**\n\nBot has successfully started!\n⚙️ Background Workers Active."
+                )
+            except Exception:
+                pass
         
         await idle()
     except (ApiIdInvalid, ApiIdPublishedFlood, AccessTokenInvalid) as e:
