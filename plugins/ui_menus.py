@@ -406,6 +406,7 @@ async def callback_userstats(client: Client, callback: CallbackQuery):
 @Client.on_callback_query(
     filters.regex(r"^set_(global|local)_(mute|ban)$")
 )
+async def moderation_settings_handler(client: Client, callback: CallbackQuery):
     # Route for moderation buttons
     if callback.data.startswith("set_local_mute") or callback.data.startswith("set_local_ban") or callback.data.startswith("set_global_mute") or callback.data.startswith("set_global_ban"):
         parts = callback.data.split("_")
