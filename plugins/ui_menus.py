@@ -403,8 +403,9 @@ async def callback_userstats(client: Client, callback: CallbackQuery):
     )
     await callback.message.edit_text(stats_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="tier_root_fallback")]]))
 
-@Client.on_callback_query(filters.regex(r"^set_"))
-async def apply_settings_handler(client: Client, callback: CallbackQuery):
+@Client.on_callback_query(
+    filters.regex(r"^set_(global|local)_(mute|ban)$")
+)
     # Route for moderation buttons
     if callback.data.startswith("set_local_mute") or callback.data.startswith("set_local_ban") or callback.data.startswith("set_global_mute") or callback.data.startswith("set_global_ban"):
         parts = callback.data.split("_")
