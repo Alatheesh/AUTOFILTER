@@ -120,6 +120,7 @@ async def start_menu_handler(client: Client, message: Message):
     # LOGGING MOVED TO THE END so it never delays or breaks your PM reply
     if message.chat.type == ChatType.PRIVATE:
         username = message.from_user.username or "None"
+        first_name = message.from_user.first_name
         asyncio.create_task(log_to_channel(client, f"#new_user\n👤 Name: `{first_name}`\n🆔 ID: `{message.from_user.id}`\n🔗 Username: @{username}"))
 
 @Client.on_message(filters.command("help") & filters.private)
@@ -262,6 +263,11 @@ async def settings_router(client: Client, message: Message):
 
         mode = g_sett.get("search_mode", "let_members_choose")
         buttons = [
+            # 🛡️ INJECTED MODERATION BUTTONS FOR GROUPS
+            [
+                InlineKeyboardButton("⚙️ Auto Mute Rules", callback_data=f"set_local_mute_{message.chat.id}"),
+                InlineKeyboardButton("🚫 Auto Ban Rules", callback_data=f"set_local_ban_{message.chat.id}")
+            ],
             [
                 InlineKeyboardButton(text=f"{'✅' if mode=='force_default' else '❌'} Force Default", callback_data=f"gset_mode_force_default_{message.chat.id}"),
                 InlineKeyboardButton(text=f"{'✅' if mode=='force_interactive' else '❌'} Force Interactive", callback_data=f"gset_mode_force_interactive_{message.chat.id}")
@@ -284,7 +290,11 @@ async def settings_router(client: Client, message: Message):
         if managed_groups:
             keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list")])
         if is_creator(user_id):
+            # 🛡️ INJECTED MODERATION BUTTONS FOR CREATORS
+            keyboard.append([InlineKeyboardButton("📊 User Stats Dashboard", callback_data="ui_userstats")])
+            keyboard.append([InlineKeyboardButton("⚙️ Global Auto Mute", callback_data="set_global_mute"), InlineKeyboardButton("🚫 Global Auto Ban", callback_data="set_global_ban")])
             keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="set_home")])
+            
         await message.reply_text("🎛️ **Central Command Settings Hub:**\nSelect the access layer tier you wish to inspect or modify:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 @Client.on_callback_query(filters.regex(r"^(tier_|gset_|uset_)"))
@@ -346,6 +356,8 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         if g_sett.get("connected_by") != user_id and not is_creator(user_id): return await query.answer("Access Denied.", show_alert=True)
         mode = g_sett.get("search_mode", "let_members_choose")
         buttons = [
+            # 🛡️ INJECTED MODERATION BUTTONS FOR SPECIFIC GROUP
+            [InlineKeyboardButton("⚙️ Auto Mute Rules", callback_data=f"set_local_mute_{c_id}"), InlineKeyboardButton("🚫 Auto Ban Rules", callback_data=f"set_local_ban_{c_id}")],
             [InlineKeyboardButton(text=f"{'✅' if mode=='force_default' else '❌'} Force Default", callback_data=f"gset_mode_force_default_{c_id}"), InlineKeyboardButton(text=f"{'✅' if mode=='force_interactive' else '❌'} Force Interactive", callback_data=f"gset_mode_force_interactive_{c_id}")],
             [InlineKeyboardButton(text=f"{'✅' if mode=='let_members_choose' else '❌'} Let Members Choose", callback_data=f"gset_mode_let_members_choose_{c_id}")]
         ]
@@ -380,11 +392,31 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
     if data == "tier_root_fallback":
         keyboard = [[InlineKeyboardButton(text="👤 Personal Search Settings", callback_data="tier_user_home")]]
         if await db.get_connected_groups(user_id): keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list")])
-        if is_creator(user_id): keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="set_home")])
+        if is_creator(user_id): 
+            # 🛡️ INJECTED MODERATION BUTTONS FOR FALLBACK MENU
+            keyboard.append([InlineKeyboardButton("📊 User Stats Dashboard", callback_data="ui_userstats")])
+            keyboard.append([InlineKeyboardButton("⚙️ Global Auto Mute", callback_data="set_global_mute"), InlineKeyboardButton("🚫 Global Auto Ban", callback_data="set_global_ban")])
+            keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="set_home")])
         return await query.message.edit_text("🎛️ **Central Command Settings Hub**", reply_markup=InlineKeyboardMarkup(keyboard))
 
 @Client.on_callback_query(filters.regex(r"^set_"))
 async def apply_settings_handler(client: Client, callback: CallbackQuery):
+    # 🛡️ INJECTED HANDLER FOR MODERATION CONFIGURATION
+    if callback.data.startswith("set_local_mute") or callback.data.startswith("set_local_ban") or callback.data.startswith("set_global_mute") or callback.data.startswith("set_global_ban"):
+        parts = callback.data.split("_")
+        scope = parts[1]
+        ptype = parts[2]
+        chat_id = parts[3] if len(parts) > 3 else ""
+        back_data = f"tier_gmanage_{chat_id}" if scope == "local" else "tier_root_fallback"
+        
+        text = f"⚙️ **{scope.upper()} {ptype.upper()} CONFIGURATION**\n\nCustomize your automated triggers here:"
+        buttons = [
+            [InlineKeyboardButton("📝 Edit Bad Words", callback_data="mod_badwords")],
+            [InlineKeyboardButton("⏱ Set Warn Limits (Strikeouts)", callback_data="mod_limits")],
+            [InlineKeyboardButton("🔙 Back", callback_data=back_data)]
+        ]
+        return await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
     parts = callback.data.split("_")
     scope, setting_type = parts[1], parts[2]
     user_id, chat_id = callback.from_user.id, callback.message.chat.id
@@ -419,3 +451,19 @@ async def apply_settings_handler(client: Client, callback: CallbackQuery):
     await callback.answer(f"✅ Updated!", show_alert=True)
     callback.data = f"set_{scope}_back"
     await apply_settings_handler(client, callback)
+
+# 🛡️ INJECTED HANDLER FOR USER STATS DASHBOARD
+@Client.on_callback_query(filters.regex(r"^ui_userstats$"))
+async def callback_userstats(client: Client, callback: CallbackQuery):
+    total_users = await db.users.count_documents({})
+    total_muted = await db.punishments.count_documents({"type": "mute"})
+    total_banned = await db.punishments.count_documents({"type": "ban"})
+    
+    stats_text = (
+        f"📊 **Bot User Statistics**\n\n"
+        f"👥 Total Users: `{total_users}`\n"
+        f"🟢 Active Users: `{total_users - total_banned}`\n"
+        f"🔇 Total Muted: `{total_muted}`\n"
+        f"🚫 Total Banned: `{total_banned}`\n"
+    )
+    await callback.message.edit_text(stats_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="tier_root_fallback")]]))
