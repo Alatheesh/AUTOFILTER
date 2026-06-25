@@ -58,19 +58,20 @@ async def main():
         logger.info(f"🔗 Username: @{me.username}")
         logger.info("==================================================")
 
-        # 🔥 START THE QUEUE AND METADATA WORKERS HERE 🔥
+       # 🔥 START THE QUEUE AND METADATA WORKERS HERE 🔥
         asyncio.create_task(process_indexing_queue(app))
         asyncio.create_task(start_background_language_indexer(app))
         asyncio.create_task(schedule_worker(app))  # 🚀 NEW LOOP STARTED!
 
+        # --- THE FIX: ROUTE STARTUP ALERT TO LOG CHANNEL ---
         if Config.LOG_CHANNEL:
             try:
-                await self.send_message(
-                    Config.LOG_CHANNEL, 
-                    "🚀 **System Alert:**\n\nBot has successfully started!\n⚙️ Background Workers Active."
+                await app.send_message(
+                    chat_id=Config.LOG_CHANNEL,
+                    text=f"🚀 **System Alert:**\n\nミ💖 🇸 🇺 🇨 🇭 🇮 🇹 🇭 🇦 💖彡 (`@{me.username}`) has successfully started on Hugging Face!\n⚙️ Background Workers Active."
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"⚠️ Could not send startup ping to Log Channel. Error: {e}")
         
         await idle()
     except (ApiIdInvalid, ApiIdPublishedFlood, AccessTokenInvalid) as e:
