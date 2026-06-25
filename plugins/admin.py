@@ -3,7 +3,7 @@ import json
 import logging
 import time
 import datetime  # 🚀 NEW: Required for converting timestamps into readable dates
-from pyrogram import Client, filters, ContinuePropagation
+from pyrogram import Client, filters, ContinuePropagation, StopPropagation
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from database.multi_db import db
 from config import Config
@@ -133,7 +133,7 @@ async def admin_input_catcher(client: Client, message: Message):
             await finish_input(f"✅ **Filter Delete Time Saved:** `{user_input} Minutes`", "set_autodelete")
         else:
             await message.reply_text("❌ **Invalid Input!** Please send only a number in minutes (e.g., `5`).")
-
+    raise StopPropagation
 
 @Client.on_message(filters.command("admin") & filters.user(Config.ADMINS))
 async def admin_direct_command(client: Client, message: Message):
