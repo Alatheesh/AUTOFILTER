@@ -3,11 +3,14 @@ import time
 import uuid
 import re
 import datetime
-from pyrogram import Client, filters
+from pyrogram import Client, filters, ContinuePropagation
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.errors import FloodWait, UserIsBlocked, InputUserDeactivated, PeerIdInvalid, MessageNotModified
 from database.multi_db import db
 from config import Config
+
+# 🧠 State Machine: Remembers message IDs and Timestamps for clean UI editing
+BROADCAST_STATE = {}
 
 # ==========================================
 # 🛠️ THE BUTTON PARSER ENGINE
@@ -49,7 +52,7 @@ def parse_inline_buttons(text: str):
 # ==========================================
 # ⚙️ CORE EXECUTION LOOP
 # ==========================================
-async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: Message, command_text: str, batch_id: str):
+async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: Message, command_text: str, batch_id: str, status_msg_id: int = None):
     skip_vips = "-novip" in command_text
     is_silent = "-silent" in command_text
     allow_replies = "-reply" in command_text
@@ -81,7 +84,16 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
     if reaction_match:
         reactions = [e for e in reaction_match.group(1).split() if e]
 
-    status_msg = await client.send_message(admin_chat_id, f"🔄 **Deploying Broadcast...**\nBatch ID: `{batch_id}`")
+    # 🚀 Clean UI Upgrade: Repurpose existing wizard prompts into live trackers
+    if status_msg_id:
+        try:
+            status_msg = await client.get_messages(admin_chat_id, status_msg_id)
+            await status_msg.edit_text(f"🔄 **Deploying Broadcast...**\nBatch ID: `{batch_id}`")
+        except Exception:
+            status_msg = await client.send_message(admin_chat_id, f"🔄 **Deploying Broadcast...**\nBatch ID: `{batch_id}`")
+    else:
+        status_msg = await client.send_message(admin_chat_id, f"🔄 **Deploying Broadcast...**\nBatch ID: `{batch_id}`")
+
     sent = 0
     failed = 0
     skipped = 0
@@ -204,6 +216,167 @@ async def schedule_auto_delete(client, user_id, msg_id, delay_seconds):
     except Exception:
         pass
 
+
+# ==========================================
+# 🧠 INTERACTIVE STATE WIZARD
+# ==========================================
+async def process_broadcast_command(client: Client, message: Message, target_msg: Message, command_text: str, prompt_msg_id: int = None):
+    """Processes parameters to decide if it schedules, cancels, or executes a broadcast."""
+    stop_match = re.search(r'-(?:stop|cancel)followup\s+(Batch_[A-Z0-9]+)', command_text, re.IGNORECASE)
+    if stop_match:
+        batch_id_to_cancel = stop_match.group(1).upper()
+        success = await db.cancel_scheduled_broadcast(batch_id_to_cancel)
+        text = f"✅ **Cancelled!** Scheduled broadcast `{batch_id_to_cancel}` has been deleted from the queue." if success else f"❌ **Failed:** Could not find a pending scheduled broadcast with ID `{batch_id_to_cancel}`."
+        if prompt_msg_id:
+            try: await client.edit_message_text(message.chat.id, prompt_msg_id, text)
+            except Exception: await message.reply_text(text)
+        else: await message.reply_text(text)
+        return
+
+    batch_id = f"Batch_{str(uuid.uuid4())[:6].upper()}"
+    schedule_match = re.search(r'(\d{4}-\d{2}-\d{2}\s+\d{2}[:\-]\d{2})', command_text)
+    
+    if schedule_match:
+        raw_date = schedule_match.group(1)
+        if len(raw_date) == 16 and raw_date[13] == "-":
+            raw_date = raw_date[:13] + ":" + raw_date[14:]
+        try:
+            ist_timezone = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+            dt = datetime.datetime.strptime(raw_date, "%Y-%m-%d %H:%M").replace(tzinfo=ist_timezone)
+            run_at_ts = dt.timestamp()
+            
+            if run_at_ts <= time.time():
+                text = "❌ Scheduled time must be in the future."
+                return await client.edit_message_text(message.chat.id, prompt_msg_id, text) if prompt_msg_id else await message.reply_text(text)
+                
+            await db.add_scheduled_broadcast(batch_id, message.chat.id, target_msg.id, run_at_ts, command_text)
+            text = f"⏳ **Broadcast Scheduled!**\n\nBatch ID: `{batch_id}`\nWill auto-deploy at: `{raw_date}` (IST)\n*(Use `/cancelfollowup {batch_id}` to cancel)*"
+            return await client.edit_message_text(message.chat.id, prompt_msg_id, text) if prompt_msg_id else await message.reply_text(text)
+        except ValueError:
+            text = "❌ Invalid date format. Please use `YYYY-MM-DD HH:MM`."
+            return await client.edit_message_text(message.chat.id, prompt_msg_id, text) if prompt_msg_id else await message.reply_text(text)
+
+    await execute_broadcast_run(client, message.chat.id, target_msg, command_text, batch_id, prompt_msg_id)
+
+
+@Client.on_message(filters.private & filters.user(Config.ADMINS), group=-3)
+async def interactive_broadcast_listener(client: Client, message: Message):
+    user_id = message.from_user.id
+    
+    if user_id not in BROADCAST_STATE:
+        raise ContinuePropagation
+
+    if message.text and message.text.startswith("/"):
+        del BROADCAST_STATE[user_id]
+        raise ContinuePropagation
+
+    state_data = BROADCAST_STATE[user_id]
+    action = state_data["action"]
+    prompt_msg_id = state_data["message_id"]
+    timestamp = state_data["timestamp"]
+
+    # 🛑 48-Hour Security Check (172,800 Seconds)
+    if time.time() - timestamp > 172800:
+        del BROADCAST_STATE[user_id]
+        try: await message.delete() 
+        except Exception: pass
+        expired_text = "⚠️ **Session Expired.**\n\nThis prompt is older than 48 hours. Please restart the setup."
+        try: await client.edit_message_text(message.chat.id, prompt_msg_id, expired_text)
+        except Exception: await message.reply_text(expired_text)
+        return
+
+    if action == "broadcast_wait_msg":
+        target_msg_id = message.id
+        BROADCAST_STATE[user_id] = {
+            "action": "broadcast_wait_params",
+            "target_msg_id": target_msg_id,
+            "message_id": prompt_msg_id,
+            "timestamp": time.time()
+        }
+        text = (
+            "✅ **Message Saved!**\n\n"
+            "Now, send any parameters you want to apply (e.g., `-novip`, `-silent`, `-ask 10m`, or a schedule time like `2026-12-31 15:30`).\n\n"
+            "*(Send `none` to deploy immediately without parameters)*"
+        )
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_broadcast_flow")]])
+        try: await client.edit_message_text(message.chat.id, prompt_msg_id, text, reply_markup=markup)
+        except Exception: pass
+
+    elif action == "broadcast_wait_params":
+        command_text = message.text.strip().lower() if message.text else ""
+        if command_text == "none":
+            command_text = ""
+            
+        target_msg_id = state_data["target_msg_id"]
+        del BROADCAST_STATE[user_id]
+        try: await message.delete()
+        except Exception: pass
+        
+        target_msg = await client.get_messages(message.chat.id, target_msg_id)
+        try: await client.edit_message_text(message.chat.id, prompt_msg_id, "🔄 **Processing your broadcast request...**")
+        except Exception: pass
+        
+        await process_broadcast_command(client, message, target_msg, command_text, prompt_msg_id)
+
+    elif action == "cancel_followup_wait":
+        batch_id = message.text.strip()
+        del BROADCAST_STATE[user_id]
+        try: await message.delete()
+        except Exception: pass
+        
+        success = await db.cancel_scheduled_broadcast(batch_id)
+        text = f"✅ **Cancelled!** Scheduled broadcast `{batch_id}` has been deleted from the queue." if success else f"❌ **Failed:** Could not find a pending scheduled broadcast with ID `{batch_id}`."
+        try: await client.edit_message_text(message.chat.id, prompt_msg_id, text)
+        except Exception: await message.reply_text(text)
+
+    elif action == "broadcast_edit_wait_id":
+        batch_id = message.text.strip()
+        BROADCAST_STATE[user_id] = {
+            "action": "broadcast_edit_wait_text",
+            "batch_id": batch_id,
+            "message_id": prompt_msg_id,
+            "timestamp": time.time()
+        }
+        try: await message.delete()
+        except Exception: pass
+        
+        text = f"📝 **Editing Batch: `{batch_id}`**\n\nPlease send the new text for this broadcast."
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_broadcast_flow")]])
+        try: await client.edit_message_text(message.chat.id, prompt_msg_id, text, reply_markup=markup)
+        except Exception: pass
+
+    elif action == "broadcast_edit_wait_text":
+        batch_id = state_data["batch_id"]
+        new_text = message.text
+        del BROADCAST_STATE[user_id]
+        try: await message.delete()
+        except Exception: pass
+        
+        try: await client.edit_message_text(message.chat.id, prompt_msg_id, f"👻 **Deploying Ghost Update to `{batch_id}`...**")
+        except Exception: pass
+        
+        edited = 0
+        async for log in await db.get_broadcast_logs(batch_id):
+            try:
+                await client.edit_message_text(log["user_id"], log["message_id"], new_text)
+                edited += 1
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+            except Exception: pass
+                
+        text = f"✅ **UPDATE COMPLETE**\n\nSilently edited `{edited}` messages."
+        try: await client.edit_message_text(message.chat.id, prompt_msg_id, text)
+        except Exception: await message.reply_text(text)
+
+
+@Client.on_callback_query(filters.regex("^cancel_broadcast_flow$"))
+async def cancel_broadcast_callback(client: Client, callback: CallbackQuery):
+    user_id = callback.from_user.id
+    if user_id in BROADCAST_STATE:
+        del BROADCAST_STATE[user_id]
+    await callback.message.edit_text("❌ **Operation Cancelled.**\n\nYou can start over whenever you're ready.")
+    await callback.answer("Cancelled", show_alert=False)
+
 # ==========================================
 # ⏰ REACTION & TRACKER CALLBACKS
 # ==========================================
@@ -271,46 +444,36 @@ async def schedule_worker(client: Client):
 # ==========================================
 # ⚙️ COMMAND CENTER (BROADCAST & RECALL)
 # ==========================================
-@Client.on_message(filters.command("broadcast") & filters.user(Config.ADMINS) & filters.reply)
+@Client.on_message(filters.command("broadcast") & filters.user(Config.ADMINS))
 async def ultimate_broadcast(client: Client, message: Message):
-    target_msg = message.reply_to_message
-    command_text = message.text.lower()
-    
-    stop_match = re.search(r'-(?:stop|cancel)followup\s+(Batch_[A-Z0-9]+)', command_text, re.IGNORECASE)
-    if stop_match:
-        batch_id_to_cancel = stop_match.group(1).upper()
-        success = await db.cancel_scheduled_broadcast(batch_id_to_cancel)
-        if success:
-            return await message.reply_text(f"✅ **Cancelled!** Scheduled broadcast `{batch_id_to_cancel}` has been deleted from the queue.")
-        else:
-            return await message.reply_text(f"❌ **Failed:** Could not find a pending scheduled broadcast with ID `{batch_id_to_cancel}`.")
-
-    batch_id = f"Batch_{str(uuid.uuid4())[:6].upper()}"
-    schedule_match = re.search(r'(\d{4}-\d{2}-\d{2}\s+\d{2}[:\-]\d{2})', command_text)
-    
-    if schedule_match:
-        raw_date = schedule_match.group(1)
-        if len(raw_date) == 16 and raw_date[13] == "-":
-            raw_date = raw_date[:13] + ":" + raw_date[14:]
-        try:
-            ist_timezone = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
-            dt = datetime.datetime.strptime(raw_date, "%Y-%m-%d %H:%M").replace(tzinfo=ist_timezone)
-            run_at_ts = dt.timestamp()
-            
-            if run_at_ts <= time.time():
-                return await message.reply_text("❌ Scheduled time must be in the future.")
-                
-            await db.add_scheduled_broadcast(batch_id, message.chat.id, target_msg.id, run_at_ts, command_text)
-            return await message.reply_text(f"⏳ **Broadcast Scheduled!**\n\nBatch ID: `{batch_id}`\nWill auto-deploy at: `{raw_date}` (IST)\n*(Use `/cancelfollowup {batch_id}` to cancel)*")
-        except ValueError:
-            return await message.reply_text("❌ Invalid date format. Please use `YYYY-MM-DD HH:MM`.")
-
-    await execute_broadcast_run(client, message.chat.id, target_msg, command_text, batch_id)
+    if message.reply_to_message:
+        target_msg = message.reply_to_message
+        command_text = message.text.replace("/broadcast", "").strip().lower()
+        await process_broadcast_command(client, message, target_msg, command_text)
+    else:
+        prompt = await message.reply_text(
+            "📢 **Broadcast Wizard**\n\nPlease send or forward the message (text, photo, video) you want to broadcast.\n\n*(Or click Cancel to abort)*",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_broadcast_flow")]])
+        )
+        BROADCAST_STATE[message.from_user.id] = {
+            "action": "broadcast_wait_msg",
+            "message_id": prompt.id,
+            "timestamp": time.time()
+        }
 
 @Client.on_message(filters.command(["cancel_followup", "cancel_schedule", "stopfollowup", "cancelfollowup"]) & filters.user(Config.ADMINS))
 async def cancel_scheduled_job(client: Client, message: Message):
     if len(message.command) < 2:
-        return await message.reply_text("⚠️ **Format:** `/stopfollowup <Batch_ID>`")
+        prompt = await message.reply_text(
+            "🛑 **Cancel Scheduled Broadcast**\n\nPlease send the **Batch ID** you want to cancel.\n\n*(Or click Cancel to abort)*",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_broadcast_flow")]])
+        )
+        BROADCAST_STATE[message.from_user.id] = {
+            "action": "cancel_followup_wait",
+            "message_id": prompt.id,
+            "timestamp": time.time()
+        }
+        return
         
     batch_id = message.command[1].strip()
     success = await db.cancel_scheduled_broadcast(batch_id)
@@ -372,9 +535,22 @@ async def execute_batch_scrub(client: Client, query: CallbackQuery):
 async def ghost_update(client: Client, message: Message):
     try:
         parts = message.text.split(" ", 2)
+        if len(parts) < 2:
+            raise IndexError
         batch_id = parts[1]
         new_text = parts[2]
     except IndexError:
+        if len(message.command) == 1:
+            prompt = await message.reply_text(
+                "👻 **Ghost Edit Wizard**\n\nPlease send the **Batch ID** you want to update.\n\n*(Or click Cancel to abort)*",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_broadcast_flow")]])
+            )
+            BROADCAST_STATE[message.from_user.id] = {
+                "action": "broadcast_edit_wait_id",
+                "message_id": prompt.id,
+                "timestamp": time.time()
+            }
+            return
         return await message.reply_text("⚠️ Format: `/broadcast_edit <Batch_ID> <New Text>`")
         
     status = await message.reply_text(f"👻 **Deploying Ghost Update to `{batch_id}`...**")
