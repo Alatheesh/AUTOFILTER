@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 START_TIME = time.time()
 
-# 🧠 Upgraded State Machine: Now remembers message IDs for clean UI editing
+# 🧠 Upgraded State Machine: Remembers message IDs and Timestamps for clean UI editing
 ADMIN_STATE = {}
 
 @Client.on_message(filters.text & filters.private & filters.user(Config.ADMINS), group=0)
@@ -25,14 +25,30 @@ async def admin_input_catcher(client: Client, message: Message):
         del ADMIN_STATE[user_id]
         raise ContinuePropagation
 
-    # Extract state and the original prompt message ID
+    # Extract state, original prompt message ID, and timestamp
     state_data = ADMIN_STATE[user_id]
     if isinstance(state_data, dict):
         state = state_data["state"]
         prompt_msg_id = state_data.get("msg_id")
+        timestamp = state_data.get("timestamp", 0)
     else:
         state = state_data
         prompt_msg_id = None
+        timestamp = 0
+
+    # 🛑 48-Hour Security Check (172,800 Seconds)
+    if time.time() - timestamp > 172800:
+        del ADMIN_STATE[user_id]
+        try: await message.delete() # Silently remove the late reply
+        except Exception: pass
+        
+        expired_text = "⚠️ **Session Expired.**\n\nThis prompt is older than 48 hours. Please restart the setup from the control panel."
+        if prompt_msg_id:
+            try: await client.edit_message_text(chat_id=message.chat.id, message_id=prompt_msg_id, text=expired_text)
+            except Exception: await message.reply_text(expired_text)
+        else:
+            await message.reply_text(expired_text)
+        return
 
     user_input = message.text.strip()
 
@@ -73,7 +89,7 @@ async def admin_input_catcher(client: Client, message: Message):
 
     elif state == "setup_shortener_url":
         await db.update_settings({"shortener_url": user_input})
-        ADMIN_STATE[user_id] = {"state": "setup_shortener_api", "msg_id": prompt_msg_id}
+        ADMIN_STATE[user_id] = {"state": "setup_shortener_api", "msg_id": prompt_msg_id, "timestamp": time.time()}
         try: 
             await message.delete() 
         except Exception: 
@@ -148,6 +164,7 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
     user_id = callback.from_user.id
 
     if action in ["set_home", "set_inside", "set_shortener", "set_requests", "set_autodelete"]:
+        # This acts as our "Cancel" fallback automatically!
         if user_id in ADMIN_STATE:
             del ADMIN_STATE[user_id]
 
@@ -188,21 +205,21 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         await settings_callbacks(client, callback)
 
     elif action == "inside_words":
-        ADMIN_STATE[user_id] = {"state": "setup_inside_words", "msg_id": callback.message.id}
+        ADMIN_STATE[user_id] = {"state": "setup_inside_words", "msg_id": callback.message.id, "timestamp": time.time()}
         await callback.message.edit_text(
             "✏️ **Send the trigger words in the chat.**\nSeparate them with spaces (e.g., `#example1 #sponsor2`).",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_inside")]])
         )
 
     elif action == "inside_times":
-        ADMIN_STATE[user_id] = {"state": "setup_inside_times", "msg_id": callback.message.id}
+        ADMIN_STATE[user_id] = {"state": "setup_inside_times", "msg_id": callback.message.id, "timestamp": time.time()}
         await callback.message.edit_text(
             "✏️ **Send the number of verifications per day.**\n(Example: Send `4` to require verification every 6 hours).",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_inside")]])
         )
 
     elif action == "inside_channels":
-        ADMIN_STATE[user_id] = {"state": "setup_inside_channels", "msg_id": callback.message.id}
+        ADMIN_STATE[user_id] = {"state": "setup_inside_channels", "msg_id": callback.message.id, "timestamp": time.time()}
         await callback.message.edit_text(
             "✏️ **Send the Target Channel Usernames or IDs.**\nSeparate multiple with spaces (e.g., `-10012345 @MyChannel`).",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_inside")]])
@@ -259,7 +276,7 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         if current_state:
             await db.update_settings({"shortener_enabled": False})
         else:
-            ADMIN_STATE[user_id] = {"state": "setup_shortener_url", "msg_id": callback.message.id}
+            ADMIN_STATE[user_id] = {"state": "setup_shortener_url", "msg_id": callback.message.id, "timestamp": time.time()}
             return await callback.message.edit_text(
                 "🛠 **Shortener Setup Wizard**\n\n"
                 "To enable the shortener, please send me the **Shortener URL** in the chat now.\n"
@@ -271,14 +288,14 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         await settings_callbacks(client, callback)
 
     elif action == "set_api":
-        ADMIN_STATE[user_id] = {"state": "waiting_for_api", "msg_id": callback.message.id}
+        ADMIN_STATE[user_id] = {"state": "waiting_for_api", "msg_id": callback.message.id, "timestamp": time.time()}
         await callback.message.edit_text(
             "✏️ **Send the new API Key in the chat now.**",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_shortener")]])
         )
 
     elif action == "set_url":
-        ADMIN_STATE[user_id] = {"state": "waiting_for_url", "msg_id": callback.message.id}
+        ADMIN_STATE[user_id] = {"state": "waiting_for_url", "msg_id": callback.message.id, "timestamp": time.time()}
         await callback.message.edit_text(
             "✏️ **Send the new URL Link template in the chat now.**\n\n"
             "💡 *Tip: Use `{api}` and `{url}` as placeholders! The bot will automatically inject your key and the movie link here.*\n"
@@ -349,11 +366,11 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         await settings_callbacks(client, callback)
 
     elif action == "time_file_del":
-        ADMIN_STATE[user_id] = {"state": "setup_file_time", "msg_id": callback.message.id}
+        ADMIN_STATE[user_id] = {"state": "setup_file_time", "msg_id": callback.message.id, "timestamp": time.time()}
         await callback.message.edit_text("✏️ **Send the File Auto-Delete time in MINUTES.**\n(e.g., `30` for 30 minutes).", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_autodelete")]]))
 
     elif action == "time_filter_del":
-        ADMIN_STATE[user_id] = {"state": "setup_filter_time", "msg_id": callback.message.id}
+        ADMIN_STATE[user_id] = {"state": "setup_filter_time", "msg_id": callback.message.id, "timestamp": time.time()}
         await callback.message.edit_text("✏️ **Send the Search Result Auto-Delete time in MINUTES.**\n(e.g., `5` for 5 minutes).", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_autodelete")]]))
 
 def format_bytes(size):
