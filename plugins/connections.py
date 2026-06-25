@@ -25,8 +25,14 @@ WAITING_FOR_CONNECTION = {}
 # ==========================================
 
 async def process_connect(client: Client, message: Message, user_id: int, target_chat_input: str, prompt_msg_id: int = None):
+    # --- BUG FIX: Convert string IDs to Integers ---
     try:
-        chat = await client.get_chat(target_chat_input)
+        target_chat = int(target_chat_input)
+    except ValueError:
+        target_chat = target_chat_input # Keep as string if it's a @username
+        
+    try:
+        chat = await client.get_chat(target_chat)
         target_chat_id = chat.id
         chat_title = chat.title
     except Exception as e:
@@ -92,8 +98,14 @@ async def process_connect(client: Client, message: Message, user_id: int, target
 
 
 async def process_disconnect(client: Client, message: Message, user_id: int, target_chat_input: str, prompt_msg_id: int = None):
+    # --- BUG FIX: Convert string IDs to Integers ---
     try:
-        chat = await client.get_chat(target_chat_input)
+        target_chat = int(target_chat_input)
+    except ValueError:
+        target_chat = target_chat_input
+        
+    try:
+        chat = await client.get_chat(target_chat)
         target_chat_id = chat.id
         chat_title = chat.title
     except Exception:
