@@ -2,7 +2,7 @@ import asyncio
 import random
 import time
 import logging
-from pyrogram import Client, filters
+from pyrogram import Client, filters, ContinuePropagation
 from pyrogram.enums import ChatType, ChatMemberStatus, ChatMembersFilter
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from database.multi_db import db
@@ -210,45 +210,49 @@ async def disconnect_group_command(client: Client, message: Message):
 # INTERACTIVE STATE LISTENER
 # ==========================================
 
-@Client.on_message(filters.text & filters.private, group=1)
+@Client.on_message(filters.text & filters.private, group=-2)
 async def interactive_connection_listener(client: Client, message: Message):
     user_id = message.from_user.id
     
-    if user_id in WAITING_FOR_CONNECTION:
-        # Ignore commands if they somehow trigger this state
-        if message.text.startswith("/"):
-            del WAITING_FOR_CONNECTION[user_id]
-            message.continue_propagation()
-            
-        state = WAITING_FOR_CONNECTION[user_id]
-        prompt_msg_id = state["message_id"]
-        timestamp = state["timestamp"]
-        action = state["action"]
+    # 1. CRITICAL FIX: If user is not setting up a connection, let the Search engine handle it!
+    if user_id not in WAITING_FOR_CONNECTION:
+        raise ContinuePropagation
         
-        # Clear state
+    # Ignore commands if they somehow trigger this state
+    if message.text.startswith("/"):
         del WAITING_FOR_CONNECTION[user_id]
+        raise ContinuePropagation
         
-        # 48-Hour Security Check (172,800 Seconds)
-        if time.time() - timestamp > 172800:
-            await client.edit_message_text(
-                chat_id=message.chat.id,
-                message_id=prompt_msg_id,
-                text="⚠️ **Session Expired.**\n\nThis prompt is older than 48 hours. Please run the command again."
-            )
-            try: await message.delete() 
-            except Exception: pass
-            return
-            
-        target_chat_input = message.text.strip()
-        
-        # Keep chat clean by deleting their text reply
+    state = WAITING_FOR_CONNECTION[user_id]
+    prompt_msg_id = state["message_id"]
+    timestamp = state["timestamp"]
+    action = state["action"]
+    
+    # Clear state
+    del WAITING_FOR_CONNECTION[user_id]
+    
+    # 48-Hour Security Check (172,800 Seconds)
+    if time.time() - timestamp > 172800:
+        await client.edit_message_text(
+            chat_id=message.chat.id,
+            message_id=prompt_msg_id,
+            text="⚠️ **Session Expired.**\n\nThis prompt is older than 48 hours. Please run the command again."
+        )
         try: await message.delete() 
         except Exception: pass
+        return
+        
+    target_chat_input = message.text.strip()
+    
+    # Keep chat clean by deleting their text reply
+    try: await message.delete() 
+    except Exception: pass
 
-        if action == "connect":
-            await process_connect(client, message, user_id, target_chat_input, prompt_msg_id)
-        elif action == "disconnect":
-            await process_disconnect(client, message, user_id, target_chat_input, prompt_msg_id)
+    if action == "connect":
+        await process_connect(client, message, user_id, target_chat_input, prompt_msg_id)
+    elif action == "disconnect":
+        await process_disconnect(client, message, user_id, target_chat_input, prompt_msg_id)
+
 
 @Client.on_callback_query(filters.regex("^cancel_connection_flow$"))
 async def cancel_connection_callback(client: Client, callback: CallbackQuery):
