@@ -138,7 +138,11 @@ async def send_settings_home(message_or_query):
     else:
         await message_or_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
-@Client.on_callback_query(filters.regex(r"^(set_|toggle_|inside_|time_)"))
+@Client.on_callback_query(
+    filters.regex(
+        r"^(set_home|set_inside|set_shortener|set_requests|set_autodelete|toggle_|inside_|time_)"
+    )
+)
 async def settings_callbacks(client: Client, callback: CallbackQuery):
     action = callback.data
     user_id = callback.from_user.id
