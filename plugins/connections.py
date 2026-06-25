@@ -2,7 +2,7 @@ import asyncio
 import random
 import time
 import logging
-from pyrogram import Client, filters, ContinuePropagation
+from pyrogram import Client, filters, ContinuePropagation, StopPropagation
 from pyrogram.enums import ChatType, ChatMemberStatus, ChatMembersFilter
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from database.multi_db import db
@@ -177,7 +177,7 @@ async def connect_group_command(client: Client, message: Message):
         
         target_chat_input = message.command[1]
         await process_connect(client, message, user_id, target_chat_input)
-
+    raise StopPropagation
 
 @Client.on_message(filters.command("disconnect"))
 async def disconnect_group_command(client: Client, message: Message):
@@ -205,6 +205,7 @@ async def disconnect_group_command(client: Client, message: Message):
             
         target_chat_input = message.command[1]
         await process_disconnect(client, message, user_id, target_chat_input)
+    raise StopPropagation
 
 # ==========================================
 # INTERACTIVE STATE LISTENER
@@ -252,7 +253,7 @@ async def interactive_connection_listener(client: Client, message: Message):
         await process_connect(client, message, user_id, target_chat_input, prompt_msg_id)
     elif action == "disconnect":
         await process_disconnect(client, message, user_id, target_chat_input, prompt_msg_id)
-
+    raise StopPropagation
 
 @Client.on_callback_query(filters.regex("^cancel_connection_flow$"))
 async def cancel_connection_callback(client: Client, callback: CallbackQuery):
