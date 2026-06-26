@@ -1,7 +1,7 @@
 import time
 import re
 import asyncio
-from pyrogram import Client, filters
+from pyrogram import Client, filters, ContinuePropagation, StopPropagation
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.enums import ChatType, ChatMemberStatus
 from pyrogram.handlers import MessageHandler
@@ -12,7 +12,9 @@ from config import Config
 LINK_TRACKER = {}  
 SPAM_TRACKER = {}
 SCRAPER_TRACKER = {} 
-ADMIN_STATE = {} # Tracks when you are typing bad words or limits
+
+# 🧠 State Machine for Clean Interactive Admin Prompts
+ADMIN_STATE = {}
 
 async def is_group_admin(client, chat_id, user_id):
     if user_id in Config.ADMINS: return True
@@ -44,6 +46,7 @@ async def get_user_stats(client: Client, message: Message):
         f"*(Manage Auto-Mute and Auto-Ban triggers in `/settings`)*"
     )
     await message.reply_text(stats_text)
+    raise StopPropagation
 
 @Client.on_message(filters.command("info") & filters.user(Config.ADMINS))
 async def get_info(client: Client, message: Message):
@@ -96,59 +99,92 @@ async def get_info(client: Client, message: Message):
     
     # 3. Send with Photo if available, otherwise just text
     if photo_id:
-        try:
-            await message.reply_photo(photo=photo_id, caption=text)
-        except Exception:
-            await message.reply_text(text)
+        try: await message.reply_photo(photo=photo_id, caption=text)
+        except Exception: await message.reply_text(text)
     else:
         await message.reply_text(text)
+    raise StopPropagation
 
 @Client.on_message(filters.command("id"))
 async def get_id(client: Client, message: Message):
     text = f"🆔 **Your ID:** `{message.from_user.id}`\n"
     if message.chat.type != ChatType.PRIVATE: text += f"👥 **Group ID:** `{message.chat.id}`"
     await message.reply_text(text)
+    raise StopPropagation
 
 # ==========================================
-# ⚙️ CONFIGURATION CAPTURE (Bad Words & Limits)
+# ⚙️ CONFIGURATION CAPTURE (Clean UI Upgrade)
 # ==========================================
 @Client.on_callback_query(filters.regex(r"^mod_(badwords|limits)$"))
 async def mod_settings_btn(client: Client, callback: CallbackQuery):
     action = callback.matches[0].group(1)
-    ADMIN_STATE[callback.from_user.id] = action
     
+    ADMIN_STATE[callback.from_user.id] = {
+        "action": action,
+        "message_id": callback.message.id,
+        "timestamp": time.time()
+    }
+    
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_mod_state")]])
     if action == "badwords":
-        await callback.message.reply_text("📝 **Send me the list of bad words separated by commas.**\nExample: `porn, bet, casino`\n\nType `/cancel` to abort.")
+        await callback.message.edit_text("📝 **Send me the list of bad words separated by commas.**\nExample: `porn, bet, casino`", reply_markup=markup)
     else:
-        await callback.message.reply_text("⏱ **Send me the number of warnings a user can get before they are Auto-Muted (Strikeout Limit).**\nExample: `3`\n\nType `/cancel` to abort.")
+        await callback.message.edit_text("⏱ **Send me the number of warnings a user can get before they are Auto-Muted.**\nExample: `3`", reply_markup=markup)
     await callback.answer()
 
-@Client.on_message(filters.private & filters.text, group=-2)
+@Client.on_callback_query(filters.regex("^cancel_mod_state$"))
+async def cancel_mod_state_handler(client: Client, callback: CallbackQuery):
+    user_id = callback.from_user.id
+    if user_id in ADMIN_STATE:
+        del ADMIN_STATE[user_id]
+    await callback.message.edit_text("❌ **Configuration Cancelled.**\n\nYou can restart it from the settings menu.")
+    await callback.answer("Cancelled", show_alert=False)
+
+@Client.on_message(filters.private & filters.text & filters.user(Config.ADMINS), group=-5)
 async def admin_state_catcher(client: Client, message: Message):
     user_id = message.from_user.id
-    if user_id in ADMIN_STATE:
-        state = ADMIN_STATE[user_id]
-        if message.text == "/cancel":
-            del ADMIN_STATE[user_id]
-            await message.reply_text("❌ Configuration Cancelled.")
-            message.stop_propagation()
-            
-        if state == "badwords":
-            words = [w.strip().lower() for w in message.text.split(",") if w.strip()]
-            await db.update_settings({"bad_words": words})
-            del ADMIN_STATE[user_id]
-            await message.reply_text(f"✅ Bad words custom dictionary updated: `{', '.join(words)}`")
-            message.stop_propagation()
-            
-        elif state == "limits":
-            try:
-                limit = int(message.text.strip())
-                await db.update_settings({"strike_limit": limit})
-                del ADMIN_STATE[user_id]
-                await message.reply_text(f"✅ Warning Strikeout limit set to: `{limit}`")
-            except Exception:
-                await message.reply_text("⚠️ Please send a valid number.")
-            message.stop_propagation()
+    if user_id not in ADMIN_STATE:
+        raise ContinuePropagation
+
+    if message.text.startswith("/"):
+        del ADMIN_STATE[user_id]
+        raise ContinuePropagation
+
+    state_data = ADMIN_STATE[user_id]
+    action = state_data["action"]
+    prompt_msg_id = state_data["message_id"]
+    timestamp = state_data["timestamp"]
+
+    # 🛑 48-Hour Security Check
+    if time.time() - timestamp > 172800:
+        del ADMIN_STATE[user_id]
+        try: await message.delete()
+        except Exception: pass
+        expired_text = "⚠️ **Session Expired.**\n\nThis prompt is older than 48 hours. Please restart from the settings."
+        try: await client.edit_message_text(message.chat.id, prompt_msg_id, expired_text)
+        except Exception: await message.reply_text(expired_text)
+        raise StopPropagation
+        
+    text_input = message.text.strip()
+    del ADMIN_STATE[user_id]
+    try: await message.delete()
+    except Exception: pass
+
+    if action == "badwords":
+        words = [w.strip().lower() for w in text_input.split(",") if w.strip()]
+        await db.update_settings({"bad_words": words})
+        success_text = f"✅ **Bad words custom dictionary updated:**\n`{', '.join(words)}`"
+    elif action == "limits":
+        try:
+            limit = int(text_input)
+            await db.update_settings({"strike_limit": limit})
+            success_text = f"✅ **Warning Strikeout limit set to:** `{limit}`"
+        except Exception:
+            success_text = "⚠️ **Invalid Input:** Please send a valid number. Start over from settings."
+
+    try: await client.edit_message_text(message.chat.id, prompt_msg_id, success_text)
+    except Exception: await message.reply_text(success_text)
+    raise StopPropagation
 
 # ==========================================
 # 🛡️ MANUAL COMMANDS (With Full Time Parsing)
@@ -159,8 +195,10 @@ async def contextual_punishment(client: Client, message: Message):
     is_global = message.chat.type == ChatType.PRIVATE
     chat_id = "global" if is_global else str(message.chat.id)
     
-    if is_global and message.from_user.id not in Config.ADMINS: return
-    if not is_global and not await is_group_admin(client, message.chat.id, message.from_user.id): return
+    if is_global and message.from_user.id not in Config.ADMINS: 
+        raise StopPropagation
+    if not is_global and not await is_group_admin(client, message.chat.id, message.from_user.id): 
+        raise StopPropagation
 
     target_user = None
     time_str = ""
@@ -172,13 +210,19 @@ async def contextual_punishment(client: Client, message: Message):
         if len(message.command) > 1: time_str = message.command[1]
         if len(message.command) > 2: reason = " ".join(message.command[2:])
     else:
-        if len(message.command) < 2: return await message.reply_text(f"⚠️ **Usage:** `/{cmd} <user_id> [time] [reason]`")
+        if len(message.command) < 2: 
+            await message.reply_text(f"⚠️ **Usage:** `/{cmd} <user_id> [time] [reason]`")
+            raise StopPropagation
         try: target_user = int(message.command[1])
-        except ValueError: return await message.reply_text("⚠️ Invalid User ID.")
+        except ValueError: 
+            await message.reply_text("⚠️ Invalid User ID.")
+            raise StopPropagation
         if len(message.command) > 2: time_str = message.command[2]
         if len(message.command) > 3: reason = " ".join(message.command[3:])
 
-    if target_user in Config.ADMINS: return await message.reply_text("🛑 Cannot punish a System Administrator.")
+    if target_user in Config.ADMINS: 
+        await message.reply_text("🛑 Cannot punish a System Administrator.")
+        raise StopPropagation
 
     # Time Parsing Engine
     duration_secs = 86400 # 1 day default
@@ -193,7 +237,7 @@ async def contextual_punishment(client: Client, message: Message):
     if cmd == "warn":
         warns = await db.add_punishment(target_user, chat_id, "warn", reason=reason)
         settings = await db.get_settings()
-        limit = settings.get("strike_limit", 5) # Dynamically fetched!
+        limit = settings.get("strike_limit", 5) 
         
         if warns >= limit:
             await db.add_punishment(target_user, chat_id, "mute", expiry_ts=time.time()+86400, reason="Exceeded warnings limit")
@@ -216,6 +260,8 @@ async def contextual_punishment(client: Client, message: Message):
     elif cmd in ["unwarn", "unmute", "unban"]:
         await db.remove_punishment(target_user, chat_id, cmd.replace("un", ""))
         await message.reply_text(f"✅ User `{target_user}` successfully {cmd}ed.")
+        
+    raise StopPropagation
 
 # ==========================================
 # 🚨 AUTO-TRIGGERS (Spam, Links, Bad Words)
@@ -232,7 +278,7 @@ async def auto_moderation_triggers(client: Client, message: Message):
     # 1. 🛑 THE SPAM FILTER (5 messages in 3 seconds -> 5 Hour Mute)
     if user_id not in SPAM_TRACKER: SPAM_TRACKER[user_id] = []
     SPAM_TRACKER[user_id].append(current_time)
-    SPAM_TRACKER[user_id] = [t for t in SPAM_TRACKER[user_id] if current_time - t < 3] # Check last 3 seconds
+    SPAM_TRACKER[user_id] = [t for t in SPAM_TRACKER[user_id] if current_time - t < 3] 
     
     if len(SPAM_TRACKER[user_id]) >= 5:
         await message.delete()
@@ -250,7 +296,7 @@ async def auto_moderation_triggers(client: Client, message: Message):
         await asyncio.sleep(10)
         return await alert.delete()
 
-    # 3. 🔗 THE LINK SPAMMER (Grace period applied: 3 links in 2 minutes -> Mute)
+    # 3. 🔗 THE LINK SPAMMER
     if re.search(r"(https?://|t\.me/|www\.)", text):
         if user_id not in LINK_TRACKER: LINK_TRACKER[user_id] = []
         LINK_TRACKER[user_id].append(current_time)
@@ -269,7 +315,7 @@ async def auto_moderation_triggers(client: Client, message: Message):
             await alert.delete()
 
 # ==========================================
-# ⚖️ APPEALS SYSTEM (With Group Routing)
+# ⚖️ APPEALS SYSTEM (Anti-Spam & Sync Upgrades)
 # ==========================================
 @Client.on_callback_query(filters.regex(r"^appeal_(global|local)_(.+)$"))
 async def process_appeal(client: Client, callback: CallbackQuery):
@@ -280,11 +326,18 @@ async def process_appeal(client: Client, callback: CallbackQuery):
     
     await callback.answer("✅ Your appeal has been submitted to the administration.", show_alert=True)
     
+    # 🚀 FIX 1: Prevent spam by modifying the user's message to remove the button!
+    try:
+        await callback.message.edit_text(
+            callback.message.text + "\n\n✅ **Appeal Submitted.** Please wait for admin review.",
+            reply_markup=None
+        )
+    except Exception: pass
+    
     if scope == "global":
         markup = InlineKeyboardMarkup([[InlineKeyboardButton(f"✅ Un{ptype.capitalize()}", callback_data=f"log_un{ptype}_{user_id}")], [InlineKeyboardButton("❌ Reject Appeal", callback_data=f"log_reject_{user_id}")]])
         await log_to_channel(client, f"⚖️ **NEW GLOBAL APPEAL**\n\n👤 User: `{user_id}`\nType: **{ptype.upper()}**\n\nPlease review:", markup)
     else:
-        # Route to Group Admin who connected the bot
         g_sett = await db.get_group_settings(int(chat_id))
         connected_by = g_sett.get("connected_by")
         if connected_by:
@@ -295,8 +348,6 @@ async def process_appeal(client: Client, callback: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^(log|admin)_(unban|unmute|reject)_(.+)$"))
 async def admin_appeal_actions(client: Client, callback: CallbackQuery):
     action = callback.matches[0].group(2)
-    
-    # Safely extract IDs based on origin
     data_parts = callback.data.split("_")
     source = data_parts[0]
     
@@ -306,6 +357,14 @@ async def admin_appeal_actions(client: Client, callback: CallbackQuery):
     else:
         chat_id = data_parts[2]
         target_user = int(data_parts[3])
+
+    # 🚀 FIX 2: Check Database Sync! Prevent double actions if manually unmuted/unbanned.
+    status, reason, expiry, p_scope = await db.check_punishment(target_user, chat_id)
+    expected_status = action.replace("un", "") # Turns "unban" into "ban"
+    
+    if action != "reject" and status != expected_status:
+        await callback.answer(f"⚠️ User is already {action}ed manually!", show_alert=True)
+        return await callback.message.edit_text(callback.message.text + f"\n\n⚠️ **Status: ALREADY {action.upper()}ED MANUALLY**")
 
     if action == "reject":
         try: await client.send_message(target_user, "❌ Your appeal has been reviewed and **rejected** by the administration. You remain restricted, but may submit a new appeal later.")
