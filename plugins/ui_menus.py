@@ -2,7 +2,7 @@ import random
 import logging
 import asyncio
 from datetime import datetime
-from pyrogram import Client, filters
+from pyrogram import Client, filters, StopPropagation
 from pyrogram.enums import ChatType
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from config import Config
@@ -77,22 +77,21 @@ async def start_menu_handler(client: Client, message: Message):
         if cmd.startswith("appeal_"):
             p_type = cmd.split("_")[1]
             btn = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Formal Appeal", callback_data=f"appeal_global_{p_type}")]])
-            return await message.reply_text(f"⚖️ **Global {p_type.upper()} Appeal Center**\n\nClick the button below to officially submit your appeal to the Creator.", reply_markup=btn)
+            await message.reply_text(f"⚖️ **Global {p_type.upper()} Appeal Center**\n\nClick the button below to officially submit your appeal to the Creator.", reply_markup=btn)
+            raise StopPropagation
         return 
 
     # 1. CHECK IF USER IS NEW
     user_id = message.from_user.id
     user_exists = await db.users.find_one({"user_id": user_id})
     
-    # 2. ONLY LOG IF NEW (The bug at the bottom was removed)
+    # 2. ONLY LOG IF NEW
     if not user_exists:
         first_name = message.from_user.first_name
         username = message.from_user.username or "None"
         await log_to_channel(client, f"#new_user\n👤 Name: `{first_name}`\n🆔 ID: `{user_id}`\n🔗 Username: @{username}")
-        # Add them to DB so they aren't 'new' next time, including joined date for the /info command
         await db.update_user_setting(user_id, "joined_date", datetime.now().strftime("%Y-%m-%d %H:%M"))
 
-    # 3. REPLY MESSAGE (Sent only to the chat that triggered the command)
     try:
         loading_msg = await message.reply_sticker(random.choice(START_STICKERS))
         await asyncio.sleep(1)
@@ -116,6 +115,7 @@ async def start_menu_handler(client: Client, message: Message):
         )
     except Exception:
         await message.reply_text(text=welcome_text, reply_markup=get_start_markup())
+    raise StopPropagation
 
 @Client.on_message(filters.command("help") & filters.private)
 async def help_command_handler(client: Client, message: Message):
@@ -136,6 +136,7 @@ async def help_command_handler(client: Client, message: Message):
         "• `/settings`: Open the advanced configuration dashboard."
     )
     await message.reply_text(text=help_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back")]]))
+    raise StopPropagation
 
 @Client.on_message(filters.command("about") & filters.private)
 async def about_command_handler(client: Client, message: Message):
@@ -153,6 +154,7 @@ async def about_command_handler(client: Client, message: Message):
         "• **Primary Deployment:** Ready for Hugging Face Spaces free-tier hosting with aiohttp daemon\n"
     )
     await message.reply_text(text=about_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back")]]))
+    raise StopPropagation
 
 @Client.on_message(filters.command("source") & filters.private)
 async def source_command_handler(client: Client, message: Message):
@@ -169,6 +171,7 @@ async def source_command_handler(client: Client, message: Message):
         "• **Credits:** Pyrogram & MongoDB Motor Driver"
     )
     await message.reply_text(text=source_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back")]]))
+    raise StopPropagation
 
 @Client.on_callback_query(filters.regex(r"^ui_(help|about|source|features|back)$"))
 async def callback_ui_router(client: Client, callback: CallbackQuery):
@@ -239,7 +242,8 @@ async def settings_router(client: Client, message: Message):
                 await asyncio.sleep(3)
                 await loading_msg.delete()
             except Exception: pass
-            return await message.reply_text("⚠️ **Group Not Connected!**\nAn admin must send `/connect` in this group first to initialize the bot.")
+            await message.reply_text("⚠️ **Group Not Connected!**\nAn admin must send `/connect` in this group first to initialize the bot.")
+            raise StopPropagation
             
         if connected_by != user_id and not is_creator(user_id):
             try: 
@@ -247,7 +251,8 @@ async def settings_router(client: Client, message: Message):
                 await asyncio.sleep(3)
                 await loading_msg.delete()
             except Exception: pass
-            return await message.reply_text("🛑 **Access Denied:** Only the Primary Connector who linked this group can change its settings.")
+            await message.reply_text("🛑 **Access Denied:** Only the Primary Connector who linked this group can change its settings.")
+            raise StopPropagation
 
         try: 
             loading_msg = await message.reply_sticker(random.choice(CODE_STICKERS))
@@ -258,8 +263,7 @@ async def settings_router(client: Client, message: Message):
         mode = g_sett.get("search_mode", "let_members_choose")
         buttons = [
             [
-                InlineKeyboardButton("⚙️ Auto Mute Rules", callback_data=f"set_local_mute_{message.chat.id}"),
-                InlineKeyboardButton("🚫 Auto Ban Rules", callback_data=f"set_local_ban_{message.chat.id}")
+                InlineKeyboardButton("🛡️ Moderation Rules", callback_data=f"set_mod_local_{message.chat.id}")
             ],
             [
                 InlineKeyboardButton(text=f"{'✅' if mode=='force_default' else '❌'} Force Default", callback_data=f"gset_mode_force_default_{message.chat.id}"),
@@ -269,7 +273,8 @@ async def settings_router(client: Client, message: Message):
                 InlineKeyboardButton(text=f"{'✅' if mode=='let_members_choose' else '❌'} Let Members Choose", callback_data=f"gset_mode_let_members_choose_{message.chat.id}")
             ]
         ]
-        return await message.reply_text(f"🛠️ **Group Settings Menu:** `{message.chat.title}`\nConfigure search visualization structures for all active participants:", reply_markup=InlineKeyboardMarkup(buttons))
+        await message.reply_text(f"🛠️ **Group Settings Menu:** `{message.chat.title}`\nConfigure search visualization structures for all active participants:", reply_markup=InlineKeyboardMarkup(buttons))
+        raise StopPropagation
 
     else:
         try: 
@@ -284,11 +289,13 @@ async def settings_router(client: Client, message: Message):
             keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list")])
         if is_creator(user_id):
             keyboard.append([InlineKeyboardButton("📊 User Stats Dashboard", callback_data="ui_userstats")])
-            keyboard.append([InlineKeyboardButton("⚙️ Global Auto Mute", callback_data="set_global_mute"), InlineKeyboardButton("🚫 Global Auto Ban", callback_data="set_global_ban")])
             keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="set_home")])
+            
         await message.reply_text("🎛️ **Central Command Settings Hub:**\nSelect the access layer tier you wish to inspect or modify:", reply_markup=InlineKeyboardMarkup(keyboard))
+        raise StopPropagation
 
-@Client.on_callback_query(filters.regex(r"^(tier_|gset_|uset_)"))
+
+@Client.on_callback_query(filters.regex(r"^(tier_|gset_|uset_|menu_)"))
 async def menus_callback_handler(client: Client, query: CallbackQuery):
     user_id = query.from_user.id
     data = query.data
@@ -347,7 +354,7 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         if g_sett.get("connected_by") != user_id and not is_creator(user_id): return await query.answer("Access Denied.", show_alert=True)
         mode = g_sett.get("search_mode", "let_members_choose")
         buttons = [
-            [InlineKeyboardButton("⚙️ Auto Mute Rules", callback_data=f"set_local_mute_{c_id}"), InlineKeyboardButton("🚫 Auto Ban Rules", callback_data=f"set_local_ban_{c_id}")],
+            [InlineKeyboardButton("🛡️ Moderation Rules", callback_data=f"set_mod_local_{c_id}")],
             [InlineKeyboardButton(text=f"{'✅' if mode=='force_default' else '❌'} Force Default", callback_data=f"gset_mode_force_default_{c_id}"), InlineKeyboardButton(text=f"{'✅' if mode=='force_interactive' else '❌'} Force Interactive", callback_data=f"gset_mode_force_interactive_{c_id}")],
             [InlineKeyboardButton(text=f"{'✅' if mode=='let_members_choose' else '❌'} Let Members Choose", callback_data=f"gset_mode_let_members_choose_{c_id}")]
         ]
@@ -384,76 +391,5 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         if await db.get_connected_groups(user_id): keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list")])
         if is_creator(user_id):
             keyboard.append([InlineKeyboardButton("📊 User Stats Dashboard", callback_data="ui_userstats")])
-            keyboard.append([InlineKeyboardButton("⚙️ Global Auto Mute", callback_data="set_global_mute"), InlineKeyboardButton("🚫 Global Auto Ban", callback_data="set_global_ban")])
             keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="set_home")])
         return await query.message.edit_text("🎛️ **Central Command Settings Hub**", reply_markup=InlineKeyboardMarkup(keyboard))
-
-@Client.on_callback_query(filters.regex(r"^ui_userstats$"))
-async def callback_userstats(client: Client, callback: CallbackQuery):
-    total_users = await db.users.count_documents({})
-    total_muted = await db.punishments.count_documents({"type": "mute"})
-    total_banned = await db.punishments.count_documents({"type": "ban"})
-    
-    stats_text = (
-        f"📊 **Bot User Statistics**\n\n"
-        f"👥 Total Users: `{total_users}`\n"
-        f"🟢 Active Users: `{total_users - total_banned}`\n"
-        f"🔇 Total Muted: `{total_muted}`\n"
-        f"🚫 Total Banned: `{total_banned}`\n"
-    )
-    await callback.message.edit_text(stats_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="tier_root_fallback")]]))
-
-@Client.on_callback_query(
-    filters.regex(r"^set_(global|local)_(mute|ban)$")
-)
-async def moderation_settings_handler(client: Client, callback: CallbackQuery):
-    # Route for moderation buttons
-    if callback.data.startswith("set_local_mute") or callback.data.startswith("set_local_ban") or callback.data.startswith("set_global_mute") or callback.data.startswith("set_global_ban"):
-        parts = callback.data.split("_")
-        scope = parts[1]
-        ptype = parts[2]
-        chat_id = parts[3] if len(parts) > 3 else ""
-        back_data = f"tier_gmanage_{chat_id}" if scope == "local" else "tier_root_fallback"
-        
-        text = f"⚙️ **{scope.upper()} {ptype.upper()} CONFIGURATION**\n\nCustomize your automated triggers here:"
-        buttons = [
-            [InlineKeyboardButton("📝 Edit Bad Words", callback_data="mod_badwords")],
-            [InlineKeyboardButton("⏱ Set Warn Limits (Strikeouts)", callback_data="mod_limits")],
-            [InlineKeyboardButton("🔙 Back", callback_data=back_data)]
-        ]
-        return await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
-
-    parts = callback.data.split("_")
-    scope, setting_type = parts[1], parts[2]
-    user_id, chat_id = callback.from_user.id, callback.message.chat.id
-    
-    if setting_type == "back":
-        if scope == "u":
-            u_sett = await db.get_user_settings(user_id)
-            mode, lang, size = u_sett.get("search_mode", "default"), u_sett.get("language", "all"), u_sett.get("size", "all")
-            text = f"⚙️ **Your Personal Settings**\n\n**Search Mode:** `{mode}`\n**Audio Preference:** `{lang}`\n**Size Preference:** `{size}`"
-            buttons = [
-                [InlineKeyboardButton("Search Mode", callback_data="menu_u_mode")],
-                [InlineKeyboardButton("Audio Pref", callback_data="menu_u_lang"), InlineKeyboardButton("Size Pref", callback_data="menu_u_size")],
-                [InlineKeyboardButton("Close Panel", callback_data="menu_close")]
-            ]
-        else:
-            g_sett = await db.get_group_settings(chat_id)
-            mode, lang, size = g_sett.get("search_mode", "let_members_choose"), g_sett.get("language_lock", "none"), g_sett.get("size_lock", "none")
-            text = f"⚙️ **Group Setup Dashboard**\n\n**Search Mode:** `{mode}`\n**Language Lock:** `{lang}`\n**Size Lock:** `{size}`"
-            buttons = [
-                [InlineKeyboardButton("Change Mode", callback_data="menu_g_mode")],
-                [InlineKeyboardButton("Lock Audio", callback_data="menu_g_lang"), InlineKeyboardButton("Lock Size", callback_data="menu_g_size")],
-                [InlineKeyboardButton("Close Dashboard", callback_data="menu_close")]
-            ]
-        return await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
-
-    value = "_".join(parts[3:])
-    if scope == "u":
-        await db.update_user_setting(user_id, ("search_mode" if setting_type == "mode" else setting_type), value)
-    else:
-        key = {"mode": "search_mode", "lang": "language_lock", "size": "size_lock"}.get(setting_type)
-        await db.update_group_setting(chat_id, key, value)
-    await callback.answer(f"✅ Updated!", show_alert=True)
-    callback.data = f"set_{scope}_back"
-    await apply_settings_handler(client, callback)
