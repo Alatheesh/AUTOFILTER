@@ -261,11 +261,17 @@ async def process_indexing_queue(client: Client):
                 await asyncio.sleep(fw.value)
                 continue
             except (PeerIdInvalid, ChannelInvalid): 
-                # The Safety Net. Never kill the job! Just sync memory and retry.
-                logger.warning(f"⚠️ Telegram memory syncing for {chat_name}. Retrying in 10s...")
-                await db.update_job(job_id, {"current_id": start_id - 1})
-                await asyncio.sleep(10)
-                continue
+                # 🚀 THE FIX: Try to get the chat to sync the access hash. If it fails, kill the dead job!
+                logger.warning(f"⚠️ Telegram memory syncing for {chat_name}. Attempting to resolve peer...")
+                try:
+                    await client.get_chat(chat_id)
+                    await asyncio.sleep(2)
+                    continue # Success! Try get_messages again next loop
+                except Exception as e:
+                    # If this fails, the bot lacks access permanently. Kill the job!
+                    logger.error(f"❌ FATAL: Cannot resolve {chat_name}. Aborting job! ({e})")
+                    await db.update_job(job_id, {"status": "completed"})
+                    continue
             except Exception as e:
                 logger.error(f"Failed to fetch batch for {chat_name}: {e}")
                 await db.update_job(job_id, {"current_id": start_id - 1})
