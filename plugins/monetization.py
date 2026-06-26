@@ -14,6 +14,12 @@ from plugins.shortener import VERIFICATION_TOKENS, get_shortlink
 
 logger = logging.getLogger(__name__)
 
+# 🧠 Tracks the last caution message sent to keep the PM clean
+LAST_CAUTION_MESSAGE = {}
+
+# 🧠 Anti-Spam Tracker: Prevents users from clicking download multiple times quickly
+USER_CLICK_TRACKER = {}
+
 async def check_double_fsub(client: Client, user_id: int) -> bool:
     if not Config.FSUB_CHANNELS: return True
     for channel in Config.FSUB_CHANNELS:
@@ -36,11 +42,26 @@ async def execute_file_delivery(client: Client, chat_id: int, file_id: str):
             try:
                 from plugins.advanced import trigger_ghost_self_destruct
                 trigger_ghost_self_destruct(client, chat_id, sent_file.id, delete_time_mins * 60)
+                
+                # 🧹 1. DELETE the previous caution message if it exists
+                if chat_id in LAST_CAUTION_MESSAGE:
+                    try:
+                        await client.delete_messages(chat_id, LAST_CAUTION_MESSAGE[chat_id])
+                    except Exception:
+                        pass # Message might have already been deleted by Ghost Mode, which is fine.
+
+                # 📨 2. SEND the new caution message at the bottom
                 warning_msg = await client.send_message(
                     chat_id, 
                     f"⏳ **Attention:** This file will automatically self-destruct in {delete_time_mins} minutes to protect our servers. Please forward it to your Saved Messages!"
                 )
+                
+                # 🧠 3. SAVE the new message ID so it can be deleted next time
+                LAST_CAUTION_MESSAGE[chat_id] = warning_msg.id
+                
+                # 👻 4. TRIGGER your existing Ghost Mode timer so it still deletes itself eventually
                 trigger_ghost_self_destruct(client, chat_id, warning_msg.id, delete_time_mins * 60)
+                
             except Exception as e:
                 logger.error(f"Ghost destruct error: {e}")
         return sent_file
@@ -50,6 +71,13 @@ async def execute_file_delivery(client: Client, chat_id: int, file_id: str):
 @Client.on_callback_query(filters.regex(r"^sendfile_(.+)"))
 async def direct_send_callback(client: Client, callback: CallbackQuery):
     user_id = callback.from_user.id
+    
+    # 🛑 ANTI-SPAM DEBOUNCE (3 Seconds)
+    current_time = time.time()
+    if user_id in USER_CLICK_TRACKER and current_time - USER_CLICK_TRACKER[user_id] < 3.0:
+        return await callback.answer("⏳ Processing... please wait a moment before clicking again.", show_alert=False)
+    USER_CLICK_TRACKER[user_id] = current_time
+
     chat_id = callback.message.chat.id
     db_id = callback.data.split("_")[1]
 
@@ -92,6 +120,13 @@ async def direct_send_callback(client: Client, callback: CallbackQuery):
 async def deep_link_start(client: Client, message: Message):
     if len(message.command) > 1:
         cmd = message.command[1]
+        user_id = message.from_user.id
+
+        # 🛑 ANTI-SPAM DEBOUNCE FOR DEEP LINKS (3 Seconds)
+        current_time = time.time()
+        if user_id in USER_CLICK_TRACKER and current_time - USER_CLICK_TRACKER[user_id] < 3.0:
+            return 
+        USER_CLICK_TRACKER[user_id] = current_time
 
         try: await message.delete()
         except Exception: pass
@@ -99,7 +134,6 @@ async def deep_link_start(client: Client, message: Message):
         if cmd.startswith("verify_"):
             token = cmd.split("_")[1]
             if token in VERIFICATION_TOKENS:
-                user_id = message.from_user.id
                 token_data = VERIFICATION_TOKENS[token]
                 
                 if token_data["user_id"] == user_id:
@@ -131,7 +165,6 @@ async def deep_link_start(client: Client, message: Message):
                 return await message.reply_text("❌ **Invalid or Expired Token.** Please search for the movie again.")
 
         if cmd.startswith("getfile_"):
-            user_id = message.from_user.id
             db_id = cmd.split("_")[1]
             
             is_joined = await check_double_fsub(client, user_id)
@@ -194,6 +227,13 @@ async def deep_link_start(client: Client, message: Message):
 @Client.on_callback_query(filters.regex(r"^retry_getfile_(.+)"))
 async def retry_getfile_callback(client: Client, callback: CallbackQuery):
     user_id = callback.from_user.id
+
+    # 🛑 ANTI-SPAM DEBOUNCE (3 Seconds)
+    current_time = time.time()
+    if user_id in USER_CLICK_TRACKER and current_time - USER_CLICK_TRACKER[user_id] < 3.0:
+        return await callback.answer("⏳ Checking... please wait a moment.", show_alert=False)
+    USER_CLICK_TRACKER[user_id] = current_time
+
     db_id = callback.data.split("_")[2]
     is_joined = await check_double_fsub(client, user_id)
     if not is_joined: return await callback.answer("❌ You still haven't joined all required channels!", show_alert=True)
@@ -204,7 +244,15 @@ async def retry_getfile_callback(client: Client, callback: CallbackQuery):
 
 @Client.on_callback_query(filters.regex(r"^check_membership_retry$"))
 async def standard_retry_callback(client: Client, callback: CallbackQuery):
-    is_joined = await check_double_fsub(client, callback.from_user.id)
+    user_id = callback.from_user.id
+    
+    # 🛑 ANTI-SPAM DEBOUNCE (3 Seconds)
+    current_time = time.time()
+    if user_id in USER_CLICK_TRACKER and current_time - USER_CLICK_TRACKER[user_id] < 3.0:
+        return await callback.answer("⏳ Checking... please wait a moment.", show_alert=False)
+    USER_CLICK_TRACKER[user_id] = current_time
+
+    is_joined = await check_double_fsub(client, user_id)
     if not is_joined: return await callback.answer("❌ You still haven't joined all required channels!", show_alert=True)
     await callback.message.delete()
     await callback.message.reply_text("✅ Verification successful! Please click the download button again.")
