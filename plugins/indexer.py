@@ -30,7 +30,6 @@ def generate_file_hash(file_name: str, file_size: int) -> str:
 
 def is_valid_movie(media) -> bool:
     """Strictly checks if a document is a movie file. Safely handles missing Telegram data."""
-    # 🚨 THE FIX: Safely wrap missing attributes so it NEVER crashes with a NoneType error
     mime = getattr(media, "mime_type", None) or ""
     name = getattr(media, "file_name", None) or ""
     
@@ -49,7 +48,6 @@ async def auto_indexer(client: Client, message: Message):
     media = message.video or message.document
     if not media: return
 
-    # Safely filter out non-movies without crashing the bot
     if not is_valid_movie(media): return
 
     raw_title = getattr(media, "file_name", None) or getattr(message, "caption", None) or "Unknown Movie File"
@@ -230,7 +228,7 @@ async def process_indexing_queue(client: Client):
     """Runs 24/7. Survives crashes. Safely parses queued channels."""
     logger.info("🟢 Safe Indexing Job Queue Started!")
 
-    # 🚨 THE FIX: Safely resume jobs directly without list_collection_names crashing
+    # 1. Start-up Rescue: Grab anything marked 'processing' and revert it to 'pending'
     try:
         if hasattr(db, "db"): 
             await db.db.jobs.update_many({"status": "processing"}, {"$set": {"status": "pending"}})
@@ -252,6 +250,7 @@ async def process_indexing_queue(client: Client):
 
             await db.update_job(job_id, {"status": "processing"})
 
+            # ONLY mark completed if we actually reached the bottom of the channel
             if current_id <= 0:
                 await db.update_job(job_id, {"status": "completed"})
                 logger.info(f"✅ Indexing completed for {chat_name}")
@@ -268,19 +267,22 @@ async def process_indexing_queue(client: Client):
                 await asyncio.sleep(fw.value)
                 continue
             except (PeerIdInvalid, ChannelInvalid): 
+                # 🚨 THE BUG FIX 🚨: Never mark this as "completed". Revert to "pending" to try again later!
                 logger.warning(f"⚠️ Telegram memory syncing for {chat_name}. Attempting to resolve peer...")
                 try:
                     await client.get_chat(chat_id)
                     await asyncio.sleep(2)
                     continue 
                 except Exception as e:
-                    logger.error(f"❌ FATAL: Cannot resolve {chat_name}. Aborting job! ({e})")
-                    await db.update_job(job_id, {"status": "completed"})
+                    logger.error(f"❌ Connection lost to {chat_name} after restart. Pausing job...")
+                    await db.update_job(job_id, {"status": "pending"}) # Safely put it back in the queue
+                    await asyncio.sleep(60) # Sleep for a full minute to prevent a spam loop
                     continue
             except Exception as e:
+                # 🚨 THE SECOND FIX 🚨: Do not skip the batch if a random network error occurs. 
                 logger.error(f"Failed to fetch batch for {chat_name}: {e}")
-                await db.update_job(job_id, {"current_id": start_id - 1})
-                await asyncio.sleep(5)
+                # We do NOT update the current_id here, meaning it will try the EXACT SAME BATCH again.
+                await asyncio.sleep(10)
                 continue
 
             saved = 0
@@ -294,7 +296,6 @@ async def process_indexing_queue(client: Client):
                 media = msg.video or msg.document
                 if not media: continue
                 
-                # Use the safe movie filter
                 if not is_valid_movie(media): continue
 
                 raw_title = getattr(media, "file_name", None) or getattr(msg, "caption", None) or "Unknown"
@@ -319,6 +320,7 @@ async def process_indexing_queue(client: Client):
                     await db.insert_file(file_data)
                     saved += 1
 
+            # Only subtract from the current_id AFTER a successful, error-free batch!
             await db.update_job(job_id, {
                 "current_id": start_id - 1,
                 "scanned": job.get("scanned", 0) + scanned,
