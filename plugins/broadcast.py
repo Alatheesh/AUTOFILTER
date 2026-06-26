@@ -606,13 +606,30 @@ async def surgical_wipe(client: Client, message: Message):
             await message.reply_text("❌ No recent broadcasts found for this user in the vault.")
             raise StopPropagation # 🚀
             
-        await client.delete_messages(target_user, latest_log["message_id"])
+        # 1. Try to delete the physical message from Telegram
+        telegram_deleted = True
+        try:
+            await client.delete_messages(target_user, latest_log["message_id"])
+        except Exception as e:
+            telegram_deleted = False
+            
+        # 2. ALWAYS delete the record from the Database Vault
         await db.delete_single_broadcast_log(target_user, latest_log["message_id"])
-        await message.reply_text(f"✅ **SURGICAL WIPE COMPLETE**\nThe last ad was scrubbed from `{target_user}`'s chat.")
+        
+        # 3. Report the accurate status to the Admin
+        if telegram_deleted:
+            await message.reply_text(f"✅ **SURGICAL WIPE COMPLETE**\nThe last ad was scrubbed from `{target_user}`'s chat and the database.")
+        else:
+            await message.reply_text(
+                f"⚠️ **PARTIAL WIPE SUCCESSFUL**\n\n"
+                f"Telegram blocked the physical deletion (the message is likely older than 48 hours or the user cleared their chat history).\n\n"
+                f"However, the record has been **successfully permanently erased** from your database vault."
+            )
+            
     except Exception as e:
-        await message.reply_text(f"❌ Failed: `{e}`")
+        await message.reply_text(f"❌ **Failed:** `{e}`")
+        
     raise StopPropagation # 🚀
-
 # ==========================================
 # 💬 TWO-WAY BROADCAST COMMUNICATION
 # ==========================================
