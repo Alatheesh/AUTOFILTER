@@ -1,9 +1,10 @@
 import re
+import time
 import hashlib
 import logging
 import asyncio
-from pyrogram import Client, filters
-from pyrogram.types import Message
+from pyrogram import Client, filters, ContinuePropagation, StopPropagation
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.errors import FloodWait, PeerIdInvalid, ChannelInvalid
 from database.multi_db import db
 from config import Config
@@ -12,6 +13,9 @@ logger = logging.getLogger(__name__)
 
 SANITIZING_REGEX = r"[_+\[\]\(\)\{\}\-.]"
 JUNK_REGEX = r"(?i)(@[\w_]+|t\.me/[\w_]+|www\.[^\s]+|https?://[^\s]+)"
+
+# 🧠 State Machine for Clean Interactive Indexing
+INDEXER_STATE = {}
 
 def sanitize_title(title: str) -> str:
     if not title: return "Unknown File"
@@ -24,7 +28,12 @@ def generate_file_hash(file_name: str, file_size: int) -> str:
     hash_payload = f"{file_name}_{file_size}".encode("utf-8")
     return hashlib.sha256(hash_payload).hexdigest()
 
-@Client.on_message(filters.document | filters.video | filters.audio, group=1)
+# ==========================================
+# 🚀 PASSIVE AUTO-INDEXER (Set-It-and-Forget-It)
+# ==========================================
+# By including filters.channel, if the bot is an admin in a channel, 
+# it automatically indexes every new movie you upload!
+@Client.on_message((filters.document | filters.video | filters.audio) & (filters.channel | filters.group | filters.private), group=1)
 async def auto_indexer(client: Client, message: Message):
     media = message.document or message.video or message.audio
     if not media: return
@@ -49,42 +58,175 @@ async def auto_indexer(client: Client, message: Message):
     }
     await db.insert_file(file_data)
 
-@Client.on_message(filters.command(["index", "batch"]) & filters.user(Config.ADMINS))
-async def mass_indexer_command(client: Client, message: Message):
-    target_chat = None
-    last_msg_id = 0
-    chat_obj = None
-
-    # HYBRID FEATURE 1: Intelligently extract @username for Public Channels
-    if message.reply_to_message:
-        reply = message.reply_to_message
-        if getattr(reply, "forward_origin", None) and getattr(reply.forward_origin, "chat", None):
-            chat_obj = reply.forward_origin.chat
-            last_msg_id = getattr(reply.forward_origin, "message_id", 0)
-        elif getattr(reply, "forward_from_chat", None):
-            chat_obj = reply.forward_from_chat
-            last_msg_id = getattr(reply, "forward_from_message_id", 0)
-
-    if chat_obj:
-        # Use username if public, fallback to -100 ID if private
-        target_chat = chat_obj.username if chat_obj.username else chat_obj.id
-
-    if not target_chat or not last_msg_id:
-        return await message.reply_text("❌ **Usage:** Forward the **NEWEST** file from your channel, reply to it, and type `/index`")
+# ==========================================
+# 🛠️ HELPER: TRIGGER INDEXING JOB
+# ==========================================
+async def trigger_indexing_job(client: Client, message: Message, target_chat, prompt_msg_id=None, known_msg_id=None):
+    """Processes the target chat, finds the latest message, and queues the job."""
+    
+    # Try converting string IDs to integers
+    try: target_chat = int(target_chat)
+    except ValueError: pass
 
     try:
         chat_info = await client.get_chat(target_chat)
         target_chat_name = chat_info.title or str(target_chat)
+        target_chat_id = chat_info.id
     except Exception as e:
-        return await message.reply_text(f"❌ **Error Accessing Chat:** Ensure bot is an Admin (if private)!\n`{e}`")
+        err = f"❌ **Error Accessing Chat:** Ensure I am an Admin in `{target_chat}`!\n`{e}`"
+        if prompt_msg_id: await client.edit_message_text(message.chat.id, prompt_msg_id, err)
+        else: await message.reply_text(err)
+        return
 
-    success = await db.add_index_job(target_chat, target_chat_name, last_msg_id)
+    last_msg_id = known_msg_id
+    
+    # If we weren't given a message ID (e.g. from a direct command), fetch the latest one!
+    if not last_msg_id:
+        try:
+            async for m in client.get_chat_history(target_chat_id, limit=1):
+                last_msg_id = m.id
+                break
+        except Exception as e:
+            err = f"❌ **Error reading history:** Ensure I have 'Read Messages' rights in `{target_chat_name}`!"
+            if prompt_msg_id: await client.edit_message_text(message.chat.id, prompt_msg_id, err)
+            else: await message.reply_text(err)
+            return
+
+    if not last_msg_id:
+        err = "❌ **Error:** That channel appears to be completely empty."
+        if prompt_msg_id: await client.edit_message_text(message.chat.id, prompt_msg_id, err)
+        else: await message.reply_text(err)
+        return
+
+    success = await db.add_index_job(target_chat_id, target_chat_name, last_msg_id)
 
     if success:
-        await message.reply_text(f"✅ **Job Queued Successfully!**\n\nChannel: `{target_chat_name}`\nThe bot will safely process this in the background.")
+        msg_text = f"✅ **Job Queued Successfully!**\n\nChannel: `{target_chat_name}`\nTargeting ~`{last_msg_id}` messages.\n\nThe bot will safely process this in the background."
     else:
-        await message.reply_text(f"⚠️ **Job Started / Reset!**\n\nThe bot is processing `{target_chat_name}`.")
+        msg_text = f"⚠️ **Job Started / Reset!**\n\nThe bot is processing `{target_chat_name}`."
+        
+    if prompt_msg_id: await client.edit_message_text(message.chat.id, prompt_msg_id, msg_text)
+    else: await message.reply_text(msg_text)
 
+
+# ==========================================
+# 📢 DIRECT COMMAND & WIZARD LAUNCHER
+# ==========================================
+@Client.on_message(filters.command(["index", "batch"]) & filters.user(Config.ADMINS))
+async def mass_indexer_command(client: Client, message: Message):
+    
+    # METHOD 1: The old Reply method
+    if message.reply_to_message:
+        reply = message.reply_to_message
+        target_chat = None
+        last_msg_id = None
+        
+        if getattr(reply, "forward_origin", None) and getattr(reply.forward_origin, "chat", None):
+            target_chat = reply.forward_origin.chat.id
+            last_msg_id = getattr(reply.forward_origin, "message_id", 0)
+        elif getattr(reply, "forward_from_chat", None):
+            target_chat = reply.forward_from_chat.id
+            last_msg_id = getattr(reply, "forward_from_message_id", 0)
+            
+        if target_chat and last_msg_id:
+            await trigger_indexing_job(client, message, target_chat, known_msg_id=last_msg_id)
+            raise StopPropagation
+            
+    # METHOD 2 & 3: Direct Username or Chat ID (e.g., /index @Movies or /index -100123)
+    if len(message.command) > 1:
+        target_chat = message.command[1].strip()
+        await trigger_indexing_job(client, message, target_chat)
+        raise StopPropagation
+
+    # METHOD 4: The Clean UI Interactive Wizard
+    prompt = await message.reply_text(
+        "📦 **Mass Indexing Wizard**\n\n"
+        "How would you like to target the channel?\n"
+        "1️⃣ **Forward** any file from the channel here.\n"
+        "2️⃣ **Type** the Channel ID (e.g., `-10012345678`).\n"
+        "3️⃣ **Type** the Public Username (e.g., `@MyChannel`).\n\n"
+        "*(Or click Cancel to abort)*",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_index_flow")]])
+    )
+    
+    INDEXER_STATE[message.from_user.id] = {
+        "message_id": prompt.id,
+        "timestamp": time.time()
+    }
+    raise StopPropagation
+
+
+# ==========================================
+# 🧠 THE CLEAN UI LISTENER
+# ==========================================
+@Client.on_message(filters.private & filters.user(Config.ADMINS), group=-6)
+async def interactive_indexer_listener(client: Client, message: Message):
+    user_id = message.from_user.id
+    
+    if user_id not in INDEXER_STATE:
+        raise ContinuePropagation
+
+    if message.text and message.text.startswith("/"):
+        del INDEXER_STATE[user_id]
+        raise ContinuePropagation
+
+    state = INDEXER_STATE[user_id]
+    prompt_msg_id = state["message_id"]
+    timestamp = state["timestamp"]
+
+    # 🛑 48-Hour Security Check
+    if time.time() - timestamp > 172800:
+        del INDEXER_STATE[user_id]
+        try: await message.delete() 
+        except Exception: pass
+        expired_text = "⚠️ **Session Expired.**\n\nThis prompt is older than 48 hours. Please run `/index` again."
+        try: await client.edit_message_text(message.chat.id, prompt_msg_id, expired_text)
+        except Exception: await message.reply_text(expired_text)
+        raise StopPropagation 
+
+    # ✅ Capture Data & Clean the Chat
+    del INDEXER_STATE[user_id]
+    try: await message.delete() 
+    except Exception: pass
+    
+    target_chat = None
+    known_msg_id = None
+    
+    # Did they forward a file?
+    if getattr(message, "forward_origin", None) and getattr(message.forward_origin, "chat", None):
+        target_chat = message.forward_origin.chat.id
+        known_msg_id = getattr(message.forward_origin, "message_id", 0)
+    elif getattr(message, "forward_from_chat", None):
+        target_chat = message.forward_from_chat.id
+        known_msg_id = getattr(message, "forward_from_message_id", 0)
+    # Did they type an ID or Username?
+    elif message.text:
+        target_chat = message.text.strip()
+    else:
+        err = "❌ Invalid input. Please forward a file or send text."
+        try: await client.edit_message_text(message.chat.id, prompt_msg_id, err)
+        except Exception: await message.reply_text(err)
+        raise StopPropagation
+
+    try: await client.edit_message_text(message.chat.id, prompt_msg_id, "🔄 **Connecting to chat & calculating files...**")
+    except Exception: pass
+    
+    await trigger_indexing_job(client, message, target_chat, prompt_msg_id, known_msg_id)
+    raise StopPropagation
+
+
+@Client.on_callback_query(filters.regex("^cancel_index_flow$"))
+async def cancel_index_callback(client: Client, callback: CallbackQuery):
+    user_id = callback.from_user.id
+    if user_id in INDEXER_STATE:
+        del INDEXER_STATE[user_id]
+    await callback.message.edit_text("❌ **Operation Cancelled.**\n\nYou can start over whenever you're ready.")
+    await callback.answer("Cancelled", show_alert=False)
+
+
+# ==========================================
+# ⚙️ BACKGROUND QUEUE WORKER
+# ==========================================
 async def process_indexing_queue(client: Client):
     """Runs 24/7. Survives crashes. Safely parses queued channels."""
     logger.info("🟢 Safe Indexing Job Queue Started!")
@@ -106,7 +248,6 @@ async def process_indexing_queue(client: Client):
             if current_id <= 0:
                 await db.update_job(job_id, {"status": "completed"})
                 logger.info(f"✅ Indexing completed for {chat_name}")
-                # THE FIX: Added sleep to prevent runaway loop deadlock
                 await asyncio.sleep(5)
                 continue
 
@@ -120,7 +261,7 @@ async def process_indexing_queue(client: Client):
                 await asyncio.sleep(fw.value)
                 continue
             except (PeerIdInvalid, ChannelInvalid): 
-                # HYBRID FEATURE 2: The Safety Net. Never kill the job! Just sync memory and retry.
+                # The Safety Net. Never kill the job! Just sync memory and retry.
                 logger.warning(f"⚠️ Telegram memory syncing for {chat_name}. Retrying in 10s...")
                 await db.update_job(job_id, {"current_id": start_id - 1})
                 await asyncio.sleep(10)
