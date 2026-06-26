@@ -28,29 +28,15 @@ def generate_file_hash(file_name: str, file_size: int) -> str:
     hash_payload = f"{file_name}_{file_size}".encode("utf-8")
     return hashlib.sha256(hash_payload).hexdigest()
 
-def is_valid_movie(media) -> bool:
-    """Strictly checks if a document is a movie file. Safely handles missing Telegram data."""
-    mime = getattr(media, "mime_type", None) or ""
-    name = getattr(media, "file_name", None) or ""
-    
-    mime = mime.lower()
-    name = name.lower()
-    
-    if mime.startswith("video/"): return True
-    if name.endswith((".mkv", ".mp4", ".avi", ".webm", ".flv", ".mov")): return True
-    return False
-
 # ==========================================
 # 🚀 PASSIVE AUTO-INDEXER (Set-It-and-Forget-It)
 # ==========================================
-@Client.on_message((filters.document | filters.video), group=1)
+@Client.on_message(filters.document | filters.video | filters.audio, group=1)
 async def auto_indexer(client: Client, message: Message):
-    media = message.video or message.document
+    media = message.document or message.video or message.audio
     if not media: return
 
-    if not is_valid_movie(media): return
-
-    raw_title = getattr(media, "file_name", None) or getattr(message, "caption", None) or "Unknown Movie File"
+    raw_title = getattr(media, "file_name", "") or getattr(message, "caption", "") or "Unknown Web File"
     file_size = getattr(media, "file_size", 0)
     crypto_hash = generate_file_hash(raw_title, file_size)
 
@@ -69,19 +55,27 @@ async def auto_indexer(client: Client, message: Message):
         "subtitle": "pending"
     }
     await db.insert_file(file_data)
-    logger.info(f"✅ Auto-Indexed new movie: {raw_title}")
 
 # ==========================================
 # 🛠️ HELPER: TRIGGER INDEXING JOB
 # ==========================================
 async def trigger_indexing_job(client: Client, message: Message, target_chat, prompt_msg_id=None, known_msg_id=None):
+    """Processes the target chat, finds the latest message, and queues the job."""
+    
+    # Try converting string IDs to integers
     try: target_chat = int(target_chat)
     except ValueError: pass
 
     try:
         chat_info = await client.get_chat(target_chat)
         target_chat_name = chat_info.title or str(target_chat)
-        target_chat_id = chat_info.id
+        
+        # 🚀 THE FIX: If the channel is public, save the @username so it NEVER fails on restart!
+        if chat_info.username:
+            target_chat_id = f"@{chat_info.username}"
+        else:
+            target_chat_id = chat_info.id
+            
     except Exception as e:
         err = f"❌ **Error Accessing Chat:** Ensure I am an Admin in `{target_chat}`!\n`{e}`"
         if prompt_msg_id: await client.edit_message_text(message.chat.id, prompt_msg_id, err)
@@ -117,11 +111,13 @@ async def trigger_indexing_job(client: Client, message: Message, target_chat, pr
     if prompt_msg_id: await client.edit_message_text(message.chat.id, prompt_msg_id, msg_text)
     else: await message.reply_text(msg_text)
 
+
 # ==========================================
 # 📢 DIRECT COMMAND & WIZARD LAUNCHER
 # ==========================================
 @Client.on_message(filters.command(["index", "batch"]) & filters.user(Config.ADMINS))
 async def mass_indexer_command(client: Client, message: Message):
+    
     if message.reply_to_message:
         reply = message.reply_to_message
         target_chat = None
@@ -158,6 +154,7 @@ async def mass_indexer_command(client: Client, message: Message):
         "timestamp": time.time()
     }
     raise StopPropagation
+
 
 # ==========================================
 # 🧠 THE CLEAN UI LISTENER
@@ -213,6 +210,7 @@ async def interactive_indexer_listener(client: Client, message: Message):
     await trigger_indexing_job(client, message, target_chat, prompt_msg_id, known_msg_id)
     raise StopPropagation
 
+
 @Client.on_callback_query(filters.regex("^cancel_index_flow$"))
 async def cancel_index_callback(client: Client, callback: CallbackQuery):
     user_id = callback.from_user.id
@@ -221,20 +219,13 @@ async def cancel_index_callback(client: Client, callback: CallbackQuery):
     await callback.message.edit_text("❌ **Operation Cancelled.**\n\nYou can start over whenever you're ready.")
     await callback.answer("Cancelled", show_alert=False)
 
+
 # ==========================================
 # ⚙️ BACKGROUND QUEUE WORKER
 # ==========================================
 async def process_indexing_queue(client: Client):
     """Runs 24/7. Survives crashes. Safely parses queued channels."""
     logger.info("🟢 Safe Indexing Job Queue Started!")
-
-    # 1. Start-up Rescue: Grab anything marked 'processing' and revert it to 'pending'
-    try:
-        if hasattr(db, "db"): 
-            await db.db.jobs.update_many({"status": "processing"}, {"$set": {"status": "pending"}})
-            logger.info("✅ Resumed stuck indexing jobs from previous restart.")
-    except Exception as e:
-        logger.warning(f"Could not automatically resume jobs: {e}")
 
     while True:
         try:
@@ -250,7 +241,6 @@ async def process_indexing_queue(client: Client):
 
             await db.update_job(job_id, {"status": "processing"})
 
-            # ONLY mark completed if we actually reached the bottom of the channel
             if current_id <= 0:
                 await db.update_job(job_id, {"status": "completed"})
                 logger.info(f"✅ Indexing completed for {chat_name}")
@@ -267,22 +257,20 @@ async def process_indexing_queue(client: Client):
                 await asyncio.sleep(fw.value)
                 continue
             except (PeerIdInvalid, ChannelInvalid): 
-                # 🚨 THE BUG FIX 🚨: Never mark this as "completed". Revert to "pending" to try again later!
+                # Keep trying to resolve the peer instead of killing the job
                 logger.warning(f"⚠️ Telegram memory syncing for {chat_name}. Attempting to resolve peer...")
                 try:
                     await client.get_chat(chat_id)
                     await asyncio.sleep(2)
                     continue 
                 except Exception as e:
-                    logger.error(f"❌ Connection lost to {chat_name} after restart. Pausing job...")
-                    await db.update_job(job_id, {"status": "pending"}) # Safely put it back in the queue
-                    await asyncio.sleep(60) # Sleep for a full minute to prevent a spam loop
+                    logger.error(f"❌ Cannot resolve {chat_name}. Retrying in 60s... ({e})")
+                    await asyncio.sleep(60)
                     continue
             except Exception as e:
-                # 🚨 THE SECOND FIX 🚨: Do not skip the batch if a random network error occurs. 
                 logger.error(f"Failed to fetch batch for {chat_name}: {e}")
-                # We do NOT update the current_id here, meaning it will try the EXACT SAME BATCH again.
-                await asyncio.sleep(10)
+                await db.update_job(job_id, {"current_id": start_id - 1})
+                await asyncio.sleep(5)
                 continue
 
             saved = 0
@@ -293,12 +281,10 @@ async def process_indexing_queue(client: Client):
                 scanned += 1
                 if msg.empty: continue
 
-                media = msg.video or msg.document
+                media = msg.document or msg.video or msg.audio
                 if not media: continue
-                
-                if not is_valid_movie(media): continue
 
-                raw_title = getattr(media, "file_name", None) or getattr(msg, "caption", None) or "Unknown"
+                raw_title = getattr(media, "file_name", "") or getattr(msg, "caption", "") or "Unknown"
                 file_size = getattr(media, "file_size", 0)
                 crypto_hash = generate_file_hash(raw_title, file_size)
 
@@ -320,15 +306,14 @@ async def process_indexing_queue(client: Client):
                     await db.insert_file(file_data)
                     saved += 1
 
-            # Only subtract from the current_id AFTER a successful, error-free batch!
             await db.update_job(job_id, {
                 "current_id": start_id - 1,
-                "scanned": job.get("scanned", 0) + scanned,
-                "saved": job.get("saved", 0) + saved,
-                "duplicates": job.get("duplicates", 0) + dupes
+                "scanned": job["scanned"] + scanned,
+                "saved": job["saved"] + saved,
+                "duplicates": job["duplicates"] + dupes
             })
 
-            logger.info(f"🔄 Queue Indexing: {chat_name} - Saved {saved} new movies.")
+            logger.info(f"🔄 Queue Indexing: {chat_name} - Saved {saved} new files.")
             await asyncio.sleep(3.0)
 
         except Exception as e:
