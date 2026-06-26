@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import time
-import datetime  # 🚀 NEW: Required for converting timestamps into readable dates
+import datetime
 from pyrogram import Client, filters, ContinuePropagation, StopPropagation
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from database.multi_db import db
@@ -12,10 +12,12 @@ logger = logging.getLogger(__name__)
 
 START_TIME = time.time()
 
-# 🧠 Upgraded State Machine: Remembers message IDs and Timestamps for clean UI editing
+# 🧠 ALL-IN-ONE STATE MACHINE (Admin, Moderation, Limits)
 ADMIN_STATE = {}
 
-@Client.on_message(filters.text & filters.private & filters.user(Config.ADMINS), group=0)
+# We use group=-5 so it intercepts text before the search engine,
+# and we removed "filters.user" so Group Admins can edit their group limits via PM too!
+@Client.on_message(filters.text & filters.private, group=-5)
 async def admin_input_catcher(client: Client, message: Message):
     user_id = message.from_user.id
     if user_id not in ADMIN_STATE:
@@ -25,21 +27,15 @@ async def admin_input_catcher(client: Client, message: Message):
         del ADMIN_STATE[user_id]
         raise ContinuePropagation
 
-    # Extract state, original prompt message ID, and timestamp
     state_data = ADMIN_STATE[user_id]
-    if isinstance(state_data, dict):
-        state = state_data["state"]
-        prompt_msg_id = state_data.get("msg_id")
-        timestamp = state_data.get("timestamp", 0)
-    else:
-        state = state_data
-        prompt_msg_id = None
-        timestamp = 0
+    state = state_data["state"]
+    prompt_msg_id = state_data.get("msg_id")
+    timestamp = state_data.get("timestamp", 0)
 
-    # 🛑 48-Hour Security Check (172,800 Seconds)
+    # 🛑 48-Hour Security Check
     if time.time() - timestamp > 172800:
         del ADMIN_STATE[user_id]
-        try: await message.delete() # Silently remove the late reply
+        try: await message.delete() 
         except Exception: pass
         
         expired_text = "⚠️ **Session Expired.**\n\nThis prompt is older than 48 hours. Please restart the setup from the control panel."
@@ -48,29 +44,57 @@ async def admin_input_catcher(client: Client, message: Message):
             except Exception: await message.reply_text(expired_text)
         else:
             await message.reply_text(expired_text)
-        return
+        raise StopPropagation
 
     user_input = message.text.strip()
 
-    # 🚀 THE UX UPGRADE: Auto-delete user text and beautifully edit the prompt
+    # 🚀 Clean UX Editor
     async def finish_input(success_text, back_callback="set_home"):
         del ADMIN_STATE[user_id]
-        try:
-            await message.delete() # Deletes the user's messy text reply!
-        except Exception:
-            pass
+        try: await message.delete() 
+        except Exception: pass
         
         markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Settings", callback_data=back_callback)]])
         if prompt_msg_id:
-            try:
-                await client.edit_message_text(chat_id=message.chat.id, message_id=prompt_msg_id, text=success_text, reply_markup=markup)
-            except Exception:
-                await message.reply_text(success_text, reply_markup=markup)
+            try: await client.edit_message_text(chat_id=message.chat.id, message_id=prompt_msg_id, text=success_text, reply_markup=markup)
+            except Exception: await message.reply_text(success_text, reply_markup=markup)
         else:
             await message.reply_text(success_text, reply_markup=markup)
 
-    # Apply the clean UX to all inputs
-    if state == "setup_inside_words":
+    # ==========================
+    # MODERATION CONFIGURATIONS
+    # ==========================
+    if state.startswith("setup_badwords_") or state.startswith("setup_limits_"):
+        parts = state.split("_")
+        mod_type = parts[1] # badwords or limits
+        scope = parts[2] # global or local
+        chat_id = parts[3] # global or -100xxx
+        
+        back_callback = f"set_mod_{scope}_{chat_id}"
+        
+        if mod_type == "badwords":
+            words = [w.strip().lower() for w in user_input.split(",") if w.strip()]
+            if scope == "global":
+                await db.update_settings({"bad_words": words})
+            else:
+                await db.update_group_setting(int(chat_id), "bad_words", words)
+            await finish_input(f"✅ **Bad words updated:**\n`{', '.join(words)}`", back_callback)
+            
+        elif mod_type == "limits":
+            if user_input.isdigit():
+                limit = int(user_input)
+                if scope == "global":
+                    await db.update_settings({"strike_limit": limit})
+                else:
+                    await db.update_group_setting(int(chat_id), "strike_limit", limit)
+                await finish_input(f"✅ **Strikeout limit set to:** `{limit}`", back_callback)
+            else:
+                await message.reply_text("❌ **Invalid Input!** Please send only a number.")
+
+    # ==========================
+    # CORE ADMIN CONFIGURATIONS
+    # ==========================
+    elif state == "setup_inside_words":
         words = [w.strip() for w in user_input.split() if w.strip()]
         await db.update_settings({"inside_words": words})
         await finish_input(f"✅ **Words Saved!**\n`{words}`", "set_inside")
@@ -90,17 +114,14 @@ async def admin_input_catcher(client: Client, message: Message):
     elif state == "setup_shortener_url":
         await db.update_settings({"shortener_url": user_input})
         ADMIN_STATE[user_id] = {"state": "setup_shortener_api", "msg_id": prompt_msg_id, "timestamp": time.time()}
-        try: 
-            await message.delete() 
-        except Exception: 
-            pass
+        try: await message.delete() 
+        except Exception: pass
         
         text = "✅ **URL Saved!**\n\nNow, please send me your secret **API Key** for this shortener."
         markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_shortener")]])
         
         if prompt_msg_id:
-            try: 
-                await client.edit_message_text(chat_id=message.chat.id, message_id=prompt_msg_id, text=text, reply_markup=markup)
+            try: await client.edit_message_text(chat_id=message.chat.id, message_id=prompt_msg_id, text=text, reply_markup=markup)
             except Exception: 
                 msg = await message.reply_text(text, reply_markup=markup)
                 ADMIN_STATE[user_id]["msg_id"] = msg.id
@@ -133,11 +154,13 @@ async def admin_input_catcher(client: Client, message: Message):
             await finish_input(f"✅ **Filter Delete Time Saved:** `{user_input} Minutes`", "set_autodelete")
         else:
             await message.reply_text("❌ **Invalid Input!** Please send only a number in minutes (e.g., `5`).")
+            
     raise StopPropagation
 
 @Client.on_message(filters.command("admin") & filters.user(Config.ADMINS))
 async def admin_direct_command(client: Client, message: Message):
     await send_settings_home(message)
+    raise StopPropagation
 
 async def send_settings_home(message_or_query):
     text = "👑 **Bot Creator Control Panel**\n\nSelect a master module to configure:"
@@ -146,6 +169,7 @@ async def send_settings_home(message_or_query):
         [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests")],
         [InlineKeyboardButton("🕵️‍♂️ Inside Settings", callback_data="set_inside")], 
         [InlineKeyboardButton("🗑 Auto-Delete Filters", callback_data="set_autodelete")],
+        [InlineKeyboardButton("🛡️ Moderation (Mute/Ban)", callback_data="set_mod_global")],
         [InlineKeyboardButton("🔙 Exit", callback_data="tier_root_fallback")]
     ]
 
@@ -156,21 +180,60 @@ async def send_settings_home(message_or_query):
 
 @Client.on_callback_query(
     filters.regex(
-        r"^(set_home|set_inside|set_shortener|set_requests|set_autodelete|toggle_|inside_|time_)"
+        r"^(set_home|set_inside|set_shortener|set_requests|set_autodelete|set_mod|toggle_|inside_|time_|mod_)"
     )
 )
 async def settings_callbacks(client: Client, callback: CallbackQuery):
     action = callback.data
     user_id = callback.from_user.id
 
-    if action in ["set_home", "set_inside", "set_shortener", "set_requests", "set_autodelete"]:
-        # This acts as our "Cancel" fallback automatically!
+    # Fallback to cancel any pending text setups automatically
+    if action in ["set_home", "set_inside", "set_shortener", "set_requests", "set_autodelete"] or action.startswith("set_mod_"):
         if user_id in ADMIN_STATE:
             del ADMIN_STATE[user_id]
 
     if action == "set_home":
         await send_settings_home(callback)
 
+    # ==========================
+    # MODERATION MENUS
+    # ==========================
+    elif action.startswith("set_mod_"):
+        parts = action.split("_")
+        scope = parts[2] # global or local
+        chat_id = parts[3] if len(parts) > 3 else "global"
+        
+        back_btn = "set_home" if scope == "global" else f"tier_gmanage_{chat_id}"
+        
+        text = f"⚙️ **{'GLOBAL' if scope=='global' else 'LOCAL'} MODERATION RULES**\n\nConfigure Auto-Mute and Auto-Ban triggers:"
+        buttons = [
+            [InlineKeyboardButton("📝 Edit Bad Words", callback_data=f"mod_badwords_{scope}_{chat_id}")],
+            [InlineKeyboardButton("⏱ Warn Limits (Strikeouts)", callback_data=f"mod_limits_{scope}_{chat_id}")],
+            [InlineKeyboardButton("🔙 Back", callback_data=back_btn)]
+        ]
+        await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+    elif action.startswith("mod_badwords_") or action.startswith("mod_limits_"):
+        parts = action.split("_")
+        mod_type = parts[1] # badwords or limits
+        scope = parts[2] # global or local
+        chat_id = parts[3] # global or -100xxx
+        
+        state_key = f"setup_{mod_type}_{scope}_{chat_id}"
+        ADMIN_STATE[user_id] = {"state": state_key, "msg_id": callback.message.id, "timestamp": time.time()}
+        
+        back_btn = f"set_mod_{scope}_{chat_id}"
+        
+        if mod_type == "badwords":
+            msg = "📝 **Send me the list of bad words separated by commas.**\nExample: `porn, bet, casino`"
+        else:
+            msg = "⏱ **Send me the number of warnings a user can get before they are Auto-Muted.**\nExample: `3`"
+            
+        await callback.message.edit_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data=back_btn)]]))
+
+    # ==========================
+    # CORE SETTINGS MENUS
+    # ==========================
     elif action == "set_inside":
         settings = await db.get_settings()
         status = "🟢 ON" if settings.get("inside_enabled", False) else "🔴 OFF"
@@ -596,7 +659,6 @@ async def get_worker3_recent_text_and_buttons():
         b_id = batch["_id"]
         count = batch["count"]
         
-        # 🚀 THE FIX: Fetch Live Engagement Stats
         eng = await db.get_batch_engagement(b_id)
         replies = eng["replies"]
         followups = eng["followups"]
@@ -624,6 +686,7 @@ async def bot_stats_dashboard(client: Client, message: Message):
     status_msg = await message.reply_text("📊 **Querying core analytics engine...**")
     text, markup = await get_stats_home_text_and_buttons()
     await status_msg.edit_text(text, reply_markup=markup)
+    raise StopPropagation
 
 @Client.on_callback_query(filters.regex(r"^stats_"))
 async def stats_callback_handler(client: Client, callback: CallbackQuery):
@@ -639,7 +702,6 @@ async def stats_callback_handler(client: Client, callback: CallbackQuery):
             text, markup = await get_worker2_text_and_buttons()
             await callback.message.edit_text(text, reply_markup=markup)
             
-        # 🚀 NEW WORKER 3 ROUTING
         elif action == "stats_worker3_home":
             text, markup = await get_worker3_home_text_and_buttons()
             await callback.message.edit_text(text, reply_markup=markup)
@@ -685,12 +747,14 @@ async def multi_shard_json_backup(client: Client, message: Message):
         await message.reply_document("shard0_backup.json", caption=f"📦 **Backup Export**\nProcessed `{len(documents)}` files.")
         await progress.delete()
     except Exception as e: await progress.edit_text(f"❌ **Schema Export Failed:** `{str(e)}`")
+    raise StopPropagation
 
 @Client.on_message(filters.command("optimize_db") & filters.user(Config.ADMINS))
 async def trigger_db_optimization(client: Client, message: Message):
     status = await message.reply_text("⚙️ **Building MongoDB Text Indexes...** This may take a moment.")
     await db.ensure_indexes()
     await status.edit_text("⚡️ **Optimization Complete!** Your database is now searching at maximum speed.")
+    raise StopPropagation
 
 @Client.on_message(filters.command("migrate_db") & filters.user(Config.ADMINS))
 async def reset_unknown_languages(client: Client, message: Message):
@@ -715,6 +779,7 @@ async def reset_unknown_languages(client: Client, message: Message):
         total_reset += result.modified_count
         
     await status.edit_text(f"✅ **Database Migration Complete!**\n\nSent `{total_reset}` old files back to the Worker 2 queue to extract their Subtitles and Audio tags.")
+    raise StopPropagation
 
 @Client.on_message(filters.command("clear_job") & filters.user(Config.ADMINS))
 async def clear_active_job(client: Client, message: Message):
@@ -724,26 +789,4 @@ async def clear_active_job(client: Client, message: Message):
         await message.reply_text("✅ **Stuck indexing job marked as completed.** The loop will now stop.")
     else:
         await message.reply_text("⚠️ **No active job found.**")
-
-@Client.on_message(filters.command("userstats") & filters.user(Config.ADMINS))
-async def get_user_stats(client: Client, message: Message):
-    # Fetching counts from the database collections
-    total_users = await db.users.count_documents({})
-    total_muted = await db.punishments.count_documents({"type": "mute"})
-    total_banned = await db.punishments.count_documents({"type": "ban"})
-    
-    # Calculate active users (Total - Banned)
-    active_users = total_users - total_banned
-    
-    stats_text = (
-        f"📊 **Bot User Statistics**\n\n"
-        f"👥 Total Users: `{total_users}`\n"
-        f"🟢 Active Users: `{active_users}`\n"
-        f"🔇 Total Muted: `{total_muted}`\n"
-        f"🚫 Total Banned: `{total_banned}`\n\n"
-        f"⚙️ **Admin Shortcuts:**\n"
-        f"/mute <id> [time] - Mute a user\n"
-        f"/ban <id> [reason] - Ban a user"
-    )
-    
-    await message.reply_text(stats_text)
+    raise StopPropagation
