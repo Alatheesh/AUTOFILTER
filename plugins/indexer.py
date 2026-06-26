@@ -29,9 +29,14 @@ def generate_file_hash(file_name: str, file_size: int) -> str:
     return hashlib.sha256(hash_payload).hexdigest()
 
 def is_valid_movie(media) -> bool:
-    """Strictly checks if a document is actually a movie file."""
-    mime = getattr(media, "mime_type", "").lower()
-    name = getattr(media, "file_name", "").lower()
+    """Strictly checks if a document is a movie file. Safely handles missing Telegram data."""
+    # 🚨 THE FIX: Safely wrap missing attributes so it NEVER crashes with a NoneType error
+    mime = getattr(media, "mime_type", None) or ""
+    name = getattr(media, "file_name", None) or ""
+    
+    mime = mime.lower()
+    name = name.lower()
+    
     if mime.startswith("video/"): return True
     if name.endswith((".mkv", ".mp4", ".avi", ".webm", ".flv", ".mov")): return True
     return False
@@ -44,10 +49,10 @@ async def auto_indexer(client: Client, message: Message):
     media = message.video or message.document
     if not media: return
 
-    # 🚨 STRICT FILTER: Ignore anything that isn't a movie/video
-    if message.document and not is_valid_movie(media): return
+    # Safely filter out non-movies without crashing the bot
+    if not is_valid_movie(media): return
 
-    raw_title = getattr(media, "file_name", "") or getattr(message, "caption", "") or "Unknown Movie File"
+    raw_title = getattr(media, "file_name", None) or getattr(message, "caption", None) or "Unknown Movie File"
     file_size = getattr(media, "file_size", 0)
     crypto_hash = generate_file_hash(raw_title, file_size)
 
@@ -114,7 +119,6 @@ async def trigger_indexing_job(client: Client, message: Message, target_chat, pr
     if prompt_msg_id: await client.edit_message_text(message.chat.id, prompt_msg_id, msg_text)
     else: await message.reply_text(msg_text)
 
-
 # ==========================================
 # 📢 DIRECT COMMAND & WIZARD LAUNCHER
 # ==========================================
@@ -156,7 +160,6 @@ async def mass_indexer_command(client: Client, message: Message):
         "timestamp": time.time()
     }
     raise StopPropagation
-
 
 # ==========================================
 # 🧠 THE CLEAN UI LISTENER
@@ -212,7 +215,6 @@ async def interactive_indexer_listener(client: Client, message: Message):
     await trigger_indexing_job(client, message, target_chat, prompt_msg_id, known_msg_id)
     raise StopPropagation
 
-
 @Client.on_callback_query(filters.regex("^cancel_index_flow$"))
 async def cancel_index_callback(client: Client, callback: CallbackQuery):
     user_id = callback.from_user.id
@@ -221,7 +223,6 @@ async def cancel_index_callback(client: Client, callback: CallbackQuery):
     await callback.message.edit_text("❌ **Operation Cancelled.**\n\nYou can start over whenever you're ready.")
     await callback.answer("Cancelled", show_alert=False)
 
-
 # ==========================================
 # ⚙️ BACKGROUND QUEUE WORKER
 # ==========================================
@@ -229,12 +230,13 @@ async def process_indexing_queue(client: Client):
     """Runs 24/7. Survives crashes. Safely parses queued channels."""
     logger.info("🟢 Safe Indexing Job Queue Started!")
 
+    # 🚨 THE FIX: Safely resume jobs directly without list_collection_names crashing
     try:
-        if hasattr(db, "db") and "jobs" in await db.db.list_collection_names():
+        if hasattr(db, "db"): 
             await db.db.jobs.update_many({"status": "processing"}, {"$set": {"status": "pending"}})
             logger.info("✅ Resumed stuck indexing jobs from previous restart.")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Could not automatically resume jobs: {e}")
 
     while True:
         try:
@@ -292,10 +294,10 @@ async def process_indexing_queue(client: Client):
                 media = msg.video or msg.document
                 if not media: continue
                 
-                # 🚨 STRICT FILTER: Ignore non-movies in the queue batch too
-                if msg.document and not is_valid_movie(media): continue
+                # Use the safe movie filter
+                if not is_valid_movie(media): continue
 
-                raw_title = getattr(media, "file_name", "") or getattr(msg, "caption", "") or "Unknown"
+                raw_title = getattr(media, "file_name", None) or getattr(msg, "caption", None) or "Unknown"
                 file_size = getattr(media, "file_size", 0)
                 crypto_hash = generate_file_hash(raw_title, file_size)
 
