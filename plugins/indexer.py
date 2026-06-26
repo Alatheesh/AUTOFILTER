@@ -28,17 +28,26 @@ def generate_file_hash(file_name: str, file_size: int) -> str:
     hash_payload = f"{file_name}_{file_size}".encode("utf-8")
     return hashlib.sha256(hash_payload).hexdigest()
 
+def is_valid_movie(media) -> bool:
+    """Strictly checks if a document is actually a movie file."""
+    mime = getattr(media, "mime_type", "").lower()
+    name = getattr(media, "file_name", "").lower()
+    if mime.startswith("video/"): return True
+    if name.endswith((".mkv", ".mp4", ".avi", ".webm", ".flv", ".mov")): return True
+    return False
+
 # ==========================================
 # 🚀 PASSIVE AUTO-INDEXER (Set-It-and-Forget-It)
 # ==========================================
-# By including filters.channel, if the bot is an admin in a channel, 
-# it automatically indexes every new movie you upload!
-@Client.on_message((filters.document | filters.video | filters.audio) & (filters.channel | filters.group | filters.private), group=1)
+@Client.on_message((filters.document | filters.video), group=1)
 async def auto_indexer(client: Client, message: Message):
-    media = message.document or message.video or message.audio
+    media = message.video or message.document
     if not media: return
 
-    raw_title = getattr(media, "file_name", "") or getattr(message, "caption", "") or "Unknown Web File"
+    # 🚨 STRICT FILTER: Ignore anything that isn't a movie/video
+    if message.document and not is_valid_movie(media): return
+
+    raw_title = getattr(media, "file_name", "") or getattr(message, "caption", "") or "Unknown Movie File"
     file_size = getattr(media, "file_size", 0)
     crypto_hash = generate_file_hash(raw_title, file_size)
 
@@ -57,14 +66,12 @@ async def auto_indexer(client: Client, message: Message):
         "subtitle": "pending"
     }
     await db.insert_file(file_data)
+    logger.info(f"✅ Auto-Indexed new movie: {raw_title}")
 
 # ==========================================
 # 🛠️ HELPER: TRIGGER INDEXING JOB
 # ==========================================
 async def trigger_indexing_job(client: Client, message: Message, target_chat, prompt_msg_id=None, known_msg_id=None):
-    """Processes the target chat, finds the latest message, and queues the job."""
-    
-    # Try converting string IDs to integers
     try: target_chat = int(target_chat)
     except ValueError: pass
 
@@ -80,7 +87,6 @@ async def trigger_indexing_job(client: Client, message: Message, target_chat, pr
 
     last_msg_id = known_msg_id
     
-    # If we weren't given a message ID (e.g. from a direct command), fetch the latest one!
     if not last_msg_id:
         try:
             async for m in client.get_chat_history(target_chat_id, limit=1):
@@ -114,8 +120,6 @@ async def trigger_indexing_job(client: Client, message: Message, target_chat, pr
 # ==========================================
 @Client.on_message(filters.command(["index", "batch"]) & filters.user(Config.ADMINS))
 async def mass_indexer_command(client: Client, message: Message):
-    
-    # METHOD 1: The old Reply method
     if message.reply_to_message:
         reply = message.reply_to_message
         target_chat = None
@@ -132,13 +136,11 @@ async def mass_indexer_command(client: Client, message: Message):
             await trigger_indexing_job(client, message, target_chat, known_msg_id=last_msg_id)
             raise StopPropagation
             
-    # METHOD 2 & 3: Direct Username or Chat ID (e.g., /index @Movies or /index -100123)
     if len(message.command) > 1:
         target_chat = message.command[1].strip()
         await trigger_indexing_job(client, message, target_chat)
         raise StopPropagation
 
-    # METHOD 4: The Clean UI Interactive Wizard
     prompt = await message.reply_text(
         "📦 **Mass Indexing Wizard**\n\n"
         "How would you like to target the channel?\n"
@@ -174,7 +176,6 @@ async def interactive_indexer_listener(client: Client, message: Message):
     prompt_msg_id = state["message_id"]
     timestamp = state["timestamp"]
 
-    # 🛑 48-Hour Security Check
     if time.time() - timestamp > 172800:
         del INDEXER_STATE[user_id]
         try: await message.delete() 
@@ -184,7 +185,6 @@ async def interactive_indexer_listener(client: Client, message: Message):
         except Exception: await message.reply_text(expired_text)
         raise StopPropagation 
 
-    # ✅ Capture Data & Clean the Chat
     del INDEXER_STATE[user_id]
     try: await message.delete() 
     except Exception: pass
@@ -192,14 +192,12 @@ async def interactive_indexer_listener(client: Client, message: Message):
     target_chat = None
     known_msg_id = None
     
-    # Did they forward a file?
     if getattr(message, "forward_origin", None) and getattr(message.forward_origin, "chat", None):
         target_chat = message.forward_origin.chat.id
         known_msg_id = getattr(message.forward_origin, "message_id", 0)
     elif getattr(message, "forward_from_chat", None):
         target_chat = message.forward_from_chat.id
         known_msg_id = getattr(message, "forward_from_message_id", 0)
-    # Did they type an ID or Username?
     elif message.text:
         target_chat = message.text.strip()
     else:
@@ -231,6 +229,13 @@ async def process_indexing_queue(client: Client):
     """Runs 24/7. Survives crashes. Safely parses queued channels."""
     logger.info("🟢 Safe Indexing Job Queue Started!")
 
+    try:
+        if hasattr(db, "db") and "jobs" in await db.db.list_collection_names():
+            await db.db.jobs.update_many({"status": "processing"}, {"$set": {"status": "pending"}})
+            logger.info("✅ Resumed stuck indexing jobs from previous restart.")
+    except Exception:
+        pass
+
     while True:
         try:
             job = await db.get_active_job()
@@ -261,14 +266,12 @@ async def process_indexing_queue(client: Client):
                 await asyncio.sleep(fw.value)
                 continue
             except (PeerIdInvalid, ChannelInvalid): 
-                # 🚀 THE FIX: Try to get the chat to sync the access hash. If it fails, kill the dead job!
                 logger.warning(f"⚠️ Telegram memory syncing for {chat_name}. Attempting to resolve peer...")
                 try:
                     await client.get_chat(chat_id)
                     await asyncio.sleep(2)
-                    continue # Success! Try get_messages again next loop
+                    continue 
                 except Exception as e:
-                    # If this fails, the bot lacks access permanently. Kill the job!
                     logger.error(f"❌ FATAL: Cannot resolve {chat_name}. Aborting job! ({e})")
                     await db.update_job(job_id, {"status": "completed"})
                     continue
@@ -286,8 +289,11 @@ async def process_indexing_queue(client: Client):
                 scanned += 1
                 if msg.empty: continue
 
-                media = msg.document or msg.video or msg.audio
+                media = msg.video or msg.document
                 if not media: continue
+                
+                # 🚨 STRICT FILTER: Ignore non-movies in the queue batch too
+                if msg.document and not is_valid_movie(media): continue
 
                 raw_title = getattr(media, "file_name", "") or getattr(msg, "caption", "") or "Unknown"
                 file_size = getattr(media, "file_size", 0)
@@ -313,12 +319,12 @@ async def process_indexing_queue(client: Client):
 
             await db.update_job(job_id, {
                 "current_id": start_id - 1,
-                "scanned": job["scanned"] + scanned,
-                "saved": job["saved"] + saved,
-                "duplicates": job["duplicates"] + dupes
+                "scanned": job.get("scanned", 0) + scanned,
+                "saved": job.get("saved", 0) + saved,
+                "duplicates": job.get("duplicates", 0) + dupes
             })
 
-            logger.info(f"🔄 Queue Indexing: {chat_name} - Saved {saved} new files.")
+            logger.info(f"🔄 Queue Indexing: {chat_name} - Saved {saved} new movies.")
             await asyncio.sleep(3.0)
 
         except Exception as e:
