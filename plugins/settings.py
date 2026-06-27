@@ -1,4 +1,3 @@
-import random
 import logging
 import asyncio
 import json
@@ -9,52 +8,14 @@ from pyrogram.enums import ChatType
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from config import Config
 from database.multi_db import db
-from plugins.moderation import log_to_channel
 
 logger = logging.getLogger(__name__)
 
 START_TIME = time.time()
-
-# 🧠 ALL-IN-ONE STATE MACHINE
 ADMIN_STATE = {}
 
-# --- STICKER & MEDIA PACKS ---
-START_STICKERS = [
-    "CAACAgUAAxkBAAERawdqNXyW6Tqft1iZtgABiTVGhBohxgIAApwAA8iUZBRzjwAB89rFhfw8BA",
-    "CAACAgIAAxkBAAERawlqNXy1AwABuumeSFheCDM2d624y90AAiYPAAL7WShJIl_khPeHLac8BA"
-]
-ROBO_STICKERS = [
-    "CAACAgUAAxkBAAERautqNXbvA3JLjJg-U_LbOgNmBXLApQACahIAAvYiyVZikUGUoRZynzwE",
-    "CAACAgIAAxkBAAERawFqNXvcF78c77WjPHAAAbL9Yk55HMAAAk4CAAJWnb0KMP5rbYEyA288BA",
-    "CAACAgIAAxkBAAERawNqNXvnj-tDUwXqJGB_6BYXFfIn-QACwGoAAjg5aUn8Q0qGpRajKzwE"
-]
-CODE_STICKERS = [
-    "CAACAgIAAxkBAAERavNqNXnoQwKwPnhWsEL5QXglsmRieAACwVsAAhKjgUg7UdLO-nt4VjwE",
-    "CAACAgIAAxkBAAERavVqNXpmmnxWeKfo-qv-kP8WdLuqkwACShcAAutrqUl9AevFXbjHDzwE",
-    "CAACAgEAAxkBAAERavFqNXnOCL7UtEeSAe3-1MHnnBpLPAACMQIAAoKgIEQHCzBVrLHGhzwE"
-]
-GHOST_STICKERS = [
-    "CAACAgEAAxkBAAERawtqNX0dllDVZhRw9UkAAeIssj3C9RAAAtEBAAI-HjBHuHEaSdq4kGA8BA",
-    "CAACAgEAAxkBAAERaw1qNX00vFFh52_2RWDP8AtWrF8evAAC0gEAAuZSMUd-GR6sSPZFxDwE"
-]
-START_BANNER_IMAGES = [
-    "https://telegra.ph/file/c4ddf6a9d136cb1735bb1.jpg",
-    "https://telegra.ph/file/b36685221ce5ac41ad667.jpg",
-    "https://telegra.ph/file/7f59377ace528148d15bd.jpg",
-    "https://telegra.ph/file/e006737306ad1c5c16192.jpg",
-    "https://telegra.ph/file/f8b495d98fd4d89c99150.jpg",
-    "https://telegra.ph/file/320cdc500bc7e3d1c9e94.jpg",
-    "https://telegra.ph/file/90ea7771a7c61e2d45d72.jpg"
-]
-
-# ==========================================
-# --- HELPER FUNCTIONS ---
-# ==========================================
-def get_start_markup() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛠 Help", callback_data="ui_help"), InlineKeyboardButton("ℹ️ About", callback_data="ui_about")],
-        [InlineKeyboardButton("👨‍💻 Source", callback_data="ui_source"), InlineKeyboardButton("✨ Features", callback_data="ui_features")]
-    ])
+CODE_STICKERS = ["CAACAgIAAxkBAAERavNqNXnoQwKwPnhWsEL5QXglsmRieAACwVsAAhKjgUg7UdLO-nt4VjwE"]
+GHOST_STICKERS = ["CAACAgEAAxkBAAERawtqNX0dllDVZhRw9UkAAeIssj3C9RAAAtEBAAI-HjBHuHEaSdq4kGA8BA"]
 
 def is_creator(user_id: int) -> bool:
     return user_id in Config.ADMINS
@@ -101,7 +62,6 @@ async def admin_input_catcher(client: Client, message: Message):
     state_data = ADMIN_STATE[user_id]
     state, prompt_msg_id, timestamp = state_data["state"], state_data.get("msg_id"), state_data.get("timestamp", 0)
 
-    # 🛑 48-Hour Security Check
     if time.time() - timestamp > 172800:
         del ADMIN_STATE[user_id]
         try: await message.delete() 
@@ -211,90 +171,6 @@ async def admin_input_catcher(client: Client, message: Message):
         else: await message.reply_text("❌ **Invalid Input!** Please send only a number in minutes (e.g., `5`).")
             
     raise StopPropagation
-
-# ==========================================
-# 📢 UI MENUS COMMAND HANDLERS
-# ==========================================
-@Client.on_message(filters.command("start"))
-async def start_menu_handler(client: Client, message: Message):
-    if len(message.command) > 1: 
-        cmd = message.command[1]
-        if cmd.startswith("appeal_"):
-            p_type = cmd.split("_")[1]
-            btn = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Formal Appeal", callback_data=f"appeal_global_{p_type}")]])
-            await message.reply_text(f"⚖️ **Global {p_type.upper()} Appeal Center**\n\nClick the button below to officially submit your appeal to the Creator.", reply_markup=btn)
-            raise StopPropagation
-        return 
-
-    user_id = message.from_user.id
-    user_exists = await db.users.find_one({"user_id": user_id})
-    if not user_exists:
-        await log_to_channel(client, f"#new_user\n👤 Name: `{message.from_user.first_name}`\n🆔 ID: `{user_id}`\n🔗 Username: @{message.from_user.username or 'None'}")
-        await db.update_user_setting(user_id, "joined_date", datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
-
-    try:
-        loading_msg = await message.reply_sticker(random.choice(START_STICKERS))
-        await asyncio.sleep(1)
-        await loading_msg.delete()
-    except Exception: pass
-        
-    hr = datetime.datetime.now().hour
-    greeting = "🌅 Good Morning" if 5 <= hr < 12 else "☀️ Good Afternoon" if 12 <= hr < 17 else "🌆 Good Evening" if 17 <= hr < 21 else "🌃 Good Night"
-    welcome_text = f"**{greeting}, {message.from_user.first_name}!**\n\nWelcome to the **Cloud Auto-Filter Bot**.\n\n✨ **Use the buttons below to explore my commands:**"
-    
-    try: await message.reply_photo(photo=random.choice(START_BANNER_IMAGES), caption=welcome_text, reply_markup=get_start_markup())
-    except Exception: await message.reply_text(text=welcome_text, reply_markup=get_start_markup())
-    raise StopPropagation
-
-@Client.on_message(filters.command("help") & filters.private)
-async def help_command_handler(client: Client, message: Message):
-    try:
-        loading_msg = await message.reply_sticker(random.choice(ROBO_STICKERS))
-        await asyncio.sleep(3); await loading_msg.delete()
-    except Exception: pass
-    help_text = "🛠 **How to Use the Auto-Filter Bot:**\n\n• **In Groups:** Just drop the title of any movie or document and I will automatically look it up.\n• **In DMs:** Send any text keyword (directly to my PM) to trigger the multi-DB file search instantly.\n• `/connect`: Link your group and become the Primary Connector.\n• `/plot <movie>`: Generates a beautiful AI-powered movie plot summary.\n• `/history`: Displays your 10 most recent searches.\n• `/settings`: Open the advanced configuration dashboard."
-    await message.reply_text(text=help_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back")]]))
-    raise StopPropagation
-
-@Client.on_message(filters.command("about") & filters.private)
-async def about_command_handler(client: Client, message: Message):
-    try:
-        loading_msg = await message.reply_sticker(random.choice(ROBO_STICKERS))
-        await asyncio.sleep(3); await loading_msg.delete()
-    except Exception: pass
-    about_text = "ℹ️ **About This Bot:**\n\n• **Engine:** Advanced Asynchronous Pyrogram V2\n• **Core Framework:** Python 3.10 with `asyncio` parallel multi-shard pooling\n• **Database Backend:** Scalable multi-cluster MongoDB connection routing\n"
-    await message.reply_text(text=about_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back")]]))
-    raise StopPropagation
-
-@Client.on_message(filters.command("source") & filters.private)
-async def source_command_handler(client: Client, message: Message):
-    try:
-        loading_msg = await message.reply_sticker(random.choice(CODE_STICKERS))
-        await asyncio.sleep(3); await loading_msg.delete()
-    except Exception: pass
-    source_text = "👨‍💻 **Open Source Repository Details:**\n\nThis application is modularly crafted to separate route dispatchers, active sharding layers, and smart monetization tasks.\n\n• **Developer:** Google AI Studio Build Architect\n• **Credits:** Pyrogram & MongoDB Motor Driver"
-    await message.reply_text(text=source_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back")]]))
-    raise StopPropagation
-
-@Client.on_callback_query(filters.regex(r"^ui_(help|about|source|features|back)$"))
-async def callback_ui_router(client: Client, callback: CallbackQuery):
-    target = callback.data.split("_")[1]
-    if target == "back":
-        welcome_text = f"👋 **Welcome to the Cloud Auto-Filter Bot, {callback.from_user.username or 'User'}!**\n\nI am a highly-optimized, multi-sharded Telegram repository search system. Send me any movie or file query and I'll find it instantly across our high-performing MongoDB clusters.\n\n✨ **Use the interactive buttons below to explore my built-in commands/specifications:**"
-        await callback.message.edit_text(text=welcome_text, reply_markup=get_start_markup())
-    elif target == "help":
-        help_text = "🛠 **How to Use the Auto-Filter Bot:**\n\n• **In Groups:** Just drop the title of any movie or document and I will automatically look it up.\n• **In DMs:** Send any text keyword (directly to my PM) to trigger the multi-DB file search instantly.\n• `/connect`: Link your group and become the Primary Connector.\n• `/settings`: Open the advanced configuration dashboard."
-        await callback.message.edit_text(text=help_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ui_back")]]))
-    elif target == "about":
-        about_text = "ℹ️ **About This Bot:**\n\n• **Engine:** Advanced Asynchronous Pyrogram V2\n• **Core Framework:** Python 3.10 with `asyncio` parallel multi-shard pooling\n• **Database Backend:** Scalable multi-cluster MongoDB connection routing\n"
-        await callback.message.edit_text(text=about_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ui_back")]]))
-    elif target == "source":
-        source_text = "👨‍💻 **Open Source Repository Details:**\n\nThis application is modularly crafted to separate route dispatchers, active sharding layers, and smart monetization tasks.\n\n• **Developer:** Google AI Studio Build Architect\n• **Credits:** Pyrogram & MongoDB Motor Driver"
-        await callback.message.edit_text(text=source_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ui_back")]]))
-    elif target == "features":
-        features_text = "✨ **Bot Feature Profile:**\n\n• **Dynamic UI:** 3-Tier Default vs Interactive Search Engine.\n• **Monetization Engine:** GPLinks shortener + double force subscription lock.\n• **Admin Dashboard:** Mass system-wide broadcasting."
-        await callback.message.edit_text(text=features_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ui_back")]]))
-    await callback.answer()
 
 # ==========================================
 # 🛠 MASTER SETTINGS ROUTER
@@ -548,7 +424,6 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         status = "🟢 ON" if settings.get("inside_enabled", False) else "🔴 OFF"
         words, times, channels = settings.get("inside_words", []), settings.get("inside_times", 5), settings.get("inside_channels", [])
         
-        # 🚀 Upgrade Legacy String to New List Format safely
         legacy_p = settings.get("inside_placement", "movie")
         placements = settings.get("inside_placements", [legacy_p] if isinstance(legacy_p, str) else ["movie"])
         p_str = ", ".join([p.capitalize() for p in placements]) if placements else "None"
@@ -588,7 +463,6 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         ADMIN_STATE[user_id] = {"state": "setup_inside_channels", "msg_id": callback.message.id, "timestamp": time.time()}
         await callback.message.edit_text("✏️ **Send the Target Channel Usernames or IDs.**\nSeparate multiple with spaces.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_inside")]]))
 
-    # 🚀 NEW: Multi-Select Placements Menu
     elif action == "set_placements":
         settings = await db.get_settings()
         legacy_p = settings.get("inside_placement", "movie")
@@ -614,14 +488,11 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         legacy_p = settings.get("inside_placement", "movie")
         placements = settings.get("inside_placements", [legacy_p] if isinstance(legacy_p, str) else ["movie"])
 
-        if place in placements:
-            placements.remove(place)
-        else:
-            placements.append(place)
+        if place in placements: placements.remove(place)
+        else: placements.append(place)
 
         await db.update_settings({"inside_placements": placements})
-        callback.data = "set_placements"
-        await settings_callbacks(client, callback)
+        callback.data = "set_placements"; await settings_callbacks(client, callback)
 
     elif action == "set_shortener":
         settings = await db.get_settings()
@@ -752,19 +623,87 @@ async def get_stats_home_text_and_buttons():
 async def get_worker1_text_and_buttons():
     active_job = await db.get_active_job()
     if active_job:
-        scanned, saved, duplicates, remaining = active_job.get("scanned", 0), active_job.get("saved", 0), active_job.get("duplicates", 0), max(0, active_job.get("current_id", 0))
+        target = active_job.get("chat_name", "Unknown Channel")
+        scanned = active_job.get("scanned", 0)
+        saved = active_job.get("saved", 0)
+        duplicates = active_job.get("duplicates", 0)
+        current_id = active_job.get("current_id", 0)
+
+        remaining = max(0, current_id)
         total_msgs = scanned + remaining
-        status_text = "✅ Completed (Sleeping)" if remaining <= 0 else "🔄 Active (Deep Scan in Progress...)"
-        text = f"⚙️ **WORKER 1: Mass Channel Indexing**\n🔄 **Status:** `{status_text}`\n\n• **Target Channel:** `{active_job.get('chat_name', 'Unknown')}`\n• **Total Progress:** `{scanned:,}` / `{total_msgs:,}`\n• **Estimated Time Left:** `{format_eta(remaining * 0.4)}`"
-    else: text = "⚙️ **WORKER 1: Mass Channel Indexing**\n💤 **Status:** `Idle (Queue Empty)`"
-    return text, InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="stats_home"), InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w1")]])
+        idx_pct = round((scanned / total_msgs * 100), 2) if total_msgs > 0 else 0.0
+
+        skipped_empty = scanned - (saved + duplicates)
+        if skipped_empty < 0:
+            skipped_empty = 0
+
+        if remaining <= 0:
+            status_text = "✅ Completed (Sleeping)"
+            idx_eta_string = "🎉 Fully Processed!"
+        else:
+            status_text = "🔄 Active (Deep Scan in Progress...)"
+            idx_eta_seconds = remaining * 0.4  
+            idx_eta_string = format_eta(idx_eta_seconds)
+
+        text = (
+            f"⚙️ **WORKER 1: Mass Channel Indexing**\n"
+            f"🔄 **Status:** `{status_text}`\n\n"
+            f"• **Target Channel:** `{target}`\n"
+            f"• **Scanned:** `{scanned:,}` | **Remaining to Scan:** `{remaining:,}`\n"
+            f"• **Total Progress:** `{scanned:,}` / `{total_msgs:,}` (`{idx_pct}%`)\n"
+            f"• **Estimated Time Left:** `{idx_eta_string}`\n\n"
+            f"📂 **Content Deep-Breakdown:**\n"
+            f"• **New Media Saved:** `{saved:,}`\n"
+            f"• **Duplicates Skipped:** `{duplicates:,}`\n"
+            f"• **Deleted / Empty Skipped:** `{skipped_empty:,}`"
+        )
+    else:
+        text = (
+            f"⚙️ **WORKER 1: Mass Channel Indexing**\n"
+            f"💤 **Status:** `Idle (Queue Empty)`\n\n"
+            f"No active mass channel indexing tasks are currently running in the background queue."
+        )
+
+    buttons = [
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="stats_home"),
+            InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w1")
+        ]
+    ]
+    return text, InlineKeyboardMarkup(buttons)
 
 async def get_worker2_text_and_buttons():
     db_stats = await db.global_stats()
-    total_files, indexed_meta = db_stats.get('total_files', 0), db_stats.get('indexed_metadata', 0)
+    total_files = db_stats.get('total_files', 0)
+    indexed_meta = db_stats.get('indexed_metadata', 0)
     pending_meta = total_files - indexed_meta
-    text = f"⚙️ **WORKER 2: Language & Metadata Extraction**\n🔄 **Status:** `Processing Database Shards...`\n\n• **Extracted Files:** `{indexed_meta:,}` / `{total_files:,}`\n• **Pending Migration Queue:** `{pending_meta:,}` files left\n• **Estimated Completion Time:** `{format_eta(pending_meta * 5.5)}`"
-    return text, InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="stats_home"), InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w2")]])
+    
+    corrupted_count = 0
+    for coll in db.collections:
+        corrupted_count += await coll.count_documents({"language": "unknown"})
+
+    meta_eta_seconds = pending_meta * 5.5 
+    meta_eta_string = format_eta(meta_eta_seconds)
+    meta_pct = (indexed_meta / total_files * 100) if total_files > 0 else 100
+
+    text = (
+        f"⚙️ **WORKER 2: Language & Metadata Extraction**\n"
+        f"🔄 **Status:** `Processing Database Shards...`\n\n"
+        f"• **Extracted Files:** `{indexed_meta:,}` / `{total_files:,}`\n"
+        f"• **Corrupted / Skipped:** `{corrupted_count:,}` files\n"
+        f"• **Current Progress:** `{meta_pct:.1f}%` complete\n"
+        f"• **Pending Migration Queue:** `{pending_meta:,}` files left\n"
+        f"• **Estimated Completion Time (ETA):** `{meta_eta_string}`\n\n"
+        f"💡 *Note: This background process routes with a safety buffer delay to avoid hitting Telegram flood limits.*"
+    )
+
+    buttons = [
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="stats_home"),
+            InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w2")
+        ]
+    ]
+    return text, InlineKeyboardMarkup(buttons)
 
 async def get_worker3_home_text_and_buttons():
     pending_count = await db.scheduled_broadcasts.count_documents({"status": "pending"})
