@@ -2,7 +2,7 @@ import random
 import asyncio
 import datetime
 from pyrogram import Client, filters, StopPropagation
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, LinkPreviewOptions
 from database.multi_db import db
 from plugins.moderation import log_to_channel
 
@@ -164,7 +164,7 @@ async def about_command_handler(client: Client, message: Message):
         loading_msg = await message.reply_sticker(random.choice(ROBO_STICKERS))
         await asyncio.sleep(2); await loading_msg.delete()
     except Exception: pass
-    await message.reply_text(text=ABOUT_TEXT, reply_markup=about_keyboard(), disable_web_page_preview=True)
+    await message.reply_text(text=ABOUT_TEXT, reply_markup=about_keyboard(), link_preview_options=LinkPreviewOptions(is_disabled=True))
     raise StopPropagation
 
 @Client.on_message(filters.command("source") & filters.private)
@@ -192,13 +192,13 @@ async def callback_ui_router(client: Client, callback: CallbackQuery):
     
     if target == "back":
         bot_username = client.me.username
-        await callback.message.edit_text(text=START_TEXT, reply_markup=get_start_markup(bot_username))
+        await callback.message.edit_text(text=START_TEXT, reply_markup=get_start_markup(bot_username), link_preview_options=LinkPreviewOptions(is_disabled=True))
         
     elif target == "help":
-        await callback.message.edit_text(text=HELP_TEXT, reply_markup=back_to_start_keyboard())
+        await callback.message.edit_text(text=HELP_TEXT, reply_markup=back_to_start_keyboard(), link_preview_options=LinkPreviewOptions(is_disabled=True))
         
     elif target == "about":
-        await callback.message.edit_text(text=ABOUT_TEXT, reply_markup=about_keyboard(), disable_web_page_preview=True)
+        await callback.message.edit_text(text=ABOUT_TEXT, reply_markup=about_keyboard(), link_preview_options=LinkPreviewOptions(is_disabled=True))
         
     elif target == "source":
         await callback.message.edit_text(
@@ -210,7 +210,7 @@ async def callback_ui_router(client: Client, callback: CallbackQuery):
         )
         
     elif target == "features":
-        await callback.message.edit_text(text=FEATURES_TEXT, reply_markup=features_keyboard())
+        await callback.message.edit_text(text=FEATURES_TEXT, reply_markup=features_keyboard(), link_preview_options=LinkPreviewOptions(is_disabled=True))
         
     elif target == "disclaimer":
         await callback.message.edit_text(text=DISCLAIMER_TEXT, reply_markup=back_to_about_keyboard())
@@ -222,7 +222,7 @@ async def callback_ui_router(client: Client, callback: CallbackQuery):
                 [InlineKeyboardButton("📞 Contact @ntmadminbot", url="https://t.me/ntmadminbot")],
                 [InlineKeyboardButton("🔙 Back", callback_data="ui_about")]
             ]),
-            disable_web_page_preview=True
+            link_preview_options=LinkPreviewOptions(is_disabled=True)
         )
         
     elif target == "privacy":
