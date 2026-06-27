@@ -4,7 +4,7 @@ import string
 import random
 import asyncio
 from pyrogram import Client, filters
-from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, LinkPreviewOptions
 from pyrogram.errors import UserIsBlocked, PeerIdInvalid
 from database.multi_db import db
 from config import Config
