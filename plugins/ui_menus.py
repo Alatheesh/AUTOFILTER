@@ -7,14 +7,14 @@ from database.multi_db import db
 from plugins.moderation import log_to_channel
 from config import Config
 
-# --- TEXT VARIABLES ---
-START_TEXT = """👋 **Welcome to the Cloud Auto-Filter Bot!**
+# --- DYNAMIC TEXT TEMPLATES ---
+START_TEXT = """👋 **Welcome to {bot_name}!**
 
 I am a highly-optimized Telegram repository search system. I help you instantly find movies, files, and data by indexing available public channels.
 
 ✨ Use the interactive buttons below to explore my built-in commands and specifications:"""
 
-ABOUT_TEXT = """🤖 **Bot Name:** Cloud Auto-Filter Bot
+ABOUT_TEXT = """🤖 **Bot Name:** {bot_name}
 🧑‍💻 **Creator:** [LATHEESH](https://t.me/LATHEESH)
 ⚙️ **Engine:** Pyrogram (Python)
 📊 **Status:** Active & Running
@@ -144,10 +144,13 @@ async def start_menu_handler(client: Client, message: Message):
     except Exception: pass
         
     bot_me = await client.get_me()
+    bot_name = bot_me.first_name
     bot_username = bot_me.username
     
-    try: await message.reply_photo(photo=random.choice(START_BANNER_IMAGES), caption=START_TEXT, reply_markup=get_start_markup(bot_username))
-    except Exception: await message.reply_text(text=START_TEXT, reply_markup=get_start_markup(bot_username))
+    formatted_start = START_TEXT.format(bot_name=bot_name)
+    
+    try: await message.reply_photo(photo=random.choice(START_BANNER_IMAGES), caption=formatted_start, reply_markup=get_start_markup(bot_username))
+    except Exception: await message.reply_text(text=formatted_start, reply_markup=get_start_markup(bot_username))
     raise StopPropagation
 
 @Client.on_message(filters.command("help") & filters.private)
@@ -165,7 +168,11 @@ async def about_command_handler(client: Client, message: Message):
         loading_msg = await message.reply_sticker(random.choice(ROBO_STICKERS))
         await asyncio.sleep(2); await loading_msg.delete()
     except Exception: pass
-    await message.reply_text(text=ABOUT_TEXT, reply_markup=about_keyboard(), link_preview_options=LinkPreviewOptions(is_disabled=True))
+    
+    bot_me = await client.get_me()
+    formatted_about = ABOUT_TEXT.format(bot_name=bot_me.first_name)
+    
+    await message.reply_text(text=formatted_about, reply_markup=about_keyboard(), link_preview_options=LinkPreviewOptions(is_disabled=True))
     raise StopPropagation
 
 @Client.on_message(filters.command("source") & filters.private)
@@ -183,6 +190,57 @@ async def source_command_handler(client: Client, message: Message):
     )
     raise StopPropagation
 
+# ==========================================
+# 🔍 UTILITY COMMANDS (/id & /info)
+# ==========================================
+@Client.on_message(filters.command("id"))
+async def id_command_handler(client: Client, message: Message):
+    if message.reply_to_message:
+        reply = message.reply_to_message
+        if reply.forward_from_chat:
+            return await message.reply_text(f"📢 **Forwarded Chat ID:** `{reply.forward_from_chat.id}`\n**Name:** `{reply.forward_from_chat.title}`")
+        elif reply.forward_from:
+            return await message.reply_text(f"👤 **Forwarded User ID:** `{reply.forward_from.id}`\n**Name:** `{reply.forward_from.first_name}`")
+        else:
+            return await message.reply_text(f"👤 **Replied User ID:** `{reply.from_user.id}`")
+    else:
+        return await message.reply_text(f"👤 **Your ID:** `{message.from_user.id}`\n💬 **Current Chat ID:** `{message.chat.id}`")
+        
+@Client.on_message(filters.command("info"))
+async def info_command_handler(client: Client, message: Message):
+    target_user_id = message.from_user.id
+    
+    if len(message.command) > 1:
+        try: target_user_id = int(message.command[1])
+        except ValueError: target_user_id = message.command[1]
+    elif message.reply_to_message:
+        target_user_id = message.reply_to_message.from_user.id
+        
+    try:
+        user = await client.get_users(target_user_id)
+    except Exception:
+        return await message.reply_text("❌ **Error:** Could not fetch data for that user.")
+        
+    name = user.first_name + (f" {user.last_name}" if user.last_name else "")
+    info_text = f"👤 **USER INFORMATION**\n\n**Name:** {name}\n**ID:** `{user.id}`\n**Profile:** [Direct Link](tg://user?id={user.id})\n"
+    
+    if message.from_user.id in Config.ADMINS:
+        u_sett = await db.get_user_settings(user.id)
+        joined = u_sett.get("joined_date", "Unknown")
+        searches = u_sett.get("total_searches", 0)
+        
+        punish_doc = await db.punishments.find_one({"_id": f"{user.id}_global"})
+        warns = punish_doc.get("warns", 0) if punish_doc else 0
+        p_type = punish_doc.get("type", "Clean").title() if punish_doc else "Clean"
+        
+        info_text += f"\n📊 **ADMIN DATABASE STATS:**\n**Joined Date:** `{joined}`\n**Total Searches:** `{searches}`\n**Global Status:** `{p_type}`\n**Warnings:** `{warns}`"
+        
+    if user.photo:
+        await message.reply_photo(user.photo.big_file_id, caption=info_text)
+    else:
+        await message.reply_text(info_text, link_preview_options=LinkPreviewOptions(is_disabled=True))
+    raise StopPropagation
+
 
 # ==========================================
 # 🔘 UI BUTTON LISTENER
@@ -190,16 +248,20 @@ async def source_command_handler(client: Client, message: Message):
 @Client.on_callback_query(filters.regex(r"^ui_"))
 async def callback_ui_router(client: Client, callback: CallbackQuery):
     target = callback.data.split("_", 1)[1]
+    bot_me = await client.get_me()
+    bot_name = bot_me.first_name
+    bot_username = bot_me.username
     
     if target == "back":
-        bot_username = client.me.username
-        await callback.message.edit_text(text=START_TEXT, reply_markup=get_start_markup(bot_username), link_preview_options=LinkPreviewOptions(is_disabled=True))
+        formatted_start = START_TEXT.format(bot_name=bot_name)
+        await callback.message.edit_text(text=formatted_start, reply_markup=get_start_markup(bot_username), link_preview_options=LinkPreviewOptions(is_disabled=True))
         
     elif target == "help":
         await callback.message.edit_text(text=HELP_TEXT, reply_markup=back_to_start_keyboard(), link_preview_options=LinkPreviewOptions(is_disabled=True))
         
     elif target == "about":
-        await callback.message.edit_text(text=ABOUT_TEXT, reply_markup=about_keyboard(), link_preview_options=LinkPreviewOptions(is_disabled=True))
+        formatted_about = ABOUT_TEXT.format(bot_name=bot_name)
+        await callback.message.edit_text(text=formatted_about, reply_markup=about_keyboard(), link_preview_options=LinkPreviewOptions(is_disabled=True))
         
     elif target == "source":
         await callback.message.edit_text(
@@ -244,31 +306,23 @@ async def callback_ui_router(client: Client, callback: CallbackQuery):
             f"📅 **Joined On:** `{joined}`\n"
             f"🔍 **Total Searches:** `{total_searches}`\n"
             f"⚙️ **Search Mode:** `{mode}`\n\n"
-            f"*(Thank you for using the bot!)*"
+            f"*(Thank you for using {bot_name}!)*"
         )
         await callback.message.edit_text(text=stats_text, reply_markup=back_to_start_keyboard())
         
     elif target == "settings_menu":
         user_id = callback.from_user.id
         
-        # Build the exact same keyboard hierarchy as /settings
         keyboard = [[InlineKeyboardButton(text="👤 Personal Search Settings", callback_data="tier_user_home")]]
-        
         if await db.get_connected_groups(user_id):
             keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list")])
-            
         if user_id in Config.ADMINS:
             keyboard.append([InlineKeyboardButton("📊 System Stats Dashboard", callback_data="stats_home")])
             keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="set_home")])
             
-        # Provide a way back to the UI features menu
-        keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="ui_features")])
+        keyboard.append([InlineKeyboardButton("🔙 Back to Features", callback_data="ui_features")])
         
         settings_text = "🎛️ **Central Command Settings Hub:**\nSelect the access layer tier you wish to inspect or modify:"
-        
-        await callback.message.edit_text(
-            text=settings_text, 
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        await callback.message.edit_text(text=settings_text, reply_markup=InlineKeyboardMarkup(keyboard))
         
     await callback.answer()
