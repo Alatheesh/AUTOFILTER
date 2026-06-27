@@ -11,38 +11,6 @@ logger = logging.getLogger(__name__)
 REQUEST_STATE = {}
 
 # ==========================================
-# 🛡️ HELPER: INSIDE VERIFICATION CHECKER
-# ==========================================
-async def check_inside_verification(client: Client, user_id: int):
-    """Returns a tuple: (is_locked, error_message_or_markup)"""
-    settings = await db.get_settings()
-    if settings.get("inside_enabled", False) and settings.get("inside_placement", "movie").lower() == "request":
-        user_data = await db.get_user_settings(user_id)
-        if time.time() > user_data.get("inside_pass_expires", 0):
-            from plugins.inside_verifier import get_target_post
-            target_url = await get_target_post(client, settings)
-            if target_url:
-                inside_times = settings.get("inside_times", 5) or 1
-                hours_per_pass = 24 / inside_times
-                
-                text = (
-                    f"🔒 **Security Verification Required!**\n\n"
-                    f"To prevent spam and unlock requests for the next **{hours_per_pass:.1f} Hours**, please complete this task:\n\n"
-                    f"1️⃣ Click the button below to go to our channel.\n"
-                    f"2️⃣ Find the latest post containing our secret words.\n"
-                    f"3️⃣ **Forward that exact message directly to me here!**"
-                )
-                markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Go to Channel Post", url=target_url)]])
-                return True, (text, markup)
-            else:
-                if user_id in Config.ADMINS:
-                    return True, ("⚠️ **ADMIN DEBUG:** Inside Feature is ON, but no target URL is cached in MongoDB. Please post a new message in your channel with the trigger word!", None)
-                else:
-                    return True, ("⏳ Verification system is starting up. Please try again later.", None)
-    return False, (None, None)
-
-
-# ==========================================
 # 📢 DIRECT COMMAND AND INTERACTIVE WIZARD
 # ==========================================
 @Client.on_message(filters.command("request") & filters.private)
@@ -53,15 +21,8 @@ async def request_command(client: Client, message: Message):
         raise StopPropagation
         
     user = message.from_user
-    
-    # 1. Security Check
-    is_locked, lock_data = await check_inside_verification(client, user.id)
-    if is_locked:
-        text, markup = lock_data
-        await message.reply_text(text, reply_markup=markup)
-        raise StopPropagation
         
-    # 2. Fast Route (If they provided the name in the command)
+    # Fast Route (If they provided the name in the command)
     if len(message.command) >= 2:
         movie_name = message.text.split(maxsplit=1)[1]
         req_text = f"#Movie_Request\n\n🔔 **NEW MOVIE REQUEST**\n\n👤 **User:** {user.first_name} (`{user.id}`)\n🎬 **Requested:**\n`{movie_name}`"
@@ -76,7 +37,7 @@ async def request_command(client: Client, message: Message):
             await message.reply_text("❌ **Error:** No log channel configured to receive requests.")
         raise StopPropagation
 
-    # 3. Clean Interactive Route (If they just typed /request)
+    # Clean Interactive Route
     prompt = await message.reply_text(
         "📝 **Submit a Movie Request**\n\n"
         "Please reply with the details of the movie you want. For the fastest response, try to use this format:\n\n"
@@ -92,7 +53,6 @@ async def request_command(client: Client, message: Message):
         "timestamp": time.time()
     }
     raise StopPropagation
-
 
 # ==========================================
 # 🧠 THE CLEAN UI LISTENER
@@ -112,7 +72,6 @@ async def interactive_request_listener(client: Client, message: Message):
     prompt_msg_id = state["message_id"]
     timestamp = state["timestamp"]
 
-    # 🛑 48-Hour Security Check
     if time.time() - timestamp > 172800:
         del REQUEST_STATE[user_id]
         try: await message.delete() 
@@ -122,14 +81,12 @@ async def interactive_request_listener(client: Client, message: Message):
         except Exception: await message.reply_text(expired_text)
         raise StopPropagation 
 
-    # ✅ Capture Data & Clean the Chat
     user_request_text = message.text.strip()
     del REQUEST_STATE[user_id]
     
     try: await message.delete() 
     except Exception: pass
 
-    # Prepare Admin Message
     user = message.from_user
     admin_text = f"#Movie_Request\n\n🔔 **NEW MOVIE REQUEST**\n\n👤 **User:** {user.first_name} (`{user.id}`)\n🎬 **Requested Details:**\n\n{user_request_text}"
     
@@ -148,9 +105,7 @@ async def interactive_request_listener(client: Client, message: Message):
         try: await client.edit_message_text(message.chat.id, prompt_msg_id, fail_msg)
         except Exception: await message.reply_text(fail_msg)
 
-    # 🚀 Block the Search Engine!
     raise StopPropagation
-
 
 @Client.on_callback_query(filters.regex("^cancel_request_flow$"))
 async def cancel_request_callback(client: Client, callback: CallbackQuery):
@@ -159,7 +114,6 @@ async def cancel_request_callback(client: Client, callback: CallbackQuery):
         del REQUEST_STATE[user_id]
     await callback.message.edit_text("❌ **Request Cancelled.**\n\nYou can use `/request` whenever you're ready.")
     await callback.answer("Cancelled", show_alert=False)
-
 
 # ==========================================
 # 🔘 INLINE BUTTON CALLBACK (From Search Results)
@@ -171,20 +125,6 @@ async def request_button_callback(client: Client, callback: CallbackQuery):
         return await callback.answer("❌ Requests are currently disabled.", show_alert=True)
         
     user = callback.from_user
-    
-    # 1. Security Check
-    is_locked, lock_data = await check_inside_verification(client, user.id)
-    if is_locked:
-        text, markup = lock_data
-        if markup:
-            await callback.message.edit_text(text, reply_markup=markup)
-            return await callback.answer("Verification required!", show_alert=True)
-        else:
-            if user.id in Config.ADMINS:
-                await client.send_message(user.id, text)
-            return await callback.answer("⏳ System starting up. Please try again later.", show_alert=True)
-    
-    # 2. Process Button Data
     movie_name = callback.data.split("req_", 1)[1]
     req_text = f"#Movie_Request\n\n🔔 **NEW MOVIE REQUEST (From Search Button)**\n\n👤 **User:** {user.first_name} (`{user.id}`)\n🎬 **Requested:** `{movie_name}`"
     
