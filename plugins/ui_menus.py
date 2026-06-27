@@ -5,6 +5,7 @@ from pyrogram import Client, filters, StopPropagation
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, LinkPreviewOptions
 from database.multi_db import db
 from plugins.moderation import log_to_channel
+from config import Config
 
 # --- TEXT VARIABLES ---
 START_TEXT = """👋 **Welcome to the Cloud Auto-Filter Bot!**
@@ -229,14 +230,45 @@ async def callback_ui_router(client: Client, callback: CallbackQuery):
         await callback.message.edit_text(text=PRIVACY_TEXT, reply_markup=back_to_about_keyboard())
         
     elif target == "stats":
-        stats_text = "📊 **Your Bot Usage Stats:**\n\nRequests made: 0\nFiles retrieved: 0\n\n*(Connect to your DB logic here)*"
+        user_id = callback.from_user.id
+        u_sett = await db.get_user_settings(user_id)
+        
+        joined = u_sett.get("joined_date", "Unknown")
+        total_searches = u_sett.get("total_searches", 0)
+        mode = u_sett.get("search_mode", "default").title()
+        
+        stats_text = (
+            f"📊 **Your Personal Statistics:**\n\n"
+            f"👤 **Name:** {callback.from_user.first_name}\n"
+            f"🆔 **ID:** `{user_id}`\n"
+            f"📅 **Joined On:** `{joined}`\n"
+            f"🔍 **Total Searches:** `{total_searches}`\n"
+            f"⚙️ **Search Mode:** `{mode}`\n\n"
+            f"*(Thank you for using the bot!)*"
+        )
         await callback.message.edit_text(text=stats_text, reply_markup=back_to_start_keyboard())
         
     elif target == "settings_menu":
-        settings_text = "⚙️ **Settings Panel:**\n\nConfigure your group or personal settings here."
+        user_id = callback.from_user.id
+        
+        # Build the exact same keyboard hierarchy as /settings
+        keyboard = [[InlineKeyboardButton(text="👤 Personal Search Settings", callback_data="tier_user_home")]]
+        
+        if await db.get_connected_groups(user_id):
+            keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list")])
+            
+        if user_id in Config.ADMINS:
+            keyboard.append([InlineKeyboardButton("📊 System Stats Dashboard", callback_data="stats_home")])
+            keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="set_home")])
+            
+        # Provide a way back to the UI features menu
+        keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="ui_features")])
+        
+        settings_text = "🎛️ **Central Command Settings Hub:**\nSelect the access layer tier you wish to inspect or modify:"
+        
         await callback.message.edit_text(
             text=settings_text, 
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ui_features")]])
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
         
     await callback.answer()
