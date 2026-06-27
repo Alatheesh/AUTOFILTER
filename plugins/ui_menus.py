@@ -16,7 +16,7 @@ I am a highly-optimized Telegram repository search system. I help you instantly 
 
 ABOUT_TEXT = """🤖 **Bot Name:** {bot_name}
 🧑‍💻 **Creator:** [LATHEESH](https://t.me/LATHEESH)
-⚙️ **Engine:** Pyrogram (Python)
+⚙️ **Engine:** Kurigram (Python)
 📊 **Status:** Active & Running
 
 Choose an option below to view more details about the bot's policies and source:"""
@@ -83,37 +83,37 @@ START_BANNER_IMAGES = [
     "https://telegra.ph/file/90ea7771a7c61e2d45d72.jpg"
 ]
 
-# --- KEYBOARD MARKUPS ---
+# --- KEYBOARD MARKUPS (WITH KURIGRAM COLORS) ---
 def get_start_markup(bot_username: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ ADD ME IN YOUR GROUP", url=f"http://t.me/{bot_username}?startgroup=true")],
-        [InlineKeyboardButton("📊 MY STATS", callback_data="ui_stats"), InlineKeyboardButton("✨ FEATURES", callback_data="ui_features")],
-        [InlineKeyboardButton("ℹ️ ABOUT", callback_data="ui_about"), InlineKeyboardButton("🛠 HELP", callback_data="ui_help")],
-        [InlineKeyboardButton("🌐 VISIT OUR WEBSITE", url="https://alatheesh.github.io/NTMONLINE")]
+        [InlineKeyboardButton("➕ ADD ME IN YOUR GROUP", url=f"http://t.me/{bot_username}?startgroup=true", style="success")],
+        [InlineKeyboardButton("📊 MY STATS", callback_data="ui_stats", style="primary"), InlineKeyboardButton("✨ FEATURES", callback_data="ui_features", style="primary")],
+        [InlineKeyboardButton("ℹ️ ABOUT", callback_data="ui_about", style="primary"), InlineKeyboardButton("🛠 HELP", callback_data="ui_help", style="primary")],
+        [InlineKeyboardButton("🌐 VISIT OUR WEBSITE", url="https://alatheesh.github.io/NTMONLINE", style="primary")]
     ])
 
 def about_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📝 Source Code", callback_data="ui_source"), InlineKeyboardButton("⚠️ Disclaimer", callback_data="ui_disclaimer")],
-        [InlineKeyboardButton("⚖️ DMCA", callback_data="ui_dmca"), InlineKeyboardButton("🔒 Privacy Policy", callback_data="ui_privacy")],
-        [InlineKeyboardButton("📞 Contact Admin", url="https://t.me/ntmadminbot")],
-        [InlineKeyboardButton("🔙 Back", callback_data="ui_back")]
+        [InlineKeyboardButton("📝 Source Code", callback_data="ui_source", style="primary"), InlineKeyboardButton("⚠️ Disclaimer", callback_data="ui_disclaimer", style="primary")],
+        [InlineKeyboardButton("⚖️ DMCA", callback_data="ui_dmca", style="primary"), InlineKeyboardButton("🔒 Privacy Policy", callback_data="ui_privacy", style="primary")],
+        [InlineKeyboardButton("📞 Contact Admin", url="https://t.me/ntmadminbot", style="primary")],
+        [InlineKeyboardButton("🔙 Back", callback_data="ui_back", style="danger")]
     ])
 
 def features_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚙️ Settings", callback_data="ui_settings_menu")],
-        [InlineKeyboardButton("🔙 Back", callback_data="ui_back")]
+        [InlineKeyboardButton("⚙️ Settings", callback_data="ui_settings_menu", style="primary")],
+        [InlineKeyboardButton("🔙 Back", callback_data="ui_back", style="danger")]
     ])
 
 def back_to_start_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔙 Back", callback_data="ui_back")]
+        [InlineKeyboardButton("🔙 Back", callback_data="ui_back", style="danger")]
     ])
 
 def back_to_about_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔙 Back", callback_data="ui_about")]
+        [InlineKeyboardButton("🔙 Back", callback_data="ui_about", style="danger")]
     ])
 
 
@@ -184,8 +184,8 @@ async def source_command_handler(client: Client, message: Message):
     await message.reply_text(
         text=SOURCE_TEXT, 
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📞 Contact Admin", url="https://t.me/ntmadminbot")],
-            [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back")]
+            [InlineKeyboardButton("📞 Contact Admin", url="https://t.me/ntmadminbot", style="primary")],
+            [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back", style="danger")]
         ])
     )
     raise StopPropagation
@@ -236,7 +236,6 @@ async def info_command_handler(client: Client, message: Message):
         info_text += f"\n📊 **ADMIN DATABASE STATS:**\n**Joined Date:** `{joined}`\n**Total Searches:** `{searches}`\n**Global Status:** `{p_type}`\n**Warnings:** `{warns}`"
         
     if user.photo:
-        # THE FIX: Iterate through the chat photos generator to get a valid PHOTO file_id
         async for photo in client.get_chat_photos(user.id, limit=1):
             await message.reply_photo(photo.file_id, caption=info_text)
             break
@@ -270,8 +269,8 @@ async def callback_ui_router(client: Client, callback: CallbackQuery):
         await callback.message.edit_text(
             text=SOURCE_TEXT, 
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📞 Contact Admin", url="https://t.me/ntmadminbot")],
-                [InlineKeyboardButton("🔙 Back", callback_data="ui_about")]
+                [InlineKeyboardButton("📞 Contact Admin", url="https://t.me/ntmadminbot", style="primary")],
+                [InlineKeyboardButton("🔙 Back", callback_data="ui_about", style="danger")]
             ])
         )
         
@@ -285,8 +284,8 @@ async def callback_ui_router(client: Client, callback: CallbackQuery):
         await callback.message.edit_text(
             text=DMCA_TEXT, 
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📞 Contact @ntmadminbot", url="https://t.me/ntmadminbot")],
-                [InlineKeyboardButton("🔙 Back", callback_data="ui_about")]
+                [InlineKeyboardButton("📞 Contact @ntmadminbot", url="https://t.me/ntmadminbot", style="primary")],
+                [InlineKeyboardButton("🔙 Back", callback_data="ui_about", style="danger")]
             ]),
             link_preview_options=LinkPreviewOptions(is_disabled=True)
         )
@@ -323,7 +322,7 @@ async def callback_ui_router(client: Client, callback: CallbackQuery):
             keyboard.append([InlineKeyboardButton("📊 System Stats Dashboard", callback_data="stats_home")])
             keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="set_home")])
             
-        keyboard.append([InlineKeyboardButton("🔙 Back to Features", callback_data="ui_features")])
+        keyboard.append([InlineKeyboardButton("🔙 Back to Features", callback_data="ui_features", style="danger")])
         
         settings_text = "🎛️ **Central Command Settings Hub:**\nSelect the access layer tier you wish to inspect or modify:"
         await callback.message.edit_text(text=settings_text, reply_markup=InlineKeyboardMarkup(keyboard))
