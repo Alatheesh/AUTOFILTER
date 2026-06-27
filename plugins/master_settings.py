@@ -446,7 +446,7 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
 # ==========================================
 # 👑 CREATOR & MODERATION CALLBACKS
 # ==========================================
-@Client.on_callback_query(filters.regex(r"^(set_home|set_inside|set_shortener|set_requests|set_autodelete|set_mod_|mod_|inside_|time_|toggle_)"))
+@Client.on_callback_query(filters.regex(r"^(set_home|set_inside|set_shortener|set_requests|set_autodelete|set_mod_|mod_|inside_|time_|toggle_|set_placements|toggle_place_)"))
 async def settings_callbacks(client: Client, callback: CallbackQuery):
     action = callback.data
     user_id = callback.from_user.id
@@ -547,14 +547,26 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         settings = await db.get_settings()
         status = "🟢 ON" if settings.get("inside_enabled", False) else "🔴 OFF"
         words, times, channels = settings.get("inside_words", []), settings.get("inside_times", 5), settings.get("inside_channels", [])
-        placement = settings.get("inside_placement", "movie").capitalize()
+        
+        # 🚀 Upgrade Legacy String to New List Format safely
+        legacy_p = settings.get("inside_placement", "movie")
+        placements = settings.get("inside_placements", [legacy_p] if isinstance(legacy_p, str) else ["movie"])
+        p_str = ", ".join([p.capitalize() for p in placements]) if placements else "None"
 
-        text = f"🕵️‍♂️ **Inside Task Settings**\n\n**Status:** {status}\n**Trigger Words:** `{', '.join(words) if words else 'None'}`\n**Pass Limit:** `{times} times/day`\n**Target Channels:** `{', '.join(channels) if channels else 'None'}`\n**Placement Module:** `{placement}`\n\nUse the buttons below to modify the task verification flow:"
+        text = (
+            f"🕵️‍♂️ **Inside Task Settings**\n\n"
+            f"**Status:** {status}\n"
+            f"**Trigger Words:** `{', '.join(words) if words else 'None Set'}`\n"
+            f"**Pass Limit:** `{times} times/day`\n"
+            f"**Target Channels:** `{', '.join(channels) if channels else 'None Set'}`\n"
+            f"**Active Placements:** `{p_str}`\n\n"
+            f"Use the buttons below to modify the task verification flow:"
+        )
         buttons = [
             [InlineKeyboardButton(f"Toggle Feature {'OFF' if 'ON' in status else 'ON'}", callback_data="inside_toggle")],
             [InlineKeyboardButton("📝 Edit Words", callback_data="inside_words"), InlineKeyboardButton("⏱ Edit Times", callback_data="inside_times")],
             [InlineKeyboardButton("📢 Edit Channels", callback_data="inside_channels")],
-            [InlineKeyboardButton(f"🔄 Placement: {placement}", callback_data="inside_placement")],
+            [InlineKeyboardButton("📍 Edit Placements", callback_data="set_placements")],
             [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="set_home")]
         ]
         await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
@@ -576,12 +588,40 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         ADMIN_STATE[user_id] = {"state": "setup_inside_channels", "msg_id": callback.message.id, "timestamp": time.time()}
         await callback.message.edit_text("✏️ **Send the Target Channel Usernames or IDs.**\nSeparate multiple with spaces.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_inside")]]))
 
-    elif action == "inside_placement":
+    # 🚀 NEW: Multi-Select Placements Menu
+    elif action == "set_placements":
         settings = await db.get_settings()
-        current_placement = settings.get("inside_placement", "movie")
-        nxt = "request" if current_placement == "movie" else "welcome" if current_placement == "request" else "movie"
-        await db.update_settings({"inside_placement": nxt})
-        callback.data = "set_inside"; await settings_callbacks(client, callback)
+        legacy_p = settings.get("inside_placement", "movie")
+        placements = settings.get("inside_placements", [legacy_p] if isinstance(legacy_p, str) else ["movie"])
+
+        m_status = "✅" if "movie" in placements else "❌"
+        w_status = "✅" if "welcome" in placements else "❌"
+
+        text = (
+            "📍 **Verification Placements**\n\n"
+            "Select where the verification lock should be enforced. You can enable multiple at the same time!"
+        )
+        buttons = [
+            [InlineKeyboardButton(f"{m_status} Movie Downloads", callback_data="toggle_place_movie")],
+            [InlineKeyboardButton(f"{w_status} Welcome Menu (/start)", callback_data="toggle_place_welcome")],
+            [InlineKeyboardButton("🔙 Back", callback_data="set_inside")]
+        ]
+        await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+    elif action.startswith("toggle_place_"):
+        place = action.split("_")[2] # "movie" or "welcome"
+        settings = await db.get_settings()
+        legacy_p = settings.get("inside_placement", "movie")
+        placements = settings.get("inside_placements", [legacy_p] if isinstance(legacy_p, str) else ["movie"])
+
+        if place in placements:
+            placements.remove(place)
+        else:
+            placements.append(place)
+
+        await db.update_settings({"inside_placements": placements})
+        callback.data = "set_placements"
+        await settings_callbacks(client, callback)
 
     elif action == "set_shortener":
         settings = await db.get_settings()
