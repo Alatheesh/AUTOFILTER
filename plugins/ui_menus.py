@@ -236,7 +236,10 @@ async def info_command_handler(client: Client, message: Message):
         info_text += f"\n📊 **ADMIN DATABASE STATS:**\n**Joined Date:** `{joined}`\n**Total Searches:** `{searches}`\n**Global Status:** `{p_type}`\n**Warnings:** `{warns}`"
         
     if user.photo:
-        await message.reply_photo(user.photo.big_file_id, caption=info_text)
+        # THE FIX: Iterate through the chat photos generator to get a valid PHOTO file_id
+        async for photo in client.get_chat_photos(user.id, limit=1):
+            await message.reply_photo(photo.file_id, caption=info_text)
+            break
     else:
         await message.reply_text(info_text, link_preview_options=LinkPreviewOptions(is_disabled=True))
     raise StopPropagation
