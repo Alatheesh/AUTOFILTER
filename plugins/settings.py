@@ -317,6 +317,10 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         if is_creator(user_id):
             keyboard.append([InlineKeyboardButton("📊 User Stats Dashboard", callback_data="ui_userstats")])
             keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="set_home")])
+            
+        # 🚀 THE FIX: This safely connects the fallback settings hub back to your UI features menu!
+        keyboard.append([InlineKeyboardButton("🔙 Back to Features", callback_data="ui_features")])
+        
         return await query.message.edit_text("🎛️ **Central Command Settings Hub**", reply_markup=InlineKeyboardMarkup(keyboard))
 
 # ==========================================
