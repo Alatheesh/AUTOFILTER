@@ -20,9 +20,6 @@ from plugins.moderation import SCRAPER_TRACKER
 
 logger = logging.getLogger(__name__)
 
-AD_SLOT_TEXT = "📢 Join Our VIP Channel [Ads Free]!"
-AD_SLOT_URL = "https://t.me/premium_channel"
-
 MB = 1024 * 1024
 GB = 1024 * MB
 
@@ -279,7 +276,8 @@ async def auto_filter(client: Client, message: Message):
         if shortener_on: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
         else: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{db_id}")])
     
-    buttons.append([InlineKeyboardButton(text=AD_SLOT_TEXT, url=AD_SLOT_URL)])
+    # 🚀 Replace old ad button with "Help Us"
+    buttons.append([InlineKeyboardButton(text="🤝 Help Us!", callback_data="help_us_menu")])
     
     if len(filtered_results) > 10:
         total_pages = math.ceil(len(filtered_results) / 10)
@@ -372,7 +370,9 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
         if shortener_on: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
         else: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{db_id}")])
     
-    buttons.append([InlineKeyboardButton(text=AD_SLOT_TEXT, url=AD_SLOT_URL)])
+    # 🚀 Replace old ad button with "Help Us"
+    buttons.append([InlineKeyboardButton(text="🤝 Help Us!", callback_data="help_us_menu")])
+    
     total_pages = math.ceil(len(filtered_results) / 10)
     nav_buttons = []
     if page > 0: nav_buttons.append(InlineKeyboardButton(text="◀️ Prev", callback_data=f"prev_{page - 1}_{base_query}"))
