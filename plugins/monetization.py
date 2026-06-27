@@ -210,7 +210,7 @@ async def deep_link_start(client: Client, message: Message):
                     if del_enabled: v_req_text += f"\n\n⏳ *Note: This message will automatically delete in {del_time} minutes.*"
 
                     req_msg = await message.reply_text(
-                        v_req_text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Verify Access", url=short_link)]])
+                        v_req_text, link_preview_options=LinkPreviewOptions(is_disabled=True), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Verify Access", url=short_link)]])
                     )
 
                     if del_enabled:
