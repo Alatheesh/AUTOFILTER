@@ -8,6 +8,7 @@ from database.multi_db import db
 from config import Config
 
 SPAM_TRACKER = {}
+SCRAPER_TRACKER = {}
 
 async def is_group_admin(client, chat_id, user_id):
     if user_id in Config.ADMINS: return True
