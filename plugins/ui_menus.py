@@ -6,6 +6,59 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, 
 from database.multi_db import db
 from plugins.moderation import log_to_channel
 
+# --- TEXT VARIABLES ---
+START_TEXT = """👋 **Welcome to the Cloud Auto-Filter Bot!**
+
+I am a highly-optimized Telegram repository search system. I help you instantly find movies, files, and data by indexing available public channels.
+
+✨ Use the interactive buttons below to explore my built-in commands and specifications:"""
+
+ABOUT_TEXT = """🤖 **Bot Name:** Cloud Auto-Filter Bot
+🧑‍💻 **Creator:** [LATHEESH](https://t.me/LATHEESH)
+⚙️ **Engine:** Pyrogram (Python)
+📊 **Status:** Active & Running
+
+Choose an option below to view more details about the bot's policies and source:"""
+
+FEATURES_TEXT = """✨ **Bot Features:**
+
+• Use `/history` to view your past searches.
+• Instant inline file retrieval and matching.
+• Deeply customizable settings based on user admin rights.
+
+Click below to configure your user or group settings:"""
+
+HELP_TEXT = """🛠 **How to Use This Bot:**
+
+**1.** Add me to your group using the button on the main menu.
+**2.** Make me an admin so I can read messages.
+**3.** Simply type the name of the movie or file you want in the chat.
+**4.** I will automatically reply with the matching files!
+
+Use `/settings` directly in the chat to adjust filters."""
+
+SOURCE_TEXT = """🔒 **Source Code Status:**
+
+This bot's source code is strictly **private** and will not be published publicly. 
+
+If you have business inquiries or require a custom bot, please contact the admin."""
+
+DISCLAIMER_TEXT = """⚠️ **Disclaimer:**
+
+This bot only indexes data that is publicly uploaded on Telegram by other users. 
+
+The creator of this bot has **not** uploaded any of the files provided in the search results and holds no responsibility for user-generated content."""
+
+DMCA_TEXT = """⚖️ **DMCA & Takedown Requests:**
+
+If you are a copyright owner and wish to place a request to remove a specific file or link from our database, please contact our admin directly.
+
+**Contact:** [@ntmadminbot](https://t.me/ntmadminbot)"""
+
+PRIVACY_TEXT = """🔒 **Privacy Policy:**
+
+We respect your privacy. This bot only collects basic usage statistics to optimize search performance. We do not store sensitive personal information or private messages."""
+
 # --- STICKER & MEDIA PACKS ---
 START_STICKERS = [
     "CAACAgUAAxkBAAERawdqNXyW6Tqft1iZtgABiTVGhBohxgIAApwAA8iUZBRzjwAB89rFhfw8BA",
@@ -29,11 +82,39 @@ START_BANNER_IMAGES = [
     "https://telegra.ph/file/90ea7771a7c61e2d45d72.jpg"
 ]
 
-def get_start_markup() -> InlineKeyboardMarkup:
+# --- KEYBOARD MARKUPS ---
+def get_start_markup(bot_username: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛠 Help", callback_data="ui_help"), InlineKeyboardButton("ℹ️ About", callback_data="ui_about")],
-        [InlineKeyboardButton("👨‍💻 Source", callback_data="ui_source"), InlineKeyboardButton("✨ Features", callback_data="ui_features")]
+        [InlineKeyboardButton("➕ ADD ME IN YOUR GROUP", url=f"http://t.me/{bot_username}?startgroup=true")],
+        [InlineKeyboardButton("📊 MY STATS", callback_data="ui_stats"), InlineKeyboardButton("✨ FEATURES", callback_data="ui_features")],
+        [InlineKeyboardButton("ℹ️ ABOUT", callback_data="ui_about"), InlineKeyboardButton("🛠 HELP", callback_data="ui_help")],
+        [InlineKeyboardButton("🌐 VISIT OUR WEBSITE", url="https://alatheesh.github.io/NTMONLINE")]
     ])
+
+def about_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📝 Source Code", callback_data="ui_source"), InlineKeyboardButton("⚠️ Disclaimer", callback_data="ui_disclaimer")],
+        [InlineKeyboardButton("⚖️ DMCA", callback_data="ui_dmca"), InlineKeyboardButton("🔒 Privacy Policy", callback_data="ui_privacy")],
+        [InlineKeyboardButton("📞 Contact Admin", url="https://t.me/ntmadminbot")],
+        [InlineKeyboardButton("🔙 Back", callback_data="ui_back")]
+    ])
+
+def features_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚙️ Settings", callback_data="ui_settings_menu")],
+        [InlineKeyboardButton("🔙 Back", callback_data="ui_back")]
+    ])
+
+def back_to_start_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 Back", callback_data="ui_back")]
+    ])
+
+def back_to_about_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 Back", callback_data="ui_about")]
+    ])
+
 
 # ==========================================
 # 📢 USER COMMAND HANDLERS
@@ -61,12 +142,11 @@ async def start_menu_handler(client: Client, message: Message):
         await loading_msg.delete()
     except Exception: pass
         
-    hr = datetime.datetime.now().hour
-    greeting = "🌅 Good Morning" if 5 <= hr < 12 else "☀️ Good Afternoon" if 12 <= hr < 17 else "🌆 Good Evening" if 17 <= hr < 21 else "🌃 Good Night"
-    welcome_text = f"**{greeting}, {message.from_user.first_name}!**\n\nWelcome to the **Cloud Auto-Filter Bot**.\n\n✨ **Use the buttons below to explore my commands:**"
+    bot_me = await client.get_me()
+    bot_username = bot_me.username
     
-    try: await message.reply_photo(photo=random.choice(START_BANNER_IMAGES), caption=welcome_text, reply_markup=get_start_markup())
-    except Exception: await message.reply_text(text=welcome_text, reply_markup=get_start_markup())
+    try: await message.reply_photo(photo=random.choice(START_BANNER_IMAGES), caption=START_TEXT, reply_markup=get_start_markup(bot_username))
+    except Exception: await message.reply_text(text=START_TEXT, reply_markup=get_start_markup(bot_username))
     raise StopPropagation
 
 @Client.on_message(filters.command("help") & filters.private)
@@ -75,8 +155,7 @@ async def help_command_handler(client: Client, message: Message):
         loading_msg = await message.reply_sticker(random.choice(ROBO_STICKERS))
         await asyncio.sleep(2); await loading_msg.delete()
     except Exception: pass
-    help_text = "🛠 **How to Use the Auto-Filter Bot:**\n\n• **In Groups:** Just drop the title of any movie or document and I will automatically look it up.\n• **In DMs:** Send any text keyword (directly to my PM) to trigger the multi-DB file search instantly.\n• `/connect`: Link your group and become the Primary Connector.\n• `/plot <movie>`: Generates a beautiful AI-powered movie plot summary.\n• `/history`: Displays your 10 most recent searches.\n• `/settings`: Open the advanced configuration dashboard."
-    await message.reply_text(text=help_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back")]]))
+    await message.reply_text(text=HELP_TEXT, reply_markup=back_to_start_keyboard())
     raise StopPropagation
 
 @Client.on_message(filters.command("about") & filters.private)
@@ -85,8 +164,7 @@ async def about_command_handler(client: Client, message: Message):
         loading_msg = await message.reply_sticker(random.choice(ROBO_STICKERS))
         await asyncio.sleep(2); await loading_msg.delete()
     except Exception: pass
-    about_text = "ℹ️ **About This Bot:**\n\n• **Engine:** Advanced Asynchronous Pyrogram V2\n• **Core Framework:** Python 3.10 with `asyncio` parallel multi-shard pooling\n• **Database Backend:** Scalable multi-cluster MongoDB connection routing\n"
-    await message.reply_text(text=about_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back")]]))
+    await message.reply_text(text=ABOUT_TEXT, reply_markup=about_keyboard(), disable_web_page_preview=True)
     raise StopPropagation
 
 @Client.on_message(filters.command("source") & filters.private)
@@ -95,29 +173,70 @@ async def source_command_handler(client: Client, message: Message):
         loading_msg = await message.reply_sticker(random.choice(CODE_STICKERS))
         await asyncio.sleep(2); await loading_msg.delete()
     except Exception: pass
-    source_text = "👨‍💻 **Open Source Repository Details:**\n\nThis application is modularly crafted to separate route dispatchers, active sharding layers, and smart monetization tasks.\n\n• **Developer:** Google AI Studio Build Architect\n• **Credits:** Pyrogram & MongoDB Motor Driver"
-    await message.reply_text(text=source_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back")]]))
+    await message.reply_text(
+        text=SOURCE_TEXT, 
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📞 Contact Admin", url="https://t.me/ntmadminbot")],
+            [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back")]
+        ])
+    )
     raise StopPropagation
+
 
 # ==========================================
 # 🔘 UI BUTTON LISTENER
 # ==========================================
-@Client.on_callback_query(filters.regex(r"^ui_(help|about|source|features|back)$"))
+@Client.on_callback_query(filters.regex(r"^ui_"))
 async def callback_ui_router(client: Client, callback: CallbackQuery):
-    target = callback.data.split("_")[1]
+    target = callback.data.split("_", 1)[1]
+    
     if target == "back":
-        welcome_text = f"👋 **Welcome to the Cloud Auto-Filter Bot, {callback.from_user.username or 'User'}!**\n\nI am a highly-optimized, multi-sharded Telegram repository search system. Send me any movie or file query and I'll find it instantly across our high-performing MongoDB clusters.\n\n✨ **Use the interactive buttons below to explore my built-in commands/specifications:**"
-        await callback.message.edit_text(text=welcome_text, reply_markup=get_start_markup())
+        bot_username = client.me.username
+        await callback.message.edit_text(text=START_TEXT, reply_markup=get_start_markup(bot_username))
+        
     elif target == "help":
-        help_text = "🛠 **How to Use the Auto-Filter Bot:**\n\n• **In Groups:** Just drop the title of any movie or document and I will automatically look it up.\n• **In DMs:** Send any text keyword (directly to my PM) to trigger the multi-DB file search instantly.\n• `/connect`: Link your group and become the Primary Connector.\n• `/settings`: Open the advanced configuration dashboard."
-        await callback.message.edit_text(text=help_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ui_back")]]))
+        await callback.message.edit_text(text=HELP_TEXT, reply_markup=back_to_start_keyboard())
+        
     elif target == "about":
-        about_text = "ℹ️ **About This Bot:**\n\n• **Engine:** Advanced Asynchronous Pyrogram V2\n• **Core Framework:** Python 3.10 with `asyncio` parallel multi-shard pooling\n• **Database Backend:** Scalable multi-cluster MongoDB connection routing\n"
-        await callback.message.edit_text(text=about_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ui_back")]]))
+        await callback.message.edit_text(text=ABOUT_TEXT, reply_markup=about_keyboard(), disable_web_page_preview=True)
+        
     elif target == "source":
-        source_text = "👨‍💻 **Open Source Repository Details:**\n\nThis application is modularly crafted to separate route dispatchers, active sharding layers, and smart monetization tasks.\n\n• **Developer:** Google AI Studio Build Architect\n• **Credits:** Pyrogram & MongoDB Motor Driver"
-        await callback.message.edit_text(text=source_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ui_back")]]))
+        await callback.message.edit_text(
+            text=SOURCE_TEXT, 
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📞 Contact Admin", url="https://t.me/ntmadminbot")],
+                [InlineKeyboardButton("🔙 Back", callback_data="ui_about")]
+            ])
+        )
+        
     elif target == "features":
-        features_text = "✨ **Bot Feature Profile:**\n\n• **Dynamic UI:** 3-Tier Default vs Interactive Search Engine.\n• **Monetization Engine:** GPLinks shortener + double force subscription lock.\n• **Admin Dashboard:** Mass system-wide broadcasting."
-        await callback.message.edit_text(text=features_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ui_back")]]))
+        await callback.message.edit_text(text=FEATURES_TEXT, reply_markup=features_keyboard())
+        
+    elif target == "disclaimer":
+        await callback.message.edit_text(text=DISCLAIMER_TEXT, reply_markup=back_to_about_keyboard())
+        
+    elif target == "dmca":
+        await callback.message.edit_text(
+            text=DMCA_TEXT, 
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📞 Contact @ntmadminbot", url="https://t.me/ntmadminbot")],
+                [InlineKeyboardButton("🔙 Back", callback_data="ui_about")]
+            ]),
+            disable_web_page_preview=True
+        )
+        
+    elif target == "privacy":
+        await callback.message.edit_text(text=PRIVACY_TEXT, reply_markup=back_to_about_keyboard())
+        
+    elif target == "stats":
+        stats_text = "📊 **Your Bot Usage Stats:**\n\nRequests made: 0\nFiles retrieved: 0\n\n*(Connect to your DB logic here)*"
+        await callback.message.edit_text(text=stats_text, reply_markup=back_to_start_keyboard())
+        
+    elif target == "settings_menu":
+        settings_text = "⚙️ **Settings Panel:**\n\nConfigure your group or personal settings here."
+        await callback.message.edit_text(
+            text=settings_text, 
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="ui_features")]])
+        )
+        
     await callback.answer()
