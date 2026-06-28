@@ -18,10 +18,10 @@ MERCHANT_NAME = "NTM GATEWAY"     # Replace with your Name
 USER_STATES = {}
 
 # Ensure DB Collections exist (Motor/MongoDB)
-vip_users = db.db["vip_users"]
-vip_orders = db.db["vip_orders"]
-vip_coupons = db.db["vip_coupons"]
-vip_settings = db.db["vip_settings"]
+vip_users = db.vip_users
+vip_orders = db.vip_orders
+vip_coupons = db.vip_coupons
+vip_settings = db.vip_settings
 
 # Default Plans
 PLANS = {
