@@ -43,11 +43,12 @@ class MultiDB:
             self.punishments = self.clients[0][resolved_db_name]["punishments"]
             
             # 💎 VIP System Collections
-            self.vip_users = self.clients[0][resolved_db_name]["vip_users"]
-            self.vip_orders = self.clients[0][resolved_db_name]["vip_orders"]
-            self.vip_coupons = self.clients[0][resolved_db_name]["vip_coupons"]
-            self.vip_settings = self.clients[0][resolved_db_name]["vip_settings"]
-
+        self.vip_users = self.clients[0][resolved_db_name]["vip_users"]
+        self.vip_orders = self.clients[0][resolved_db_name]["vip_orders"]
+        self.vip_coupons = self.clients[0][resolved_db_name]["vip_coupons"]
+        self.vip_settings = self.clients[0][resolved_db_name]["vip_settings"]
+        self.vip_history = self.clients[0][resolved_db_name]["vip_history"]
+        
         # ==========================================
         # ⚙️ MULTI-SHARD CAPACITY CONSTANTS
         # ==========================================
