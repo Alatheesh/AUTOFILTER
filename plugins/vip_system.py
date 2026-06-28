@@ -2,19 +2,17 @@ import random
 import string
 import datetime
 import asyncio
-import logging
 from pyrogram import Client, filters, StopPropagation, ContinuePropagation
+from pyrogram.enums import ButtonStyle
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, LinkPreviewOptions
 from database.multi_db import db
 from config import Config
 
-logger = logging.getLogger(__name__)
-
 # ==========================================
 # ⚙️ VIP SYSTEM CONFIGURATION
 # ==========================================
-UPI_ID = "6303579515@ibl"      # Your UPI ID
-MERCHANT_NAME = "NTM GATEWAY"     # Your Name
+UPI_ID = "6303579515@ibl"      # Replace with your UPI ID
+MERCHANT_NAME = "NTM GATEWAY"     # Replace with your Name
 
 # Temporary State Storage for waiting inputs (UTR/Screenshots)
 USER_STATES = {}
@@ -99,7 +97,7 @@ async def apply_new_user_trial(user_id):
 @Client.on_message(filters.command("buyvip"), group=-1)
 async def buy_vip_command(client, message):
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"{p['name']} - ₹{p['price']} ({p['days']} Days)", callback_data=f"vip_buy_{k}")] for k, p in PLANS.items()
+        [InlineKeyboardButton(f"{p['name']} - ₹{p['price']} ({p['days']} Days)", callback_data=f"vip_buy_{k}", style=ButtonStyle.PRIMARY)] for k, p in PLANS.items()
     ])
     await message.reply("💎 **Choose a VIP Membership Plan:**", reply_markup=markup)
     raise StopPropagation
@@ -130,9 +128,10 @@ async def vip_buy_callback(client, callback: CallbackQuery):
     encoded_upi = urllib.parse.quote(upi_url)
     qr_link = f"https://api.qrserver.com/v1/create-qr-code/?size=400x400&data={encoded_upi}"
     
+    # We only keep the Callback buttons (No URL buttons)
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ I have Paid", callback_data=f"vip_paid_{order_id}")],
-        [InlineKeyboardButton("❌ Cancel Order", callback_data=f"vip_cancel_{order_id}")]
+        [InlineKeyboardButton("✅ I have Paid", callback_data=f"vip_paid_{order_id}", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton("❌ Cancel Order", callback_data=f"vip_cancel_{order_id}", style=ButtonStyle.DANGER)]
     ])
     
     text = (
@@ -145,6 +144,7 @@ async def vip_buy_callback(client, callback: CallbackQuery):
         f"⚠️ *Important: After sending exactly ₹{plan['price']} to the UPI ID above, you MUST click '✅ I have Paid' below.*"
     )
     
+    # The LinkPreviewOptions will force Telegram to load the QR code image directly in the chat!
     await callback.message.edit_text(
         text, 
         reply_markup=markup, 
@@ -162,8 +162,8 @@ async def vip_paid_callback(client, callback: CallbackQuery):
     time_diff = datetime.datetime.now() - order["created_at"]
     if time_diff.total_seconds() > 1800 and order["status"] == "Created":
         markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Yes, I Already Paid", callback_data=f"vip_recover_{order_id}")],
-            [InlineKeyboardButton("🔄 Create New Order", callback_data="vip_reorder")]
+            [InlineKeyboardButton("✅ Yes, I Already Paid", callback_data=f"vip_recover_{order_id}", style=ButtonStyle.SUCCESS)],
+            [InlineKeyboardButton("🔄 Create New Order", callback_data="vip_reorder", style=ButtonStyle.PRIMARY)]
         ])
         return await callback.message.edit_text("⚠️ **Your order has expired.**\n\nDid you already complete the payment for this order?", reply_markup=markup)
 
@@ -177,14 +177,15 @@ async def vip_recover_callback(client, callback: CallbackQuery):
     await callback.message.edit_text("🔄 **PAYMENT RECOVERY**\n\n📝 Please send the 12-Digit UPI Reference Number (UTR) or a Screenshot of the payment. Our admin will manually verify it.")
 
 # ==========================================
-# 📸 CATCH UTR / SCREENSHOTS (Safely Passes Movies)
+# 📸 CATCH UTR / SCREENSHOTS (Absolute Priority)
 # ==========================================
-@Client.on_message(filters.private & ~filters.command(["start", "help"]), group=-1)
-async def catch_payment_proof(client, message):
+@Client.on_message(filters.private, group=-1)
+async def catch_payment_proof(client, message: Message):
+    # Completely ignore commands so they don't break propagation
+    if message.text and message.text.startswith("/"):
+        raise ContinuePropagation
+
     state = USER_STATES.get(message.from_user.id)
-    
-    # If the user is NOT actively in the middle of a purchase, 
-    # immediately pass the text down to the search engine!
     if not state or state.get("action") != "wait_utr":
         raise ContinuePropagation
         
@@ -215,8 +216,8 @@ async def catch_payment_proof(client, message):
         f"🧾 UTR: `{utr}`"
     )
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Approve", callback_data=f"vip_approve_{order_id}"),
-         InlineKeyboardButton("❌ Reject", callback_data=f"vip_reject_{order_id}")]
+        [InlineKeyboardButton("✅ Approve", callback_data=f"vip_approve_{order_id}", style=ButtonStyle.SUCCESS),
+         InlineKeyboardButton("❌ Reject", callback_data=f"vip_reject_{order_id}", style=ButtonStyle.DANGER)]
     ])
     
     if message.photo:
@@ -242,15 +243,16 @@ async def admin_approve(client, callback: CallbackQuery):
     plan = PLANS[order["plan"]]
     await add_vip(order["user_id"], plan["name"], plan["days"], method="UPI", order_id=order_id)
     
-    await callback.message.edit_reply_markup(InlineKeyboardMarkup([[InlineKeyboardButton("✅ APPROVED", callback_data="noop")]]))
+    await callback.message.edit_reply_markup(InlineKeyboardMarkup([[InlineKeyboardButton("✅ APPROVED", callback_data="noop", style=ButtonStyle.SUCCESS)]]))
     await client.send_message(order["user_id"], f"🎉 **Payment Approved!**\n\nYour {plan['name']} VIP Membership is now Active! Thank you for your support.")
 
 @Client.on_callback_query(filters.regex(r"^vip_reject_") & filters.user(Config.ADMINS))
 async def admin_reject(client, callback: CallbackQuery):
     order_id = callback.data.split("_")[2]
+    order = await vip_orders.find_one({"order_id": order_id})
     
     await vip_orders.update_one({"order_id": order_id}, {"$set": {"status": "Rejected"}})
-    await callback.message.edit_reply_markup(InlineKeyboardMarkup([[InlineKeyboardButton("❌ REJECTED", callback_data="noop")]]))
+    await callback.message.edit_reply_markup(InlineKeyboardMarkup([[InlineKeyboardButton("❌ REJECTED", callback_data="noop", style=ButtonStyle.DANGER)]]))
     await client.send_message(order["user_id"], f"❌ **Payment Rejected**\n\nYour payment for Order `{order_id}` could not be verified. Please contact admin if this is a mistake.")
 
 # ==========================================
