@@ -156,8 +156,7 @@ def build_safe_webapp_url(client_username, short_id, data_url):
     bot_username = client_username or "Bot"
     return f"{base_link}?bot={bot_username}&id={short_id}&url={safe_url}"
 
-# 🚀 THE FIX: Added VIP commands to the ignore list
-@Client.on_message((filters.group | filters.private) & filters.text & ~filters.command(["start", "help", "about", "source", "settings", "request", "plot", "history", "clear_history", "broadcast", "stats", "userstats", "backup", "admin", "index", "batch", "migrate_db", "clear_job", "optimize_db", "connect", "disconnect", "setshort", "warn", "mute", "ban", "unwarn", "unmute", "unban", "id", "info", "buyvip", "checkvip", "addvip", "setviptrial", "listvip", "freevip"]))
+@Client.on_message((filters.group | filters.private) & filters.text & ~filters.regex(r"^/"))
 async def auto_filter(client: Client, message: Message):
     query = message.text.strip()
     if len(query) < 3: return
