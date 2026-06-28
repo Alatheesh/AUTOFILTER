@@ -17,7 +17,7 @@ MERCHANT_NAME = "NTM GATEWAY"     # Replace with your Name
 # Temporary State Storage for waiting inputs (UTR/Screenshots)
 USER_STATES = {}
 
-# Ensure DB Collections exist (Motor/MongoDB)
+# Use the properly routed collections from multi_db.py
 vip_users = db.vip_users
 vip_orders = db.vip_orders
 vip_coupons = db.vip_coupons
@@ -53,7 +53,6 @@ async def add_vip(user_id, plan_name, days, method="Admin", gifted_by=None, orde
         "gifted_by": gifted_by
     }
     
-    # Check if exists to increment renewals instead of overwriting joined date
     existing = await vip_users.find_one({"user_id": user_id})
     if existing:
         new_expiry = max(existing["expiry"], datetime.datetime.now()) + datetime.timedelta(days=days)
@@ -76,7 +75,7 @@ async def check_vip_status(user_id):
 # ==========================================
 # 🎁 NEW USER TRIAL VIP FEATURE
 # ==========================================
-@Client.on_message(filters.command("setviptrial") & filters.user(Config.ADMINS))
+@Client.on_message(filters.command("setviptrial") & filters.user(Config.ADMINS), group=-1)
 async def set_vip_trial(client, message):
     if len(message.command) != 2:
         return await message.reply("Usage: `/setviptrial <days>` (Use 0 to disable)")
@@ -84,6 +83,7 @@ async def set_vip_trial(client, message):
     days = int(message.command[1])
     await vip_settings.update_one({"_id": "trial_settings"}, {"$set": {"days": days}}, upsert=True)
     await message.reply(f"✅ **New users will now automatically get {days} days of VIP.**")
+    raise StopPropagation
 
 async def apply_new_user_trial(user_id):
     setting = await vip_settings.find_one({"_id": "trial_settings"})
@@ -94,12 +94,13 @@ async def apply_new_user_trial(user_id):
 # ==========================================
 # 💳 PAYMENT & PURCHASE FLOW (USERS)
 # ==========================================
-@Client.on_message(filters.command("buyvip"))
+@Client.on_message(filters.command("buyvip"), group=-1)
 async def buy_vip_command(client, message):
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton(f"{p['name']} - ₹{p['price']} ({p['days']} Days)", callback_data=f"vip_buy_{k}", style=ButtonStyle.PRIMARY)] for k, p in PLANS.items()
     ])
     await message.reply("💎 **Choose a VIP Membership Plan:**", reply_markup=markup)
+    raise StopPropagation
 
 @Client.on_callback_query(filters.regex(r"^vip_buy_"))
 async def vip_buy_callback(client, callback: CallbackQuery):
@@ -107,7 +108,6 @@ async def vip_buy_callback(client, callback: CallbackQuery):
     plan = PLANS[plan_key]
     order_id = generate_order_id(plan_key)
     
-    # Create Order Session
     await vip_orders.insert_one({
         "order_id": order_id,
         "user_id": callback.from_user.id,
@@ -117,7 +117,6 @@ async def vip_buy_callback(client, callback: CallbackQuery):
         "created_at": datetime.datetime.now(),
     })
     
-    # Generate UPI Deep Links
     note = f"VIP-{callback.from_user.id}"
     upi_url = f"upi://pay?pa={UPI_ID}&pn={MERCHANT_NAME}&am={plan['price']}&tr={order_id}&cu=INR&tn={note}"
     
@@ -125,7 +124,7 @@ async def vip_buy_callback(client, callback: CallbackQuery):
         [InlineKeyboardButton("📱 Pay via PhonePe", url=upi_url.replace("upi://", "phonepe://"), style=ButtonStyle.PRIMARY),
          InlineKeyboardButton("📱 Pay via GPay", url=upi_url.replace("upi://", "tez://"), style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton("📱 Pay via Paytm", url=upi_url.replace("upi://", "paytmmp://"), style=ButtonStyle.PRIMARY),
-         InlineKeyboardButton("📱 Other UPI Apps", url=upi_url, style=ButtonStyle.PRIMARY)],
+         InlineKeyboardButton("📱 Other Apps", url=upi_url, style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton("✅ I have Paid", callback_data=f"vip_paid_{order_id}", style=ButtonStyle.SUCCESS)],
         [InlineKeyboardButton("❌ Cancel Order", callback_data=f"vip_cancel_{order_id}", style=ButtonStyle.DANGER)]
     ])
@@ -142,12 +141,11 @@ async def vip_buy_callback(client, callback: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^vip_paid_"))
 async def vip_paid_callback(client, callback: CallbackQuery):
     order_id = callback.data.split("_")[2]
-    
     order = await vip_orders.find_one({"order_id": order_id})
+    
     if not order:
         return await callback.answer("Order not found!", show_alert=True)
         
-    # Expiry Check (30 mins)
     time_diff = datetime.datetime.now() - order["created_at"]
     if time_diff.total_seconds() > 1800 and order["status"] == "Created":
         markup = InlineKeyboardMarkup([
@@ -156,7 +154,6 @@ async def vip_paid_callback(client, callback: CallbackQuery):
         ])
         return await callback.message.edit_text("⚠️ **Your order has expired.**\n\nDid you already complete the payment for this order?", reply_markup=markup)
 
-    # Move to waiting state
     USER_STATES[callback.from_user.id] = {"action": "wait_utr", "order_id": order_id}
     await callback.message.edit_text("📝 **Please send the 12-Digit UPI Reference Number (UTR) or a Screenshot of the payment.**")
 
@@ -167,9 +164,9 @@ async def vip_recover_callback(client, callback: CallbackQuery):
     await callback.message.edit_text("🔄 **PAYMENT RECOVERY**\n\n📝 Please send the 12-Digit UPI Reference Number (UTR) or a Screenshot of the payment. Our admin will manually verify it.")
 
 # ==========================================
-# 📸 CATCH UTR / SCREENSHOTS
+# 📸 CATCH UTR / SCREENSHOTS (Absolute Priority)
 # ==========================================
-@Client.on_message(filters.private & ~filters.command(["start", "help"]))
+@Client.on_message(filters.private & ~filters.command(["start", "help"]), group=-1)
 async def catch_payment_proof(client, message):
     state = USER_STATES.get(message.from_user.id)
     if not state or state.get("action") != "wait_utr":
@@ -177,27 +174,22 @@ async def catch_payment_proof(client, message):
         
     order_id = state["order_id"]
     order = await vip_orders.find_one({"order_id": order_id})
-    
     utr = message.text if message.text else "Screenshot Provided"
     
-    # Duplicate UTR Protection
     if message.text:
         dup = await vip_orders.find_one({"utr": message.text})
         if dup:
-            return await message.reply("❌ **This Reference Number has already been used.** If you believe this is an error, contact admin.")
+            await message.reply("❌ **This Reference Number has already been used.** If you believe this is an error, contact admin.")
+            raise StopPropagation
 
-    # Update DB
     await vip_orders.update_one(
         {"order_id": order_id},
         {"$set": {"status": "Under Review", "utr": utr, "submitted_at": datetime.datetime.now()}}
     )
     
-    # Clear state
     del USER_STATES[message.from_user.id]
-    
     await message.reply("✅ **Payment Proof Submitted!**\n\nYour order is now under review. You will receive a notification once the admin approves it.")
     
-    # Send to Admin
     admin_text = (
         f"🚨 **NEW PAYMENT SUBMISSION**\n\n"
         f"👤 User: {message.from_user.mention} (`{message.from_user.id}`)\n"
@@ -235,8 +227,6 @@ async def admin_approve(client, callback: CallbackQuery):
     await add_vip(order["user_id"], plan["name"], plan["days"], method="UPI", order_id=order_id)
     
     await callback.message.edit_reply_markup(InlineKeyboardMarkup([[InlineKeyboardButton("✅ APPROVED", callback_data="noop", style=ButtonStyle.SUCCESS)]]))
-    
-    # Notify User
     await client.send_message(order["user_id"], f"🎉 **Payment Approved!**\n\nYour {plan['name']} VIP Membership is now Active! Thank you for your support.")
 
 @Client.on_callback_query(filters.regex(r"^vip_reject_") & filters.user(Config.ADMINS))
@@ -251,9 +241,8 @@ async def admin_reject(client, callback: CallbackQuery):
 # ==========================================
 # 🛠️ ADMIN VIP COMMANDS
 # ==========================================
-@Client.on_message(filters.command("addvip") & filters.user(Config.ADMINS))
+@Client.on_message(filters.command("addvip") & filters.user(Config.ADMINS), group=-1)
 async def admin_add_vip(client, message):
-    # Syntax: /addvip 12345 Gold 30d
     args = message.text.split()
     if len(args) < 4:
         return await message.reply("Usage: `/addvip <user_id> <Plan> <days>d`")
@@ -264,8 +253,9 @@ async def admin_add_vip(client, message):
     
     await add_vip(user_id, plan, days, method="Admin Added")
     await message.reply(f"✅ Added {days} days of {plan} VIP to `{user_id}`.")
+    raise StopPropagation
 
-@Client.on_message(filters.command("checkvip"))
+@Client.on_message(filters.command("checkvip"), group=-1)
 async def check_vip_cmd(client, message):
     target = message.from_user.id
     if len(message.command) > 1 and message.from_user.id in Config.ADMINS:
@@ -273,7 +263,8 @@ async def check_vip_cmd(client, message):
         
     is_vip, user = await check_vip_status(target)
     if not is_vip:
-        return await message.reply("❌ **No Active VIP Membership.**\nUse /buyvip to get one!")
+        await message.reply("❌ **No Active VIP Membership.**\nUse /buyvip to get one!")
+        raise StopPropagation
         
     rem = user['expiry'] - datetime.datetime.now()
     text = (
@@ -287,5 +278,14 @@ async def check_vip_cmd(client, message):
         f"💳 **Method:** {user['payment_method']}"
     )
     await message.reply(text)
+    raise StopPropagation
 
-# (Additional admin commands like /removevip, /coupons, /createcoupon can be expanded here using the exact same Motor logic!)
+@Client.on_message(filters.command("listvip") & filters.user(Config.ADMINS), group=-1)
+async def list_vip_placeholder(client, message):
+    await message.reply("⚙️ **VIP List Module is under construction.**")
+    raise StopPropagation
+
+@Client.on_message(filters.command("freevip") & filters.user(Config.ADMINS), group=-1)
+async def free_vip_placeholder(client, message):
+    await message.reply("⚙️ **Free VIP / Promo Wizard is under construction.**")
+    raise StopPropagation
