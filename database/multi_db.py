@@ -38,7 +38,6 @@ class MultiDB:
             self.broadcast_logs = self.clients[0][resolved_db_name]["broadcast_logs"]
             self.scheduled_broadcasts = self.clients[0][resolved_db_name]["scheduled_broadcasts"]
             self.batch_stats = self.clients[0][resolved_db_name]["batch_stats"]  
-            self.vip_subscriptions = self.clients[0][resolved_db_name]["vip_subscriptions"]
             
             # 🛡️ Centralized Moderation Database
             self.punishments = self.clients[0][resolved_db_name]["punishments"]
@@ -52,7 +51,7 @@ class MultiDB:
             self.vip_recovery = self.clients[0][resolved_db_name]["vip_recovery"]
             self.vip_plans = self.clients[0][resolved_db_name]["vip_plans"]
             self.vip_subscriptions = self.clients[0][resolved_db_name]["vip_subscriptions"]
-        
+            self.vip_features = self.clients[0][resolved_db_name]["vip_features"]
         # ==========================================
         # ⚙️ MULTI-SHARD CAPACITY CONSTANTS
         # ==========================================
