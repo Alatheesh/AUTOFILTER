@@ -370,14 +370,38 @@ async def list_coupons_analytics(client, message):
 @Client.on_message(filters.command("createcoupon") & filters.user(Config.ADMINS), group=-1)
 async def admin_create_coupons(client, message: Message):
     args = message.text.split()
+    
+    # 📖 The new detailed Help & Tutorial Menu!
     if len(args) < 6: 
-        return await message.reply("⚠️ **Usage:** `/createcoupon <plan_key> <prefix> <quantity> <max_uses> <expiry_days>`\nExample: `/createcoupon gold GLD 10 1 30`")
+        help_text = (
+            "⚠️ **Create Coupon Wizard** ⚠️\n"
+            "`/createcoupon <Plan> <Prefix> <Qty> <Max_Uses> <Expiry_Days>`\n\n"
+            "📖 **Parameter Breakdown:**\n"
+            "• **Plan**: The VIP tier to give (`bronze`, `silver`, `gold`, `lifetime`).\n"
+            "• **Prefix**: Custom starting letters (e.g., `GLD` becomes `GLD-X92KA`).\n"
+            "• **Qty**: How many unique codes to generate (e.g., `10`).\n"
+            "• **Max_Uses**: How many times *each* code can be claimed (usually `1`).\n"
+            "• **Expiry_Days**: Days until these unused codes expire (e.g., `30`).\n\n"
+            "💡 **Example Command:**\n"
+            "`/createcoupon gold GLD 10 1 30`\n"
+            "_(Generates 10 Gold coupons, starting with GLD, 1 use each, expiring in 30 days)_"
+        )
+        return await message.reply(help_text)
     
     plan_target = args[1].lower()
     prefix = args[2].upper()
-    qty = int(args[3])
-    max_uses = int(args[4])
-    exp_days = int(args[5])
+    
+    # Safely convert to integers
+    try:
+        qty = int(args[3])
+        max_uses = int(args[4])
+        exp_days = int(args[5])
+    except ValueError:
+        return await message.reply("❌ **Error:** Quantity, Max Uses, and Expiry Days must be numbers.")
+
+    if qty <= 0:
+        return await message.reply("❌ **Error:** You must generate at least 1 coupon.")
+
     expiry = datetime.datetime.now() + datetime.timedelta(days=exp_days)
     
     generated = []
@@ -389,11 +413,20 @@ async def admin_create_coupons(client, message: Message):
         })
         generated.append(token)
         
-    with open("coupons.txt", "w") as f: f.write("\n".join(generated))
-    await message.reply_document("coupons.txt", caption=f"🎟️ Generated `{qty}` coupons for `{plan_target}`.\nUses per coupon: `{max_uses}`\nExpires in: `{exp_days}` days.")
-    import os
-    try: os.remove("coupons.txt")
-    except: pass
+    # 🚀 THE FIX: Use an in-memory buffer instead of a physical disk file
+    import io
+    file_content = "\n".join(generated).encode('utf-8')
+    file_buffer = io.BytesIO(file_content)
+    file_buffer.name = f"{prefix}_Coupons.txt"
+    
+    await message.reply_document(
+        document=file_buffer, 
+        caption=f"🎟️ **Batch Generation Complete!**\n\n"
+                f"📦 **Target Plan:** `{plan_target.capitalize()}`\n"
+                f"🔢 **Coupons Generated:** `{qty}`\n"
+                f"♻️ **Uses per code:** `{max_uses}`\n"
+                f"⏳ **Codes expire in:** `{exp_days}` days."
+    )
     raise StopPropagation
 
 @Client.on_message(filters.command("deletecoupon") & filters.user(Config.ADMINS), group=-1)
