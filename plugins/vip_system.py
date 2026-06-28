@@ -104,10 +104,14 @@ async def buy_vip_command(client, message):
 
 @Client.on_callback_query(filters.regex(r"^vip_buy_"))
 async def vip_buy_callback(client, callback: CallbackQuery):
+    import urllib.parse
+    from pyrogram.types import LinkPreviewOptions
+    
     plan_key = callback.data.split("_")[2]
     plan = PLANS[plan_key]
     order_id = generate_order_id(plan_key)
     
+    # Create Order Session
     await vip_orders.insert_one({
         "order_id": order_id,
         "user_id": callback.from_user.id,
@@ -117,14 +121,16 @@ async def vip_buy_callback(client, callback: CallbackQuery):
         "created_at": datetime.datetime.now(),
     })
     
+    # Generate UPI Deep Link
     note = f"VIP-{callback.from_user.id}"
     upi_url = f"upi://pay?pa={UPI_ID}&pn={MERCHANT_NAME}&am={plan['price']}&tr={order_id}&cu=INR&tn={note}"
     
+    # Generate a Live QR Code for the UPI Link
+    encoded_upi = urllib.parse.quote(upi_url)
+    qr_link = f"https://api.qrserver.com/v1/create-qr-code/?size=400x400&data={encoded_upi}"
+    
+    # We only keep the Callback buttons (No URL buttons)
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📱 Pay via PhonePe", url=upi_url.replace("upi://", "phonepe://"), style=ButtonStyle.PRIMARY),
-         InlineKeyboardButton("📱 Pay via GPay", url=upi_url.replace("upi://", "tez://"), style=ButtonStyle.PRIMARY)],
-        [InlineKeyboardButton("📱 Pay via Paytm", url=upi_url.replace("upi://", "paytmmp://"), style=ButtonStyle.PRIMARY),
-         InlineKeyboardButton("📱 Other Apps", url=upi_url, style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton("✅ I have Paid", callback_data=f"vip_paid_{order_id}", style=ButtonStyle.SUCCESS)],
         [InlineKeyboardButton("❌ Cancel Order", callback_data=f"vip_cancel_{order_id}", style=ButtonStyle.DANGER)]
     ])
@@ -133,10 +139,18 @@ async def vip_buy_callback(client, callback: CallbackQuery):
         f"💳 **Order ID:** `{order_id}`\n"
         f"📦 **Plan:** {plan['name']}\n"
         f"💵 **Amount:** ₹{plan['price']}\n\n"
-        f"**UPI ID:** `{UPI_ID}`\n\n"
-        f"⚠️ *Important: After completing the payment, you MUST click '✅ I have Paid' below.*"
+        f"**🏦 PAYMENT OPTIONS:**\n\n"
+        f"1️⃣ **Tap to Copy UPI ID:**\n`{UPI_ID}`\n\n"
+        f"2️⃣ **Scan QR Code:**\n[Click Here to view QR Code]({qr_link})\n\n"
+        f"⚠️ *Important: After sending exactly ₹{plan['price']} to the UPI ID above, you MUST click '✅ I have Paid' below.*"
     )
-    await callback.message.edit_text(text, reply_markup=markup)
+    
+    # The LinkPreviewOptions will force Telegram to load the QR code image directly in the chat!
+    await callback.message.edit_text(
+        text, 
+        reply_markup=markup, 
+        link_preview_options=LinkPreviewOptions(is_disabled=False)
+    )
 
 @Client.on_callback_query(filters.regex(r"^vip_paid_"))
 async def vip_paid_callback(client, callback: CallbackQuery):
