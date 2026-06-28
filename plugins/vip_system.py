@@ -114,6 +114,23 @@ async def check_vip_status(user_id):
         return False, None
     return True, user
 
+async def parse_target_users(client, args_list):
+    targets = []
+    if not args_list: return targets
+    selector = args_list[0].lower()
+    if selector == "all":
+        async for u in client.db.users.find({}): targets.append(u["user_id"])
+    elif selector == "nonvip":
+        async for u in client.db.users.find({}):
+            is_vip, _ = await check_vip_status(u["user_id"])
+            if not is_vip: targets.append(u["user_id"])
+    elif selector == "vip":
+        async for u in vip_users.find({"status": "Active"}): targets.append(u["user_id"])
+    else:
+        for item in args_list:
+            if item.isdigit(): targets.append(int(item))
+    return list(set(targets))
+
 # ==========================================
 # ⏰ BACKGROUND AUTO-WORKERS (Reminders & Expirations)
 # ==========================================
@@ -148,7 +165,7 @@ async def vip_background_worker(client: Client):
                 except: pass
 
         except Exception as e: logger.error(f"VIP Background Worker Error: {e}")
-        await asyncio.sleep(300) # Check every 5 minutes
+        await asyncio.sleep(300)
 
 # ==========================================
 # 💳 PAYMENT & PURCHASE FLOW (STATE MACHINE)
@@ -280,8 +297,9 @@ async def admin_approve(client, callback: CallbackQuery):
     plans = await get_all_plans()
     plan = plans.get(order["plan"], DEFAULT_PLANS["bronze"])
     
-    # We pass the full user object so username/first_name can be extracted in add_vip
-    user_obj = await client.get_users(order["user_id"])
+    try: user_obj = await client.get_users(order["user_id"])
+    except: user_obj = order["user_id"]
+    
     await add_vip(user_obj, plan["name"], plan["days"], method="UPI", order_id=order_id, trx_id=order.get("utr"))
     
     await callback.message.edit_reply_markup(InlineKeyboardMarkup([[InlineKeyboardButton("✅ APPROVED", callback_data="noop")]]))
@@ -339,7 +357,7 @@ async def my_payments_cmd(client, message: Message):
     raise StopPropagation
 
 # ==========================================
-# 🛠️ MISSING COMMANDS (Coupons & Plans)
+# 🛠️ COUPONS, PLANS & ANALYTICS COMMANDS
 # ==========================================
 @Client.on_message(filters.command("coupons") & filters.user(Config.ADMINS), group=-1)
 async def list_coupons_analytics(client, message):
@@ -349,6 +367,59 @@ async def list_coupons_analytics(client, message):
     await message.reply(f"🎟️ **COUPON SYSTEM ANALYTICS**\n\n🟢 Active: `{active}`\n🔴 Used: `{used}`\n🕰️ Expired: `{expired}`")
     raise StopPropagation
 
+@Client.on_message(filters.command("createcoupon") & filters.user(Config.ADMINS), group=-1)
+async def admin_create_coupons(client, message: Message):
+    args = message.text.split()
+    if len(args) < 6: 
+        return await message.reply("⚠️ **Usage:** `/createcoupon <plan_key> <prefix> <quantity> <max_uses> <expiry_days>`\nExample: `/createcoupon gold GLD 10 1 30`")
+    
+    plan_target = args[1].lower()
+    prefix = args[2].upper()
+    qty = int(args[3])
+    max_uses = int(args[4])
+    exp_days = int(args[5])
+    expiry = datetime.datetime.now() + datetime.timedelta(days=exp_days)
+    
+    generated = []
+    for _ in range(qty):
+        token = f"{prefix}-" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+        await vip_coupons.insert_one({
+            "code": token, "plan_target": plan_target, "status": "Active", "created_at": datetime.datetime.now(),
+            "max_uses": max_uses, "remaining_uses": max_uses, "expiry": expiry, "created_by": message.from_user.id
+        })
+        generated.append(token)
+        
+    with open("coupons.txt", "w") as f: f.write("\n".join(generated))
+    await message.reply_document("coupons.txt", caption=f"🎟️ Generated `{qty}` coupons for `{plan_target}`.\nUses per coupon: `{max_uses}`\nExpires in: `{exp_days}` days.")
+    import os
+    try: os.remove("coupons.txt")
+    except: pass
+    raise StopPropagation
+
+@Client.on_message(filters.command("deletecoupon") & filters.user(Config.ADMINS), group=-1)
+async def delete_coupon_cmd(client, message):
+    if len(message.command) < 2: return await message.reply("⚠️ Syntax: `/deletecoupon <CODE>`")
+    await vip_coupons.delete_one({"code": message.command[1].upper()})
+    await message.reply("🗑️ Coupon Deleted.")
+    raise StopPropagation
+
+@Client.on_message(filters.command("plans") & filters.user(Config.ADMINS), group=-1)
+async def list_plans_cmd(client, message):
+    plans = await get_all_plans()
+    out = "📦 **Configured VIP Plans:**\n\n"
+    for k, p in plans.items(): out += f"• `{k}` : {p['name']} | ₹{p['price']} | {p['days']} Days\n"
+    await message.reply(out)
+    raise StopPropagation
+
+@Client.on_message(filters.command("addplan") & filters.user(Config.ADMINS), group=-1)
+async def add_plan_cmd(client, message):
+    args = message.text.split(maxsplit=4)
+    if len(args) < 5: return await message.reply("⚠️ Syntax: `/addplan <id_key> <Price> <Days> <Display Name>`\nExample: `/addplan platinum 1499 180 🌟 Platinum Tier`")
+    k = args[1].lower()
+    await vip_plans_db.update_one({"_id": k}, {"$set": {"name": args[4], "price": int(args[2]), "days": int(args[3]), "features": []}}, upsert=True)
+    await message.reply(f"✅ Added Plan `{k}`.")
+    raise StopPropagation
+
 @Client.on_message(filters.command("editplan") & filters.user(Config.ADMINS), group=-1)
 async def edit_plan_cmd(client, message):
     args = message.text.split(maxsplit=4)
@@ -356,6 +427,13 @@ async def edit_plan_cmd(client, message):
     k = args[1].lower()
     await vip_plans_db.update_one({"_id": k}, {"$set": {"price": int(args[2]), "days": int(args[3]), "name": args[4]}}, upsert=True)
     await message.reply(f"✅ Updated Plan `{k}` parameters.")
+    raise StopPropagation
+
+@Client.on_message(filters.command("deleteplan") & filters.user(Config.ADMINS), group=-1)
+async def delete_plan_cmd(client, message):
+    if len(message.command) < 2: return await message.reply("⚠️ Syntax: `/deleteplan <id_key>`")
+    await vip_plans_db.delete_one({"_id": message.command[1].lower()})
+    await message.reply(f"🗑️ Deleted Plan.")
     raise StopPropagation
 
 @Client.on_message(filters.command("searchvip") & filters.user(Config.ADMINS), group=-1)
@@ -383,9 +461,16 @@ async def admin_search_vip_regex(client, message: Message):
     await message.reply(out)
     raise StopPropagation
 
-# ---------------------------------------------------------
-# Keep original Commands (/addvip, /removevip, /vippanel) below
-# ---------------------------------------------------------
+@Client.on_message(filters.command("listvip") & filters.user(Config.ADMINS), group=-1)
+async def list_vip_cmd(client, message):
+    active = await vip_users.count_documents({"status": "Active"})
+    expired = await vip_users.count_documents({"status": "Expired"})
+    await message.reply(f"📊 **VIP Registry**\n🟢 Active: `{active}`\n🔴 Expired: `{expired}`\n\n*(Use /searchvip to find specific users)*")
+    raise StopPropagation
+
+# ==========================================
+# 💎 CENTRALIZED VIP DASHBOARD (/vippanel)
+# ==========================================
 @Client.on_message(filters.command("vippanel") & filters.user(Config.ADMINS), group=-1)
 async def open_vip_panel(client, message):
     markup = InlineKeyboardMarkup([
@@ -429,9 +514,9 @@ async def vip_panel_router(client, callback: CallbackQuery):
     else:
         await callback.message.edit_text(f"⚙️ Module `{action.upper()}` is active. Use the specific slash commands (e.g. /addvip, /createcoupon, /editplan) to interact with this layer.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="vipdb_home")]]))
 
-# ---------------------------------------------------------
-# Admin Actions Matrix (/addvip, /removevip, /redeem, etc.)
-# ---------------------------------------------------------
+# ==========================================
+# 🛠️ USER & ADMIN ACTIONS MATRIX
+# ==========================================
 @Client.on_message(filters.command("addvip") & filters.user(Config.ADMINS), group=-1)
 async def admin_add_vip_matrix(client, message: Message):
     args = message.text.split()
@@ -447,6 +532,15 @@ async def admin_add_vip_matrix(client, message: Message):
         await add_vip(user_obj, plan_name, days, method="Admin Matrix Injection", gifted_by=message.from_user.id)
         count += 1
     await message.reply(f"🎯 **Matrix Allocation Successful!** Granted {days} Days across `{count}` accounts.")
+    raise StopPropagation
+
+@Client.on_message(filters.command("removevip") & filters.user(Config.ADMINS), group=-1)
+async def admin_remove_vip_matrix(client, message: Message):
+    targets = await parse_target_users(client, message.text.split()[1:])
+    if not targets and message.reply_to_message: targets = [message.reply_to_message.from_user.id]
+    await vip_users.delete_many({"user_id": {"$in": targets}})
+    for uid in targets: await log_vip_event("Removed", uid, "VIP access forcefully revoked", message.from_user.id)
+    await message.reply(f"🗑️ Revoked access for `{len(targets)}` accounts.")
     raise StopPropagation
 
 @Client.on_message(filters.command("compensate") & filters.user(Config.ADMINS), group=-1)
@@ -472,7 +566,7 @@ async def check_vip_cmd(client, message: Message):
     target = message.from_user.id
     if len(message.command) > 1 and message.from_user.id in Config.ADMINS: target = int(message.command[1])
     is_vip, user = await check_vip_status(target)
-    if not is_vip: return await message.reply("❌ **No Active VIP Membership.**\nUse `/buyvip` to browse options!")
+    if not is_vip: return await message.reply("❌ **No Active VIP Membership.**\nUse `/buyvip` to browse options!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💎 Buy Premium VIP", callback_data="vip_reorder")]]))
     rem = user['expiry'] - datetime.datetime.now()
     rem_days = "Infinite" if user["plan"] == "💎 Lifetime" else f"{rem.days} Days"
     text = (f"💎 **VIP STATUS**\n📦 **Plan:** `{user['plan']}`\n🟢 **Status:** `{user['status']}`\n📅 **Joined:** `{user['joined'].strftime('%Y-%m-%d')}`\n⏳ **Expiry:** `{user['expiry'].strftime('%Y-%m-%d')}`\n⏱ **Remaining:** `{rem_days}`\n💳 **Order ID:** `{user.get('order_id','N/A')}`")
