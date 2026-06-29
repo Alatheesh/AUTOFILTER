@@ -46,7 +46,7 @@ DEFAULT_FEATURES = {
 }
 
 # ==========================================
-# 🛡️ FEATURE REGISTRY & DYNAMIC PLANS
+# 🛡️ HELPER FUNCTIONS & TRIAL VIP
 # ==========================================
 async def init_feature_registry():
     if await vip_features.count_documents({}) == 0:
@@ -150,6 +150,22 @@ async def parse_target_users(client, args_list):
             if item.isdigit(): targets.append(int(item))
     return list(set(targets))
 
+# --- NEW USER TRIAL SYSTEM ---
+@Client.on_message(filters.command("setviptrial") & filters.user(Config.ADMINS), group=-1)
+async def set_vip_trial(client, message):
+    if len(message.command) != 2:
+        return await message.reply("Usage: `/setviptrial <days>` (Use 0 to disable)")
+    days = int(message.command[1])
+    await vip_settings.update_one({"_id": "trial_settings"}, {"$set": {"days": days}}, upsert=True)
+    await message.reply(f"✅ **New users will now automatically get {days} days of VIP.**")
+    raise StopPropagation
+
+async def apply_new_user_trial(user_id):
+    setting = await vip_settings.find_one({"_id": "trial_settings"})
+    if setting and setting.get("days", 0) > 0:
+        days = setting["days"]
+        await add_vip(user_id, "🎁 Trial", days, method="Welcome Gift")
+
 # ==========================================
 # ⏰ BACKGROUND AUTO-WORKERS
 # ==========================================
@@ -229,7 +245,7 @@ async def vip_buy_callback(client, callback: CallbackQuery):
 
 @Client.on_callback_query(filters.regex(r"^vip_cancel_"))
 async def vip_cancel_callback(client, callback: CallbackQuery):
-    USER_STATES.pop(callback.from_user.id, None) # Clear any state
+    USER_STATES.pop(callback.from_user.id, None) 
     order_id = callback.data.split("_")[2]
     await update_order_state(order_id, "Rejected")
     await callback.message.edit_text("❌ Order Cancelled successfully.")
@@ -269,15 +285,13 @@ def get_dashboard_main_markup():
 
 @Client.on_message(filters.command("vippanel") & filters.user(Config.ADMINS), group=-1)
 async def open_vip_panel(client, message):
-    USER_STATES.pop(message.from_user.id, None) # Clear state on panel open
+    USER_STATES.pop(message.from_user.id, None) 
     await message.reply("💎 **VIP ENTERPRISE DASHBOARD**\nSelect a module to manage:", reply_markup=get_dashboard_main_markup())
     raise StopPropagation
 
 @Client.on_callback_query(filters.regex(r"^vipdb_") & filters.user(Config.ADMINS))
 async def vip_panel_router(client, callback: CallbackQuery):
-    # 🔥 CRITICAL FIX: ALWAYS clear active text wizards if an admin clicks a dashboard button
     USER_STATES.pop(callback.from_user.id, None)
-    
     action = callback.data.split("_")[1]
     
     if action == "close": 
@@ -470,13 +484,7 @@ async def admin_wizards_router(client, callback: CallbackQuery):
     action = callback.data.replace("vipwiz_", "")
     msg_id = callback.message.id
     
-    # --- UNIVERSAL SEARCH WIZARD ---
-    if action == "search_init":
-        USER_STATES[callback.from_user.id] = {"action": "wiz_search", "msg_id": msg_id}
-        await callback.message.edit_text("🔍 **Wizard: Universal Search**\n\nReply with any ID, Username, Order ID, UTR, or Coupon.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="vipdb_home", style=ButtonStyle.DANGER)]]))
-
-    # --- ADD VIP WIZARD ---
-    elif action == "addvip_init":
+    if action == "addvip_init":
         USER_STATES[callback.from_user.id] = {"action": "wiz_addvip_uid", "msg_id": msg_id}
         await callback.message.edit_text("👤 **Wizard: Add VIP**\n\nPlease reply with the **User ID** you want to upgrade.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="vipdb_members", style=ButtonStyle.DANGER)]]))
 
@@ -503,12 +511,10 @@ async def admin_wizards_router(client, callback: CallbackQuery):
         await add_vip(user_obj, plan_name, days, method="Wizard Injection", gifted_by=callback.from_user.id)
         await callback.message.edit_text(f"✅ **Success!**\n\nAdded {days} Days of {plan_name} to `{target}`.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Memberships", callback_data="vipdb_members", style=ButtonStyle.PRIMARY)]]))
 
-    # --- REMOVE VIP WIZARD ---
     elif action == "remvip_init":
         USER_STATES[callback.from_user.id] = {"action": "wiz_remvip", "msg_id": msg_id}
         await callback.message.edit_text("➖ **Wizard: Remove VIP**\n\nReply with the **User ID** to revoke.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="vipdb_members", style=ButtonStyle.DANGER)]]))
 
-    # --- EXTEND VIP WIZARD ---
     elif action == "extvip_init":
         USER_STATES[callback.from_user.id] = {"action": "wiz_extvip", "msg_id": msg_id}
         await callback.message.edit_text("⏫ **Wizard: Extend VIP**\n\nReply with the **User ID**.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="vipdb_members", style=ButtonStyle.DANGER)]]))
@@ -525,7 +531,6 @@ async def admin_wizards_router(client, callback: CallbackQuery):
         else:
             await callback.message.edit_text("❌ User is not an active VIP.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="vipdb_members", style=ButtonStyle.DANGER)]]))
 
-    # --- REDUCE VIP WIZARD ---
     elif action == "redvip_init":
         USER_STATES[callback.from_user.id] = {"action": "wiz_redvip", "msg_id": msg_id}
         await callback.message.edit_text("⏬ **Wizard: Reduce VIP**\n\nReply with the **User ID**.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="vipdb_members", style=ButtonStyle.DANGER)]]))
@@ -542,17 +547,14 @@ async def admin_wizards_router(client, callback: CallbackQuery):
         else:
             await callback.message.edit_text("❌ User is not an active VIP.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="vipdb_members", style=ButtonStyle.DANGER)]]))
 
-    # --- SET VIP WIZARD ---
     elif action == "setvip_init":
         USER_STATES[callback.from_user.id] = {"action": "wiz_setvip_uid", "msg_id": msg_id}
         await callback.message.edit_text("🔄 **Wizard: Set VIP (Overwrite)**\n\nReply with the **User ID**.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="vipdb_members", style=ButtonStyle.DANGER)]]))
 
-    # --- ADD PLAN WIZARD ---
     elif action == "addplan_init":
         USER_STATES[callback.from_user.id] = {"action": "wiz_addplan", "msg_id": msg_id}
         await callback.message.edit_text("📦 **Wizard: Add/Edit Plan**\n\nReply with details separated by comma:\n`Plan_ID, Price, Days, Display Name`\n\nExample: `platinum, 1499, 180, 🌟 Platinum`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="vipdb_plans", style=ButtonStyle.DANGER)]]))
 
-    # --- DELETE PLAN WIZARD ---
     elif action == "delplan_init":
         plans = await get_all_plans()
         markup = [[InlineKeyboardButton(f"🗑️ Delete {p['name']}", callback_data=f"vipwiz_delplan_exec_{k}", style=ButtonStyle.DANGER)] for k, p in plans.items()]
@@ -564,7 +566,6 @@ async def admin_wizards_router(client, callback: CallbackQuery):
         await vip_plans_db.delete_one({"_id": plan_key})
         await callback.message.edit_text(f"✅ Deleted Plan `{plan_key}`.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Plans", callback_data="vipdb_plans", style=ButtonStyle.PRIMARY)]]))
 
-    # --- CREATE COUPON WIZARD ---
     elif action == "addcoup_init":
         plans = await get_all_plans()
         markup = [[InlineKeyboardButton(p["name"], callback_data=f"vipwiz_addcoup_plan_{k}", style=ButtonStyle.PRIMARY)] for k, p in plans.items()]
@@ -605,12 +606,10 @@ async def admin_wizards_router(client, callback: CallbackQuery):
         await callback.message.reply_document(file_buffer, caption=f"🎟️ **Batch Generation Complete!**\nTarget: `{plan_target.capitalize()}` | Qty: `{qty}`")
         await callback.message.edit_text("✅ Coupons generated successfully.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Coupons", callback_data="vipdb_coupons", style=ButtonStyle.PRIMARY)]]))
 
-    # --- DELETE COUPON WIZARD ---
     elif action == "delcoup_init":
         USER_STATES[callback.from_user.id] = {"action": "wiz_delcoup", "msg_id": msg_id}
         await callback.message.edit_text("➖ **Wizard: Delete Coupon**\n\nReply with the exact **Coupon Code** to delete.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="vipdb_coupons", style=ButtonStyle.DANGER)]]))
 
-    # --- COMPENSATE WIZARD ---
     elif action == "comp_init":
         markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("All Users", callback_data="vipwiz_comp_targ_all", style=ButtonStyle.PRIMARY), InlineKeyboardButton("Active VIPs", callback_data="vipwiz_comp_targ_vip", style=ButtonStyle.PRIMARY)],
@@ -655,9 +654,8 @@ async def catch_payment_proof(client, message: Message):
     
     action = state.get("action")
     
-    # --- ADMIN WIZARD INPUT CATCHERS (CRASH-PROOFED) ---
     if action.startswith("wiz_"):
-        try: await message.delete() # Keep chat clean
+        try: await message.delete() 
         except: pass
         
         msg_id = state["msg_id"]
@@ -699,7 +697,7 @@ async def catch_payment_proof(client, message: Message):
                 await client.edit_message_text(message.chat.id, msg_id, f"✅ Revoked VIP access from `{target}`.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Memberships", callback_data="vipdb_members", style=ButtonStyle.PRIMARY)]]))
 
             elif action == "wiz_extvip" or action == "wiz_redvip":
-                target = int(message.text.strip()) # Enforce int check
+                target = int(message.text.strip())
                 prefix = "extvip" if action == "wiz_extvip" else "redvip"
                 sign = "+" if action == "wiz_extvip" else "-"
                 markup = InlineKeyboardMarkup([
@@ -741,11 +739,9 @@ async def catch_payment_proof(client, message: Message):
         except Exception as e:
             await client.send_message(message.chat.id, f"❌ **Wizard Error:** {e}")
         finally:
-            # 🔥 CRITICAL FIX: ALWAYS clear the state so you don't get trapped deleting messages!
             USER_STATES.pop(message.from_user.id, None)
             raise StopPropagation
 
-    # --- UTR PAYMENT CATCHER ---
     if action == "wait_utr":
         try:
             order_id = state["order_id"]
