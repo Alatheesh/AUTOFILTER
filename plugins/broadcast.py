@@ -3,11 +3,14 @@ import time
 import uuid
 import re
 import datetime
+import logging
 from pyrogram import Client, filters, ContinuePropagation, StopPropagation
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from pyrogram.errors import FloodWait, UserIsBlocked, InputUserDeactivated, PeerIdInvalid, MessageNotModified
+from pyrogram.errors import FloodWait, UserIsBlocked, InputUserDeactivated, PeerIdInvalid, MessageNotModified, UserIsBot
 from database.multi_db import db
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 # 🧠 State Machine: Remembers message IDs and Timestamps for clean UI editing
 BROADCAST_STATE = {}
@@ -147,7 +150,7 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
             skipped += 1
             continue
             
-        # 🔥 CRITICAL FIX: Ensure names are strictly strings so .replace() never crashes on None
+        # 🔥 Ensure names are strictly strings so .replace() never crashes on None
         first_name_raw = user_data.get("first_name")
         first_name = str(first_name_raw) if first_name_raw else "User"
         
@@ -191,7 +194,7 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
                 sent += 1
             except Exception:
                 failed += 1
-        except (UserIsBlocked, InputUserDeactivated, PeerIdInvalid):
+        except (UserIsBlocked, InputUserDeactivated, PeerIdInvalid, UserIsBot):
             failed += 1
         except Exception as e:
             logger.error(f"Broadcast error on user {user_id}: {e}")
