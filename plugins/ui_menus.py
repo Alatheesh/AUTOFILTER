@@ -6,7 +6,6 @@ from pyrogram.enums import ButtonStyle
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, LinkPreviewOptions
 from database.multi_db import db
 from plugins.moderation import log_to_channel
-from plugins.vip_system import apply_new_user_trial
 from config import Config
 
 # --- DYNAMIC TEXT TEMPLATES ---
@@ -120,7 +119,7 @@ def back_to_about_keyboard():
 
 
 # ==========================================
-# 📢 USER COMMAND HANDLERS & INLINE TRACKING
+# 📢 USER COMMAND HANDLERS
 # ==========================================
 @Client.on_message(filters.command("start"))
 async def start_menu_handler(client: Client, message: Message):
@@ -133,49 +132,15 @@ async def start_menu_handler(client: Client, message: Message):
             raise StopPropagation
         return 
 
-    user = message.from_user
-    user_id = user.id
-    
-    # 1. Check if the user is completely new
+    user_id = message.from_user.id
     user_exists = await db.users.find_one({"user_id": user_id})
-    is_new_user = False
-    if not user_exists or "joined_date" not in user_exists:
-        is_new_user = True
-
-    # 2. Extract safe data fields directly from the Telegram API
-    user_data = {
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "username": user.username,
-        "language_code": getattr(user, 'language_code', 'en'),
-        "dc_id": getattr(user, 'dc_id', None),
-        "last_interaction": datetime.datetime.now()
-    }
-    
-    if is_new_user:
-        user_data["joined_date"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-
-    try:
-        # 3. Store or update the main users registry natively
-        await db.users.update_one({"user_id": user_id}, {"$set": user_data}, upsert=True)
+    if not user_exists:
+        await log_to_channel(client, f"#new_user\n👤 Name: `{message.from_user.first_name}`\n🆔 ID: `{user_id}`\n🔗 Username: @{message.from_user.username or 'None'}")
+        await db.update_user_setting(user_id, "joined_date", datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
         
-        # 4. Keep the VIP dashboard records cleanly mirrored
-        await db.vip_users.update_many(
-            {"user_id": user_id},
-            {"$set": {
-                "username": f"@{user.username}" if user.username else "N/A", 
-                "first_name": user.first_name or "Unknown"
-            }}
-        )
-    except Exception:
-        pass
-
-    # 5. Trigger new user specific actions if applicable
-    if is_new_user:
-        await log_to_channel(client, f"#new_user\n👤 Name: `{user.first_name}`\n🆔 ID: `{user_id}`\n🔗 Username: @{user.username or 'None'}")
+        # Give them the Free VIP Trial (if enabled by admin)
         await apply_new_user_trial(user_id)
 
-    # 6. Render the normal Start Menu UI
     try:
         loading_msg = await message.reply_sticker(random.choice(START_STICKERS))
         await asyncio.sleep(1)
@@ -367,3 +332,4 @@ async def callback_ui_router(client: Client, callback: CallbackQuery):
         await callback.message.edit_text(text=settings_text, reply_markup=InlineKeyboardMarkup(keyboard))
         
     await callback.answer()
+        
