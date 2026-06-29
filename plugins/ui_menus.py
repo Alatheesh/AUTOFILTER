@@ -118,49 +118,9 @@ def back_to_about_keyboard():
         [InlineKeyboardButton("🔙 Back", callback_data="ui_about", style=ButtonStyle.DANGER)]
     ])
 
-# ==========================================
-# 🕵️ USER PROFILE TRACKER
-# ==========================================
-async def track_and_sync_user(user):
-    """
-    Safely captures and updates all available user metadata in the DB.
-    Ensures VIP dashboard and main user records are perfectly synced.
-    """
-    if not user:
-        return
-
-    # Extract data fields exposed by the Telegram API (No Premium Check)
-    user_data = {
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "username": user.username,
-        "language_code": getattr(user, 'language_code', 'en'),
-        "dc_id": getattr(user, 'dc_id', None),
-        "last_interaction": datetime.datetime.now()
-    }
-    
-    try:
-        # 1. Store or update the main users registry
-        await db.users.update_one(
-            {"user_id": user.id},
-            {"$set": user_data},
-            upsert=True
-        )
-        
-        # 2. Keep the VIP dashboard records cleanly mirrored
-        await db.vip_users.update_many(
-            {"user_id": user.id},
-            {"$set": {
-                "username": f"@{user.username}" if user.username else "N/A", 
-                "first_name": user.first_name or "Unknown"
-            }}
-        )
-    except Exception:
-        pass
-
 
 # ==========================================
-# 📢 USER COMMAND HANDLERS
+# 📢 USER COMMAND HANDLERS & INLINE TRACKING
 # ==========================================
 @Client.on_message(filters.command("start"))
 async def start_menu_handler(client: Client, message: Message):
@@ -173,20 +133,49 @@ async def start_menu_handler(client: Client, message: Message):
             raise StopPropagation
         return 
 
-    user_id = message.from_user.id
+    user = message.from_user
+    user_id = user.id
     
-    # Check if the user is completely new before we run the tracker
+    # 1. Check if the user is completely new
     user_exists = await db.users.find_one({"user_id": user_id})
-    if not user_exists:
-        await log_to_channel(client, f"#new_user\n👤 Name: `{message.from_user.first_name}`\n🆔 ID: `{user_id}`\n🔗 Username: @{message.from_user.username or 'None'}")
-        await db.update_user_setting(user_id, "joined_date", datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
+    is_new_user = False
+    if not user_exists or "joined_date" not in user_exists:
+        is_new_user = True
+
+    # 2. Extract safe data fields directly from the Telegram API
+    user_data = {
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "username": user.username,
+        "language_code": getattr(user, 'language_code', 'en'),
+        "dc_id": getattr(user, 'dc_id', None),
+        "last_interaction": datetime.datetime.now()
+    }
+    
+    if is_new_user:
+        user_data["joined_date"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    try:
+        # 3. Store or update the main users registry natively
+        await db.users.update_one({"user_id": user_id}, {"$set": user_data}, upsert=True)
         
-        # Give them the Free VIP Trial (if enabled by admin)
+        # 4. Keep the VIP dashboard records cleanly mirrored
+        await db.vip_users.update_many(
+            {"user_id": user_id},
+            {"$set": {
+                "username": f"@{user.username}" if user.username else "N/A", 
+                "first_name": user.first_name or "Unknown"
+            }}
+        )
+    except Exception:
+        pass
+
+    # 5. Trigger new user specific actions if applicable
+    if is_new_user:
+        await log_to_channel(client, f"#new_user\n👤 Name: `{user.first_name}`\n🆔 ID: `{user_id}`\n🔗 Username: @{user.username or 'None'}")
         await apply_new_user_trial(user_id)
 
-    # 🚀 Run the Profile Tracker to sync their latest username/name
-    await track_and_sync_user(message.from_user)
-
+    # 6. Render the normal Start Menu UI
     try:
         loading_msg = await message.reply_sticker(random.choice(START_STICKERS))
         await asyncio.sleep(1)
