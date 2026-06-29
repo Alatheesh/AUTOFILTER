@@ -3,7 +3,6 @@ import time
 import uuid
 import re
 import datetime
-# 🚀 IMPORTED StopPropagation
 from pyrogram import Client, filters, ContinuePropagation, StopPropagation
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.errors import FloodWait, UserIsBlocked, InputUserDeactivated, PeerIdInvalid, MessageNotModified
@@ -148,8 +147,13 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
             skipped += 1
             continue
             
-        first_name = user_data.get("first_name", "User")
-        last_name = user_data.get("last_name", "")
+        # 🔥 CRITICAL FIX: Ensure names are strictly strings so .replace() never crashes on None
+        first_name_raw = user_data.get("first_name")
+        first_name = str(first_name_raw) if first_name_raw else "User"
+        
+        last_name_raw = user_data.get("last_name")
+        last_name = str(last_name_raw) if last_name_raw else ""
+        
         full_name = f"{first_name} {last_name}".strip()
             
         try:
@@ -189,7 +193,8 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
                 failed += 1
         except (UserIsBlocked, InputUserDeactivated, PeerIdInvalid):
             failed += 1
-        except Exception:
+        except Exception as e:
+            logger.error(f"Broadcast error on user {user_id}: {e}")
             failed += 1
             
         if (sent + failed) % 20 == 0:
@@ -290,7 +295,7 @@ async def interactive_broadcast_listener(client: Client, message: Message):
         expired_text = "⚠️ **Session Expired.**\n\nThis prompt is older than 48 hours. Please restart the setup."
         try: await client.edit_message_text(message.chat.id, prompt_msg_id, expired_text)
         except Exception: await message.reply_text(expired_text)
-        raise StopPropagation # 🚀 THE FIX: Swallow the expired input message
+        raise StopPropagation 
 
     if action == "broadcast_wait_msg":
         target_msg_id = message.id
@@ -375,7 +380,6 @@ async def interactive_broadcast_listener(client: Client, message: Message):
         try: await client.edit_message_text(message.chat.id, prompt_msg_id, text)
         except Exception: await message.reply_text(text)
 
-    # 🚀 THE FIX: Swallow the message so the Search Engine never sees it
     raise StopPropagation
 
 
@@ -471,7 +475,6 @@ async def ultimate_broadcast(client: Client, message: Message):
             "timestamp": time.time()
         }
     
-    # 🚀 THE FIX: Swallow the command so it never triggers search
     raise StopPropagation
 
 @Client.on_message(filters.command(["cancel_followup", "cancel_schedule", "stopfollowup", "cancelfollowup"]) & filters.user(Config.ADMINS))
@@ -486,7 +489,7 @@ async def cancel_scheduled_job(client: Client, message: Message):
             "message_id": prompt.id,
             "timestamp": time.time()
         }
-        raise StopPropagation # 🚀
+        raise StopPropagation 
         
     batch_id = message.command[1].strip()
     success = await db.cancel_scheduled_broadcast(batch_id)
@@ -496,7 +499,7 @@ async def cancel_scheduled_job(client: Client, message: Message):
     else:
         await message.reply_text(f"❌ **Failed:** Could not find a pending scheduled broadcast with ID `{batch_id}`.")
         
-    raise StopPropagation # 🚀
+    raise StopPropagation 
 
 @Client.on_message(filters.command("broadcast_del") & filters.user(Config.ADMINS))
 async def recall_vault_menu(client: Client, message: Message):
@@ -515,7 +518,7 @@ async def recall_vault_menu(client: Client, message: Message):
                 
         await db.delete_broadcast_batch(batch_id)
         await status.edit_text(f"✅ **GHOST PROTOCOL COMPLETE**\n\n`{deleted}` messages from `{batch_id}` have been permanently erased from user chats.")
-        raise StopPropagation # 🚀
+        raise StopPropagation 
 
     batches = await db.get_recent_batches()
     buttons = []
@@ -526,11 +529,11 @@ async def recall_vault_menu(client: Client, message: Message):
         
     if not buttons:
         await message.reply_text("📂 The 48-Hour Vault is currently empty.")
-        raise StopPropagation # 🚀
+        raise StopPropagation 
         
     reply_markup = InlineKeyboardMarkup(buttons)
     await message.reply_text("🛡 **THE RECALL VAULT**\n\nSelect a recent batch to instantly delete it from all user inboxes:", reply_markup=reply_markup)
-    raise StopPropagation # 🚀
+    raise StopPropagation 
 
 @Client.on_callback_query(filters.regex(r"^delbatch_") & filters.user(Config.ADMINS))
 async def execute_batch_scrub(client: Client, query: CallbackQuery):
@@ -568,10 +571,10 @@ async def ghost_update(client: Client, message: Message):
                 "message_id": prompt.id,
                 "timestamp": time.time()
             }
-            raise StopPropagation # 🚀
+            raise StopPropagation 
             
         await message.reply_text("⚠️ Format: `/broadcast_edit <Batch_ID> <New Text>`")
-        raise StopPropagation # 🚀
+        raise StopPropagation 
         
     status = await message.reply_text(f"👻 **Deploying Ghost Update to `{batch_id}`...**")
     edited = 0
@@ -585,7 +588,7 @@ async def ghost_update(client: Client, message: Message):
             pass
             
     await status.edit_text(f"✅ **UPDATE COMPLETE**\n\nSilently edited `{edited}` messages.")
-    raise StopPropagation # 🚀
+    raise StopPropagation 
 
 @Client.on_message(filters.command("user_broadcast") & filters.user(Config.ADMINS) & filters.reply)
 async def direct_support(client: Client, message: Message):
@@ -595,7 +598,7 @@ async def direct_support(client: Client, message: Message):
         await message.reply_text(f"✅ Securely dropped into `{target_user}`'s PMs.")
     except Exception as e:
         await message.reply_text(f"❌ Failed: `{e}`")
-    raise StopPropagation # 🚀
+    raise StopPropagation 
 
 @Client.on_message(filters.command("delbroadcastuser") & filters.user(Config.ADMINS))
 async def surgical_wipe(client: Client, message: Message):
@@ -604,19 +607,16 @@ async def surgical_wipe(client: Client, message: Message):
         latest_log = await db.get_user_latest_broadcast(target_user)
         if not latest_log:
             await message.reply_text("❌ No recent broadcasts found for this user in the vault.")
-            raise StopPropagation # 🚀
+            raise StopPropagation 
             
-        # 1. Try to delete the physical message from Telegram
         telegram_deleted = True
         try:
             await client.delete_messages(target_user, latest_log["message_id"])
         except Exception as e:
             telegram_deleted = False
             
-        # 2. ALWAYS delete the record from the Database Vault
         await db.delete_single_broadcast_log(target_user, latest_log["message_id"])
         
-        # 3. Report the accurate status to the Admin
         if telegram_deleted:
             await message.reply_text(f"✅ **SURGICAL WIPE COMPLETE**\nThe last ad was scrubbed from `{target_user}`'s chat and the database.")
         else:
@@ -629,7 +629,8 @@ async def surgical_wipe(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(f"❌ **Failed:** `{e}`")
         
-    raise StopPropagation # 🚀
+    raise StopPropagation 
+
 # ==========================================
 # 💬 TWO-WAY BROADCAST COMMUNICATION
 # ==========================================
@@ -637,10 +638,9 @@ async def surgical_wipe(client: Client, message: Message):
 async def handle_user_reply_to_broadcast(client: Client, message: Message):
     target_msg = message.reply_to_message
     
-    # 🚀 INTELLIGENT DB LOOKUP: Matches the replied message directly to the broadcast batch!
     log = await db.broadcast_logs.find_one({"user_id": message.from_user.id, "message_id": target_msg.id})
     if not log:
-        return # If it's a normal message, let it fall down to the Movie Search!
+        return 
         
     batch_id = log["batch_id"]
     await db.add_batch_reply(batch_id, message.from_user.id)
@@ -651,7 +651,7 @@ async def handle_user_reply_to_broadcast(client: Client, message: Message):
         text=f"📩 **New Reply to Broadcast!**\n\n👤 **User:** {message.from_user.mention}\n🆔 **ID:** `{message.from_user.id}`\n🏷 **Batch:** `{batch_id}`\n👇 Their reply is below:"
     )
     await message.forward(admin_id)
-    raise StopPropagation # 🚀
+    raise StopPropagation 
 
 @Client.on_message(filters.command("replybroadcast") & filters.user(Config.ADMINS) & filters.reply)
 async def smart_admin_reply(client: Client, message: Message):
@@ -669,11 +669,11 @@ async def smart_admin_reply(client: Client, message: Message):
         
     if not target_user:
         await message.reply_text("❌ **Could not detect User ID.**\nPlease reply to the '📩 New Reply' header.")
-        raise StopPropagation # 🚀
+        raise StopPropagation 
         
     if len(message.command) < 2:
         await message.reply_text("⚠️ **Format:** `/replybroadcast [-ask 10s] <your message>`")
-        raise StopPropagation # 🚀
+        raise StopPropagation 
         
     raw_text = message.text.split(" ", 1)[1]
     ask_match = re.search(r'-ask\s+(\d+)([smh])', raw_text)
@@ -694,7 +694,7 @@ async def smart_admin_reply(client: Client, message: Message):
         
     if not raw_text:
         await message.reply_text("⚠️ You cannot send an empty message.")
-        raise StopPropagation # 🚀
+        raise StopPropagation 
     
     try:
         sent_msg = await client.send_message(chat_id=target_user, text=f"👨‍💻 **Admin Reply:**\n\n{raw_text}")
@@ -710,4 +710,4 @@ async def smart_admin_reply(client: Client, message: Message):
     except Exception as e:
         await message.reply_text(f"❌ **Failed to send reply:** `{e}`")
         
-    raise StopPropagation # 🚀
+    raise StopPropagation
