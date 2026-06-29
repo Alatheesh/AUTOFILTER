@@ -29,7 +29,7 @@ vip_history = db.vip_history
 vip_recovery = db.vip_recovery
 vip_plans_db = db.vip_plans
 vip_subscriptions = db.vip_subscriptions
-vip_features = db.vip_features  # 🚀 Feature Registry
+vip_features = db.vip_features  
 
 DEFAULT_PLANS = {
     "bronze": {"name": "🥉 Bronze", "days": 30, "price": 99},
@@ -46,7 +46,7 @@ DEFAULT_FEATURES = {
 }
 
 # ==========================================
-# 🛡️ HELPER FUNCTIONS & TRIAL VIP
+# 🛡️ HELPER FUNCTIONS
 # ==========================================
 async def init_feature_registry():
     if await vip_features.count_documents({}) == 0:
@@ -112,13 +112,13 @@ async def add_vip(user, plan_name, days, method="Admin Added", gifted_by=None, o
         new_expiry = base_expiry + datetime.timedelta(days=days)
         await vip_users.update_one(
             {"user_id": user_id},
-            {"$set": {"expiry": new_expiry, "plan": plan_name, "status": "Active", "username": username, "first_name": first_name, "notice_24h": False}, "$inc": {"renewals": 1}}
+            {"$set": {"expiry": new_expiry, "plan": plan_name, "status": "Active", "username": username, "first_name": first_name}, "$inc": {"renewals": 1}}
         )
         await log_vip_event("Renewed/Extended", user_id, f"Added {days} days to {plan_name}", admin_id=gifted_by)
     else:
         await vip_users.insert_one({
             "user_id": user_id, "username": username, "first_name": first_name, "plan": plan_name, "status": "Active",
-            "joined": datetime.datetime.now(), "expiry": expiry, "renewals": 1, "coupons_used": [], "notice_24h": False
+            "joined": datetime.datetime.now(), "expiry": expiry, "renewals": 1
         })
         await log_vip_event("Created", user_id, f"Joined {plan_name} for {days} days", admin_id=gifted_by)
 
@@ -150,12 +150,18 @@ async def parse_target_users(client, args_list):
             if item.isdigit(): targets.append(int(item))
     return list(set(targets))
 
-# --- NEW USER TRIAL SYSTEM ---
+# ==========================================
+# 🎁 TRIAL VIP SYSTEM (FIXED & RESTORED)
+# ==========================================
 @Client.on_message(filters.command("setviptrial") & filters.user(Config.ADMINS), group=-1)
 async def set_vip_trial(client, message):
     if len(message.command) != 2:
         return await message.reply("Usage: `/setviptrial <days>` (Use 0 to disable)")
-    days = int(message.command[1])
+    try:
+        days = int(message.command[1])
+    except ValueError:
+        return await message.reply("❌ Error: Days must be a number.")
+        
     await vip_settings.update_one({"_id": "trial_settings"}, {"$set": {"days": days}}, upsert=True)
     await message.reply(f"✅ **New users will now automatically get {days} days of VIP.**")
     raise StopPropagation
@@ -271,7 +277,7 @@ async def vip_recover_callback(client, callback: CallbackQuery):
 
 
 # ==========================================
-# 💎 UNIVERSAL VIP ENTERPRISE DASHBOARD (/vippanel)
+# 💎 UNIVERSAL VIP ENTERPRISE DASHBOARD
 # ==========================================
 def get_dashboard_main_markup():
     return InlineKeyboardMarkup([
