@@ -6,6 +6,7 @@ from pyrogram.enums import ButtonStyle
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, LinkPreviewOptions
 from database.multi_db import db
 from plugins.moderation import log_to_channel
+from plugins.vip_system import apply_new_user_trial
 from config import Config
 
 # --- DYNAMIC TEXT TEMPLATES ---
@@ -117,6 +118,46 @@ def back_to_about_keyboard():
         [InlineKeyboardButton("🔙 Back", callback_data="ui_about", style=ButtonStyle.DANGER)]
     ])
 
+# ==========================================
+# 🕵️ USER PROFILE TRACKER
+# ==========================================
+async def track_and_sync_user(user):
+    """
+    Safely captures and updates all available user metadata in the DB.
+    Ensures VIP dashboard and main user records are perfectly synced.
+    """
+    if not user:
+        return
+
+    # Extract data fields exposed by the Telegram API (No Premium Check)
+    user_data = {
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "username": user.username,
+        "language_code": getattr(user, 'language_code', 'en'),
+        "dc_id": getattr(user, 'dc_id', None),
+        "last_interaction": datetime.datetime.now()
+    }
+    
+    try:
+        # 1. Store or update the main users registry
+        await db.users.update_one(
+            {"user_id": user.id},
+            {"$set": user_data},
+            upsert=True
+        )
+        
+        # 2. Keep the VIP dashboard records cleanly mirrored
+        await db.vip_users.update_many(
+            {"user_id": user.id},
+            {"$set": {
+                "username": f"@{user.username}" if user.username else "N/A", 
+                "first_name": user.first_name or "Unknown"
+            }}
+        )
+    except Exception:
+        pass
+
 
 # ==========================================
 # 📢 USER COMMAND HANDLERS
@@ -133,6 +174,8 @@ async def start_menu_handler(client: Client, message: Message):
         return 
 
     user_id = message.from_user.id
+    
+    # Check if the user is completely new before we run the tracker
     user_exists = await db.users.find_one({"user_id": user_id})
     if not user_exists:
         await log_to_channel(client, f"#new_user\n👤 Name: `{message.from_user.first_name}`\n🆔 ID: `{user_id}`\n🔗 Username: @{message.from_user.username or 'None'}")
@@ -140,6 +183,9 @@ async def start_menu_handler(client: Client, message: Message):
         
         # Give them the Free VIP Trial (if enabled by admin)
         await apply_new_user_trial(user_id)
+
+    # 🚀 Run the Profile Tracker to sync their latest username/name
+    await track_and_sync_user(message.from_user)
 
     try:
         loading_msg = await message.reply_sticker(random.choice(START_STICKERS))
@@ -332,4 +378,3 @@ async def callback_ui_router(client: Client, callback: CallbackQuery):
         await callback.message.edit_text(text=settings_text, reply_markup=InlineKeyboardMarkup(keyboard))
         
     await callback.answer()
-        
