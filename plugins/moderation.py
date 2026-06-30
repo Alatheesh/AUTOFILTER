@@ -110,6 +110,60 @@ async def contextual_punishment(client: Client, message: Message):
     raise StopPropagation
 
 # ==========================================
+# 🚨 EMERGENCY ADMIN REPORT SYSTEM
+# ==========================================
+@Client.on_message(filters.group & filters.text & filters.regex(r"(?i)@admins?"), group=1)
+async def emergency_admin_report(client: Client, message: Message):
+    chat_id = message.chat.id
+    reporter = message.from_user
+    
+    # 1. Fetch admins
+    admin_ids = await db.get_group_admins(chat_id)
+    
+    # Fallback to connected_by if admins list is empty
+    if not admin_ids:
+        g_sett = await db.get_group_settings(chat_id)
+        if g_sett.get("connected_by"):
+            admin_ids = [g_sett.get("connected_by")]
+            
+    if not admin_ids:
+        return await message.reply_text("⚠️ **Error:** No admins are registered in the bot's database for this group. An admin needs to run `/connect` or `/refreshadmins` first.")
+        
+    # 2. Construct Report
+    chat_title = message.chat.title
+    msg_link = message.link if message.link else f"https://t.me/c/{str(chat_id).replace('-100', '')}/{message.id}"
+    
+    report_text = f"🚨 **EMERGENCY REPORT** 🚨\n\n"
+    report_text += f"👥 **Group:** `{chat_title}`\n"
+    report_text += f"👤 **Reporter:** {reporter.mention} (`{reporter.id}`)\n"
+    
+    if message.reply_to_message:
+        target_msg = message.reply_to_message
+        target_user = target_msg.from_user
+        user_info = f"{target_user.mention} (`{target_user.id}`)" if target_user else "Unknown/Anonymous"
+        report_text += f"🎯 **Reported User:** {user_info}\n\n"
+        report_text += f"📝 **Reported Message:**\n_{target_msg.text or target_msg.caption or '[Media/Non-text message]'}_\n\n"
+    else:
+        report_text += f"\n📝 **Report Message:**\n_{message.text}_\n\n"
+        
+    report_text += f"*(Please check the group to take action)*"
+    
+    # 3. Send to admins securely in PM
+    sent_count = 0
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Go to Message", url=msg_link)]])
+    for adm in admin_ids:
+        try:
+            await client.send_message(adm, report_text, disable_web_page_preview=True, reply_markup=markup)
+            sent_count += 1
+        except Exception as e:
+            logger.error(f"Failed to send report to admin {adm}: {e}")
+            
+    if sent_count > 0:
+        await message.reply_text(f"✅ **Emergency Report sent securely to {sent_count} admin(s).**")
+    else:
+        await message.reply_text("⚠️ **Failed to reach admins.** They might have blocked the bot in their private messages.")
+
+# ==========================================
 # 🚨 AUTO-MODERATION TRIGGERS (Groups Only)
 # ==========================================
 @Client.on_message(filters.text & filters.group, group=-1)
