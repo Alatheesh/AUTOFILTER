@@ -189,7 +189,7 @@ async def disconnect_group_command(client: Client, message: Message):
     raise StopPropagation
 
 # 🚀 NEW FEATURE: Sync Admins without disconnecting
-@Client.on_message(filters.command("refreshadmins") & (filters.group | filters.supergroup))
+@Client.on_message(filters.command("refreshadmins") & filters.group)
 async def refresh_admins_command(client: Client, message: Message):
     user_id = message.from_user.id
     target_chat_id = message.chat.id
