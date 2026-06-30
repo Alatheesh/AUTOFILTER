@@ -352,7 +352,7 @@ async def auto_filter(client: Client, message: Message):
 
     # 👉 RESTORED: Bulk Delivery for Single Search
     if settings.get("bulk_enabled", True):
-        web_app_results = filtered_results[:1000] 
+        web_app_results = filtered_results[:10000] 
         short_id = hashlib.md5(f"{user_id}_{query}_{time.time()}".encode()).hexdigest()[:8]
         webapp_data = [f"{f.get('title', 'Unknown')}|{format_size(f.get('size', 0))}" for f in web_app_results]
         
