@@ -203,6 +203,12 @@ async def auto_filter(client: Client, message: Message):
     chat_id = message.chat.id
     current_time = time.time()
     
+    # 🚀 NEW: Smart Group Connection Interceptor
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        is_connected = await db.is_group_connected(chat_id)
+        if not is_connected:
+            return await message.reply_text("⚠️ **Group Not Connected**\n\nThis group is not connected to my database. Please ask a Group Admin to type `/connect` to activate movie searches!")
+
     # 🚨 1. Scraper Protection Layer
     if user_id not in SCRAPER_TRACKER: SCRAPER_TRACKER[user_id] = []
     SCRAPER_TRACKER[user_id].append(current_time)
