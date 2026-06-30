@@ -227,7 +227,7 @@ async def vip_buy_callback(client, callback: CallbackQuery):
         f"💳 **Order ID:** `{order_id}`\n📦 **Plan:** {plan['name']}\n💵 **Amount:** ₹{plan['price']}\n\n"
         f"**🏦 HOW TO PAY:**\n\n"
         f"📱 **Mobile Users:** [👉 TAP HERE TO PAY DIRECTLY]({upi_url})\n*(Opens GPay, PhonePe, Paytm automatically)*\n\n" # 🚀 FIX 2: Mobile Deep Link!
-        f"1️⃣ **Tap to Copy UPI ID:**\n`{UPI_ID}`\n\n"
+        f"1️⃣ **Tap to Copy UPI ID:**\n`{UPI_ID}`\n\n       **(OR)**        \n\n"
         f"2️⃣ **Scan QR Code:**\n[Click Here to view QR Code image]({qr_link})\n\n"
         f"⚠️ *After sending exactly ₹{plan['price']}, you MUST click '✅ I have Paid' within 30 mins.*"
     )
