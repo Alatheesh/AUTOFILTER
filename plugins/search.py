@@ -18,18 +18,10 @@ from database.multi_db import db
 from config import Config
 from plugins.moderation import SCRAPER_TRACKER
 
+# 🚀 Import our new Extensible Filter Engine!
+from plugins.search_filters import get_filter_settings, apply_search_filters, SIZE_MAP
+
 logger = logging.getLogger(__name__)
-
-MB = 1024 * 1024
-GB = 1024 * MB
-
-SIZE_MAP = {
-    "small": (0, 500 * MB),
-    "medium": (500 * MB, 1 * GB),
-    "large": (1 * GB, 2 * GB),
-    "xlarge": (2 * GB, float('inf')),
-    "all": (0, float('inf'))
-}
 
 # --- RAM CACHE SYSTEMS ---
 SPAM_TRACKER = {}       
@@ -105,15 +97,6 @@ async def get_fuzzy_suggestions(query: str) -> list:
             suggestions.append(title)
     return list(dict.fromkeys(suggestions))[:3]
 
-async def get_filter_settings(user_id: int, chat_id: int, chat_type):
-    if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-        g_sett = await db.get_group_settings(chat_id)
-        g_mode = g_sett.get("search_mode", "let_members_choose")
-        if g_mode == "force_default": return "default", "all", "all"
-        elif g_mode == "force_interactive": return "interactive", g_sett.get("language_lock", "all"), g_sett.get("size_lock", "all")
-    u_sett = await db.get_user_settings(user_id)
-    return u_sett.get("search_mode", "default"), u_sett.get("language", "all"), u_sett.get("size", "all")
-
 def format_size(size_bytes):
     if size_bytes == 0: return "0B"
     size_name = ("B", "KB", "MB", "GB", "TB")
@@ -165,7 +148,7 @@ async def auto_filter(client: Client, message: Message):
     chat_id = message.chat.id
     current_time = time.time()
     
-    # 🚨 1. Scraper Protection Layer (50 searches / 1 minute)
+    # 🚨 1. Scraper Protection Layer
     if user_id not in SCRAPER_TRACKER: SCRAPER_TRACKER[user_id] = []
     SCRAPER_TRACKER[user_id].append(current_time)
     SCRAPER_TRACKER[user_id] = [t for t in SCRAPER_TRACKER[user_id] if current_time - t < 60]
@@ -181,7 +164,6 @@ async def auto_filter(client: Client, message: Message):
         lock_msg += f"\nReason: {p_reason}"
         if p_type == "mute" and p_expiry > 0: lock_msg += f"\nUnlocks: <t:{int(p_expiry)}:R>"
         
-        # Deep Link Appeal back to PM if they are globally banned but searching in a group
         if p_scope == "global" and message.chat.type != ChatType.PRIVATE:
             bot_me = await client.get_me()
             btn = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Appeal in PM", url=f"https://t.me/{bot_me.username}?start=appeal_{p_type}")]])
@@ -190,7 +172,6 @@ async def auto_filter(client: Client, message: Message):
             
         return await message.reply_text(lock_msg, reply_markup=btn)
 
-    # Track usage stats
     await asyncio.create_task(db.add_search_count(user_id))
     
     if user_id in SPAM_TRACKER and current_time - SPAM_TRACKER[user_id] < SPAM_COOLDOWN: return 
@@ -201,6 +182,8 @@ async def auto_filter(client: Client, message: Message):
     except Exception: pass
 
     chat_type = getattr(message.chat, "type", ChatType.PRIVATE)
+    
+    # 🚀 NEW: Retrieve filter settings from our new module
     resolved_mode, resolved_lang, resolved_size = await get_filter_settings(user_id, chat_id, chat_type)
 
     cache_key = f"{query.lower()}_{resolved_mode}_{resolved_lang}_{resolved_size}"
@@ -219,16 +202,8 @@ async def auto_filter(client: Client, message: Message):
             raw_results = await db.search_files(query.replace(" ", ""), skip=0, limit=10000, exact=False)
         QUERY_CACHE[cache_key] = (current_time, raw_results)
 
-    min_bytes, max_bytes = SIZE_MAP.get(resolved_size, (0, float('inf')))
-    filtered_results = []
-    
-    for f in raw_results:
-        if not (min_bytes <= f.get("size", 0) <= max_bytes): continue
-        if resolved_mode == "interactive" and resolved_lang not in ["all", "none"]:
-            if resolved_lang.lower() not in f.get("language", "unknown").lower() and resolved_lang.lower() not in f.get("title", "").lower():
-                continue
-        filtered_results.append(f)
-
+    # 🚀 NEW: Apply filtering cleanly through our new function
+    filtered_results = apply_search_filters(raw_results, resolved_mode, resolved_lang, resolved_size)
     results = filtered_results[:10]
     
     if not results:
@@ -276,7 +251,6 @@ async def auto_filter(client: Client, message: Message):
         if shortener_on: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
         else: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{db_id}")])
     
-    # 🚀 Replace old ad button with "Help Us"
     buttons.append([InlineKeyboardButton(text="🤝 Help Us!", callback_data="help_us_menu")])
     
     if len(filtered_results) > 10:
@@ -323,19 +297,15 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     user_id = callback.from_user.id
     chat_id = callback.message.chat.id
     chat_type = callback.message.chat.type
+    
+    # 🚀 NEW: Retrieve filter settings from our new module
     resolved_mode, resolved_lang, resolved_size = await get_filter_settings(user_id, chat_id, chat_type)
 
     raw_results = await db.search_files(base_query, skip=0, limit=10000, exact=False)
     if not raw_results and " " in base_query: raw_results = await db.search_files(base_query.replace(" ", ""), skip=0, limit=10000, exact=False)
     
-    min_bytes, max_bytes = SIZE_MAP.get(resolved_size, (0, float('inf')))
-    filtered_results = []
-    for f in raw_results:
-        if not (min_bytes <= f.get("size", 0) <= max_bytes): continue
-        if resolved_mode == "interactive" and resolved_lang not in ["all", "none"]:
-            if resolved_lang.lower() not in f.get("language", "unknown").lower() and resolved_lang.lower() not in f.get("title", "").lower():
-                continue
-        filtered_results.append(f)
+    # 🚀 NEW: Apply filtering cleanly through our new function
+    filtered_results = apply_search_filters(raw_results, resolved_mode, resolved_lang, resolved_size)
     
     results = filtered_results[page * 10 : (page + 1) * 10]
     if not results: return await callback.answer("⚠️ No more pages available matching your filters!", show_alert=True)
@@ -370,7 +340,6 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
         if shortener_on: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
         else: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{db_id}")])
     
-    # 🚀 Replace old ad button with "Help Us"
     buttons.append([InlineKeyboardButton(text="🤝 Help Us!", callback_data="help_us_menu")])
     
     total_pages = math.ceil(len(filtered_results) / 10)
