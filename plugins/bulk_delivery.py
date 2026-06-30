@@ -7,6 +7,7 @@ import string
 import random
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from pyrogram.errors import FloodWait, UserIsBlocked # 🚀 NEW: Critical safety imports
 from database.multi_db import db
 from config import Config
 from plugins.search import BULK_CACHE
@@ -179,6 +180,7 @@ async def handle_bulk_delivery(client: Client, message: Message):
             successful = 0
             sent_message_ids = []
             
+            # 🚀 THE NEW DYNAMIC SAFETY LOOP
             for f_data in selected_files:
                 if f_data:
                     try:
@@ -189,12 +191,36 @@ async def handle_bulk_delivery(client: Client, message: Message):
                         )
                         sent_message_ids.append(sent_file.id)
                         successful += 1
+                        await asyncio.sleep(0.5) # Standard safety timer
+                        
+                    except FloodWait as e:
+                        logger.warning(f"⚠️ FloodWait hit during bulk delivery! Sleeping for {e.value} seconds.")
+                        await asyncio.sleep(e.value + 2) # Sleep exactly what Telegram asks + 2s buffer
+                        
+                        # Try sending the file one more time after waking up
+                        try:
+                            sent_file = await client.send_cached_media(
+                                chat_id=user_id, 
+                                file_id=f_data.get("file_id"), 
+                                caption="✨ **Here is your requested file.**\n\n🛡 *Provided securely by the Auto-Filter System.*"
+                            )
+                            sent_message_ids.append(sent_file.id)
+                            successful += 1
+                            await asyncio.sleep(0.5)
+                        except Exception:
+                            pass # If it fails again, skip the file and move on
+                            
+                    except UserIsBlocked:
+                        logger.warning(f"User {user_id} blocked the bot during massive bulk delivery.")
+                        await status_msg.edit_text("❌ **Delivery Stopped:** You blocked the bot!")
+                        return # Immediately abort the entire delivery process to save API calls
+                        
                     except Exception as e:
                         logger.error(f"Bulk send error: {e}")
-                    
-                    await asyncio.sleep(0.5) 
+                        await asyncio.sleep(0.5)
                     
             await status_msg.delete()
+            
             if settings.get("file_delete_enabled", False):
                 del_time = settings.get("file_delete_time", 10)
                 summary_msg = await message.reply_text(
