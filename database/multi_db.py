@@ -132,6 +132,22 @@ class MultiDB:
         if not self.clients: return
         await self.groups.update_one({"chat_id": chat_id}, {"$set": {key: value}}, upsert=True)
 
+    # 🚀 NEW: Helper to quickly check if a group is connected to the bot
+    async def is_group_connected(self, chat_id: int) -> bool:
+        if not self.clients: return False
+        group = await self.groups.find_one({"chat_id": chat_id})
+        if group and group.get("connected_by") is not None:
+            return True
+        return False
+
+    # 🚀 NEW: Helper to quickly fetch all admins of a group for the @admin report feature
+    async def get_group_admins(self, chat_id: int) -> list:
+        if not self.clients: return []
+        group = await self.groups.find_one({"chat_id": chat_id})
+        if group:
+            return group.get("admins", [])
+        return []
+
     async def get_admin_groups(self, user_id: int):
         if not self.clients: return []
         cursor = self.groups.find({"admins": user_id})
@@ -161,7 +177,8 @@ class MultiDB:
                 "file_delete_time": 10,
                 "filter_delete_enabled": False,
                 "filter_delete_time": 5,
-                "bulk_enabled": True
+                "bulk_enabled": True,
+                "multi_search_limit": 5
             }
             await self.settings.insert_one(default)
             return default
