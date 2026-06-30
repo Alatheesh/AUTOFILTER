@@ -210,7 +210,10 @@ async def vip_buy_callback(client, callback: CallbackQuery):
         "timeline": [{"status": "Created", "time": datetime.datetime.now()}]
     })
     
-    upi_url = f"upi://pay?pa={UPI_ID}&pn={MERCHANT_NAME}&am={plan['price']}&tr={order_id}&cu=INR&tn=VIP-{callback.from_user.id}"
+    # 🚀 UPGRADE: URL Encoding Merchant Name and embedding the specific Order ID as the Transaction Note
+    encoded_name = urllib.parse.quote(MERCHANT_NAME)
+    encoded_note = urllib.parse.quote(f"Payment for Order {order_id}")
+    upi_url = f"upi://pay?pa={UPI_ID}&pn={encoded_name}&am={plan['price']}&tr={order_id}&cu=INR&tn={encoded_note}"
     qr_link = f"https://api.qrserver.com/v1/create-qr-code/?size=400x400&data={urllib.parse.quote(upi_url)}"
     
     markup = InlineKeyboardMarkup([
@@ -382,7 +385,9 @@ async def vip_panel_router(client, callback: CallbackQuery):
             text += f"**{p['name']}**\n₹{p['price']} | {p['days']} Days | {len(feats)} Features\n━━━━━━━━━━\n"
             
         markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("➕ Add Plan", callback_data="vipwiz_addplan_init", style=ButtonStyle.SUCCESS), InlineKeyboardButton("➖ Delete Plan", callback_data="vipwiz_delplan_init", style=ButtonStyle.DANGER)],
+            # 🚀 UPGRADE: Added "Edit Plan" Button next to Add Plan
+            [InlineKeyboardButton("➕ Add Plan", callback_data="vipwiz_addplan_init", style=ButtonStyle.SUCCESS), InlineKeyboardButton("✏️ Edit Plan", callback_data="vipwiz_editplan_init", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("➖ Delete Plan", callback_data="vipwiz_delplan_init", style=ButtonStyle.DANGER)],
             [InlineKeyboardButton("🔙 Back to Dashboard", callback_data="vipdb_home", style=ButtonStyle.DANGER), InlineKeyboardButton("🔄 Refresh", callback_data="vipdb_plans", style=ButtonStyle.SUCCESS)]
         ])
         await callback.message.edit_text(text, reply_markup=markup)
@@ -550,7 +555,21 @@ async def admin_wizards_router(client, callback: CallbackQuery):
     # --- ADD PLAN WIZARD ---
     elif action == "addplan_init":
         USER_STATES[callback.from_user.id] = {"action": "wiz_addplan", "msg_id": msg_id}
-        await callback.message.edit_text("📦 **Wizard: Add/Edit Plan**\n\nReply with details separated by comma:\n`Plan_ID, Price, Days, Display Name`\n\nExample: `platinum, 1499, 180, 🌟 Platinum`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="vipdb_plans", style=ButtonStyle.DANGER)]]))
+        await callback.message.edit_text("📦 **Wizard: Add New Plan**\n\nReply with details separated by comma:\n`Plan_ID, Price, Days, Display Name`\n\nExample: `platinum, 1499, 180, 🌟 Platinum`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="vipdb_plans", style=ButtonStyle.DANGER)]]))
+
+    # 🚀 UPGRADE: --- EDIT PLAN WIZARD ---
+    elif action == "editplan_init":
+        plans = await get_all_plans()
+        markup = [[InlineKeyboardButton(f"✏️ Edit {p['name']}", callback_data=f"vipwiz_editplan_sel_{k}", style=ButtonStyle.PRIMARY)] for k, p in plans.items()]
+        markup.append([InlineKeyboardButton("❌ Cancel", callback_data="vipdb_plans", style=ButtonStyle.DANGER)])
+        await callback.message.edit_text("📦 **Wizard: Edit Plan**\n\nSelect a plan to modify:", reply_markup=InlineKeyboardMarkup(markup))
+
+    elif action.startswith("editplan_sel_"):
+        plan_key = action.split("_")[2]
+        plans = await get_all_plans()
+        p = plans[plan_key]
+        USER_STATES[callback.from_user.id] = {"action": "wiz_editplan", "msg_id": msg_id, "plan_key": plan_key}
+        await callback.message.edit_text(f"✏️ **Editing Plan:** `{p['name']}`\n\nCurrent Price: ₹{p['price']}\nCurrent Days: {p['days']}\n\nReply with new details separated by comma:\n`New Price, New Days, New Display Name`\n\nExample: `199, 30, 🌟 Premium Bronze`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="vipdb_plans", style=ButtonStyle.DANGER)]]))
 
     # --- DELETE PLAN WIZARD ---
     elif action == "delplan_init":
@@ -714,7 +733,18 @@ async def catch_payment_proof(client, message: Message):
                 if len(parts) >= 4:
                     k, price, days, name = parts[0].lower(), int(parts[1]), int(parts[2]), parts[3]
                     await vip_plans_db.update_one({"_id": k}, {"$set": {"name": name, "price": price, "days": days, "features": []}}, upsert=True)
-                    await client.edit_message_text(message.chat.id, msg_id, f"✅ Added/Edited Plan `{k}`.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Plans", callback_data="vipdb_plans", style=ButtonStyle.PRIMARY)]]))
+                    await client.edit_message_text(message.chat.id, msg_id, f"✅ Added New Plan `{k}`.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Plans", callback_data="vipdb_plans", style=ButtonStyle.PRIMARY)]]))
+                else:
+                    await client.edit_message_text(message.chat.id, msg_id, "❌ Error parsing format. Cancelled.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Plans", callback_data="vipdb_plans", style=ButtonStyle.DANGER)]]))
+
+            # 🚀 UPGRADE: --- EDIT PLAN CATCHER ---
+            elif action == "wiz_editplan":
+                plan_key = state["plan_key"]
+                parts = [p.strip() for p in message.text.split(",")]
+                if len(parts) >= 3:
+                    price, days, name = int(parts[0]), int(parts[1]), parts[2]
+                    await vip_plans_db.update_one({"_id": plan_key}, {"$set": {"name": name, "price": price, "days": days}}, upsert=True)
+                    await client.edit_message_text(message.chat.id, msg_id, f"✅ Successfully updated Plan `{name}`.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Plans", callback_data="vipdb_plans", style=ButtonStyle.PRIMARY)]]))
                 else:
                     await client.edit_message_text(message.chat.id, msg_id, "❌ Error parsing format. Cancelled.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Plans", callback_data="vipdb_plans", style=ButtonStyle.DANGER)]]))
 
