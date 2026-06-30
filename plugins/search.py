@@ -273,10 +273,11 @@ async def auto_filter(client: Client, message: Message):
             try: await progress_msg.edit_caption(prog_text) if progress_msg.photo else await progress_msg.edit_text(prog_text)
             except Exception: pass
             
-            raw_results = await db.search_files(movie, skip=0, limit=100, exact=False)
+            # Execute Search and Filter
+            raw_results = await db.search_files(movie, skip=0, limit=10000, exact=False)
             filtered = apply_search_filters(raw_results, resolved_mode, resolved_lang, resolved_size)
             
-            if filtered: found_movies.append((movie, filtered[:1000])) # Save all found for bulk delivery later
+            if filtered: found_movies.append((movie, filtered[:10000])) # Save all found for bulk delivery later
             else: not_found_movies.append(movie)
             
             await asyncio.sleep(0.4) 
