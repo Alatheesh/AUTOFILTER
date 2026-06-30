@@ -210,11 +210,13 @@ async def vip_buy_callback(client, callback: CallbackQuery):
         "timeline": [{"status": "Created", "time": datetime.datetime.now()}]
     })
     
-    # 🚀 UPGRADE: URL Encoding Merchant Name and embedding the specific Order ID as the Transaction Note
+    # 🚀 FIX 1: Removing spaces from the Transaction Note. 
+    # PhonePe & GPay scanners drop the note if it contains spaces or %20.
     encoded_name = urllib.parse.quote(MERCHANT_NAME)
-    encoded_note = urllib.parse.quote(f"Payment for Order {order_id}")
-    upi_url = f"upi://pay?pa={UPI_ID}&pn={encoded_name}&am={plan['price']}&tr={order_id}&cu=INR&tn={encoded_note}"
-    qr_link = f"https://api.qrserver.com/v1/create-qr-code/?size=400x400&data={urllib.parse.quote(upi_url)}"
+    clean_note = f"VIP_Order_{order_id}"
+    
+    upi_url = f"upi://pay?pa={UPI_ID}&pn={encoded_name}&am={plan['price']}&tr={order_id}&cu=INR&tn={clean_note}"
+    qr_link = f"https://api.qrserver.com/v1/create-qr-code/?size=500x500&data={urllib.parse.quote(upi_url)}"
     
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ I have Paid", callback_data=f"vip_paid_{order_id}", style=ButtonStyle.SUCCESS)],
@@ -223,9 +225,10 @@ async def vip_buy_callback(client, callback: CallbackQuery):
     
     text = (
         f"💳 **Order ID:** `{order_id}`\n📦 **Plan:** {plan['name']}\n💵 **Amount:** ₹{plan['price']}\n\n"
-        f"**🏦 SUPPORTED PAYMENT METHODS:**\n*(PhonePe, GPay, Paytm, BHIM, Amazon Pay)*\n\n"
+        f"**🏦 HOW TO PAY:**\n\n"
+        f"📱 **Mobile Users:** [👉 TAP HERE TO PAY DIRECTLY]({upi_url})\n*(Opens GPay, PhonePe, Paytm automatically)*\n\n" # 🚀 FIX 2: Mobile Deep Link!
         f"1️⃣ **Tap to Copy UPI ID:**\n`{UPI_ID}`\n\n"
-        f"2️⃣ **Scan QR Code:**\n[Click Here to view QR Code]({qr_link})\n\n"
+        f"2️⃣ **Scan QR Code:**\n[Click Here to view QR Code image]({qr_link})\n\n"
         f"⚠️ *After sending exactly ₹{plan['price']}, you MUST click '✅ I have Paid' within 30 mins.*"
     )
     await callback.message.edit_text(text, reply_markup=markup, link_preview_options=LinkPreviewOptions(is_disabled=False))
