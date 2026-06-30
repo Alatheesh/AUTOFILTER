@@ -198,6 +198,10 @@ async def set_multi_search_limit(client: Client, message: Message):
 async def auto_filter(client: Client, message: Message):
     query = message.text.strip()
     if len(query) < 3: return
+
+    query_lower = query.lower()
+    if "@admin" in query_lower or "@admins" in query_lower:
+        return
         
     user_id = message.from_user.id
     chat_id = message.chat.id
