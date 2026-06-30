@@ -18,6 +18,8 @@ from pyrogram.types import (
 from database.multi_db import db
 from config import Config
 from plugins.moderation import SCRAPER_TRACKER
+
+# 🚀 Import our new Extensible Filter Engine!
 from plugins.search_filters import get_filter_settings, apply_search_filters, SIZE_MAP
 
 logger = logging.getLogger(__name__)
@@ -39,6 +41,9 @@ SEARCH_STICKERS = [
     "CAACAgIAAxkBAAERau9qNXctqQUyQ4JPHMUlrBCSMmTpRwACvAwAAocoMEntN5GZWCFoBDwE",
     "CAACAgIAAxkBAAERavdqNXraBk9c93sSXemtFwSlSN_RnAAC_iYAAp2TAUsNtzXDZ_a-szwE",
     "CAACAgIAAxkBAAERavlqNXreh03oKow7UUFuKzMlU85awAACnRcAArwzqEn0nAMmwtD6cTwE"
+]
+GHOST_STICKERS = [
+    "CAACAgEAAxkBAAERawtqNX0dllDVZhRw9UkAAeIssj3C9RAAAtEBAAI-HjBHuHEaSdq4kGA8BA"
 ]
 BULK_BANNER = "https://telegra.ph/file/f8b495d98fd4d89c99150.jpg"
 
@@ -113,14 +118,34 @@ async def upload_json_payload(data_list):
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post("https://api.npoint.io/", json=data_list, timeout=8) as resp:
-                if resp.status == 200: return f"https://api.npoint.io/{(await resp.json())['id']}"
-    except Exception: pass
+                if resp.status == 200:
+                    return f"https://api.npoint.io/{(await resp.json())['id']}"
+    except Exception as e: logger.error(f"Npoint Cloud Upload Failed: {e}")
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post("https://dpaste.com/api/v2/", data={"content": json_string, "syntax": "json"}, timeout=8) as resp:
+                if resp.status in [200, 201]:
+                    url = (await resp.text()).strip()
+                    if url.startswith("http"):
+                        return f"{url}.txt"
+    except Exception as e: logger.error(f"Dpaste Cloud Upload Failed: {e}")
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post("https://rentry.co/api/new", data={"text": json_string}, timeout=8) as resp:
+                if resp.status == 200:
+                    res = await resp.json()
+                    if res.get("url"):
+                        return f"{res['url']}/raw"
+    except Exception as e: logger.error(f"Rentry Cloud Upload Failed: {e}")
     return None
 
 def build_safe_webapp_url(client_username, short_id, data_url):
     base_link = getattr(Config, "BULK_LINK", "https://yourusername.github.io/autofilter-web/").strip()
-    if not base_link.startswith("http"): base_link = f"https://{base_link}"
-    return f"{base_link}?bot={client_username or 'Bot'}&id={short_id}&url={urllib.parse.quote(data_url)}"
+    if not base_link.startswith("http"):
+        base_link = f"https://{base_link}"
+    safe_url = urllib.parse.quote(data_url)
+    bot_username = client_username or "Bot"
+    return f"{base_link}?bot={bot_username}&id={short_id}&url={safe_url}"
 
 def get_progress_bar(current, total):
     percent = current / total if total > 0 else 0
@@ -172,13 +197,13 @@ async def set_multi_search_limit(client: Client, message: Message):
 @Client.on_message((filters.group | filters.private) & filters.text & ~filters.regex(r"^/"))
 async def auto_filter(client: Client, message: Message):
     query = message.text.strip()
-    if len(query) < 2: return
+    if len(query) < 3: return
         
     user_id = message.from_user.id
     chat_id = message.chat.id
     current_time = time.time()
     
-    # 1. Scraper Protection Layer
+    # 🚨 1. Scraper Protection Layer
     if user_id not in SCRAPER_TRACKER: SCRAPER_TRACKER[user_id] = []
     SCRAPER_TRACKER[user_id].append(current_time)
     SCRAPER_TRACKER[user_id] = [t for t in SCRAPER_TRACKER[user_id] if current_time - t < 60]
@@ -187,16 +212,23 @@ async def auto_filter(client: Client, message: Message):
         await db.add_punishment(user_id, "global", "ban", reason="Automated Scraper Detection.")
         return await message.reply_text("🚫 **SECURITY LOCK:** You have been permanently banned globally for API scraping.")
 
-    # 2. Lazy Evaluation Interception
+    # ⚖️ 2. Lazy Evaluation Interception
     p_type, p_reason, p_expiry, p_scope = await db.check_punishment(user_id, str(chat_id))
     if p_type:
         lock_msg = f"🚫 You are **{p_type.upper()}ED** " + ("globally." if p_scope == "global" else "in this group.")
         lock_msg += f"\nReason: {p_reason}"
         if p_type == "mute" and p_expiry > 0: lock_msg += f"\nUnlocks: <t:{int(p_expiry)}:R>"
-        btn = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Appeal", callback_data=f"appeal_{p_scope}_{p_type}")]])
+        
+        if p_scope == "global" and message.chat.type != ChatType.PRIVATE:
+            bot_me = await client.get_me()
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Appeal in PM", url=f"https://t.me/{bot_me.username}?start=appeal_{p_type}")]])
+        else:
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Appeal", callback_data=f"appeal_{p_scope}_{p_type}")]])
+            
         return await message.reply_text(lock_msg, reply_markup=btn)
 
     await asyncio.create_task(db.add_search_count(user_id))
+    
     if user_id in SPAM_TRACKER and current_time - SPAM_TRACKER[user_id] < SPAM_COOLDOWN: return 
     SPAM_TRACKER[user_id] = current_time
 
@@ -225,7 +257,6 @@ async def auto_filter(client: Client, message: Message):
         for i, m in enumerate(unique_movies, 1): initial_text += f"{i}. {m}\n"
         initial_text += "━━━━━━━━━━━━━━━━━━\n*Preparing search...*"
         
-        # Start with a generic bulk banner image so we can edit media later
         try: progress_msg = await message.reply_photo(photo=BULK_BANNER, caption=initial_text)
         except Exception: progress_msg = await message.reply_text(initial_text)
 
@@ -233,7 +264,6 @@ async def auto_filter(client: Client, message: Message):
         not_found_movies = []
 
         for idx, movie in enumerate(unique_movies):
-            # Update Live Progress Text
             prog_text = "🔍 **Searching Movies...**\n\n"
             for prev_idx in range(idx): prog_text += f"✅ {unique_movies[prev_idx]}\n"
             prog_text += f"🟢 {movie}\n"
@@ -243,22 +273,20 @@ async def auto_filter(client: Client, message: Message):
             try: await progress_msg.edit_caption(prog_text) if progress_msg.photo else await progress_msg.edit_text(prog_text)
             except Exception: pass
             
-            # Execute Search and Filter
             raw_results = await db.search_files(movie, skip=0, limit=100, exact=False)
             filtered = apply_search_filters(raw_results, resolved_mode, resolved_lang, resolved_size)
             
-            if filtered: found_movies.append((movie, filtered[:20]))
+            if filtered: found_movies.append((movie, filtered[:1000])) # Save all found for bulk delivery later
             else: not_found_movies.append(movie)
             
-            await asyncio.sleep(0.4) # Rate limit safety
+            await asyncio.sleep(0.4) 
 
         total_time = time.time() - start_time
         summary_text = build_bulk_summary_text(found_movies, not_found_movies, total_time)
         
-        # Build Summary Buttons
         buttons = []
         for i, (m_name, files) in enumerate(found_movies):
-            buttons.append([InlineKeyboardButton(f"{m_name} ({len(files)})", callback_data=f"bms_sel_{session_id}_{i}")])
+            buttons.append([InlineKeyboardButton(f"{m_name} ({len(files)})", callback_data=f"bms_sel_{session_id}_{i}_0")])
             
         MULTI_SEARCH_CACHE[session_id] = {
             "timestamp": time.time(),
@@ -271,20 +299,35 @@ async def auto_filter(client: Client, message: Message):
         
         try: await progress_msg.edit_caption(summary_text, reply_markup=InlineKeyboardMarkup(buttons)) if progress_msg.photo else await progress_msg.edit_text(summary_text, reply_markup=InlineKeyboardMarkup(buttons))
         except Exception: pass
+
+        # 👉 RESTORED: Auto-delete for Multi-Search
+        if settings.get("filter_delete_enabled", False):
+            from plugins.advanced import trigger_ghost_self_destruct
+            trigger_ghost_self_destruct(client, chat_id, progress_msg.id, settings.get("filter_delete_time", 5) * 60)
+            
         return
 
     # ==========================================
     # 🌟 NORMAL SINGLE SEARCH LOGIC
     # ==========================================
+    loading_msg = None
     try: loading_msg = await message.reply_sticker(random.choice(SEARCH_STICKERS))
-    except Exception: loading_msg = None
+    except Exception: pass
 
     cache_key = f"{query.lower()}_{resolved_mode}_{resolved_lang}_{resolved_size}"
-    if cache_key in QUERY_CACHE and (current_time - QUERY_CACHE[cache_key][0] < CACHE_TTL):
-        raw_results = QUERY_CACHE[cache_key][1]
-    else: 
+    
+    if cache_key in QUERY_CACHE:
+        cached_time, cached_results = QUERY_CACHE[cache_key]
+        if current_time - cached_time < CACHE_TTL: raw_results = cached_results
+        else:
+            del QUERY_CACHE[cache_key]
+            raw_results = None
+    else: raw_results = None
+
+    if raw_results is None:
         raw_results = await db.search_files(query, skip=0, limit=10000, exact=False)
-        if not raw_results and " " in query: raw_results = await db.search_files(query.replace(" ", ""), skip=0, limit=10000, exact=False)
+        if not raw_results and " " in query:
+            raw_results = await db.search_files(query.replace(" ", ""), skip=0, limit=10000, exact=False)
         QUERY_CACHE[cache_key] = (current_time, raw_results)
 
     filtered_results = apply_search_filters(raw_results, resolved_mode, resolved_lang, resolved_size)
@@ -295,19 +338,47 @@ async def auto_filter(client: Client, message: Message):
             try: await loading_msg.delete()
             except Exception: pass
         suggestions = await get_fuzzy_suggestions(query)
-        btn_list = [[InlineKeyboardButton(f"🔍 Search: {s}", callback_data=f"fuz_{s[:50]}")] for s in suggestions]
+        btn_list = []
+        for s in suggestions: btn_list.append([InlineKeyboardButton(f"🔍 Search: {s}", callback_data=f"fuz_{s[:50]}")])
         btn_list.append([InlineKeyboardButton("🔔 Request this Movie", callback_data=f"req_{query[:40]}")])
-        return await message.reply_text("😔 **No exact matches found.**", reply_markup=InlineKeyboardMarkup(btn_list), reply_parameters=ReplyParameters(message_id=message.id))
+        try: await message.reply_text("😔 **No exact matches found.**", reply_markup=InlineKeyboardMarkup(btn_list), reply_parameters=ReplyParameters(message_id=message.id))
+        except Exception: await client.send_message(chat_id, "😔 **No matches found.**", reply_markup=InlineKeyboardMarkup(btn_list))
+        return
 
     metadata = await fetch_imdb_tmdb(query)
     buttons = []
     shortener_on = settings.get("shortener_enabled", False)
 
+    # 👉 RESTORED: Bulk Delivery for Single Search
+    if settings.get("bulk_enabled", True):
+        web_app_results = filtered_results[:1000] 
+        short_id = hashlib.md5(f"{user_id}_{query}_{time.time()}".encode()).hexdigest()[:8]
+        webapp_data = [f"{f.get('title', 'Unknown')}|{format_size(f.get('size', 0))}" for f in web_app_results]
+        
+        data_url = await upload_json_payload(webapp_data)
+        
+        if data_url:
+            web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url)
+            
+            BULK_CACHE[short_id] = (time.time(), web_app_results, web_app_url)
+            for k in list(BULK_CACHE.keys()):
+                if time.time() - BULK_CACHE[k][0] > BULK_CACHE_TTL: del BULK_CACHE[k]
+
+            if chat_type == ChatType.PRIVATE:
+                buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)})", web_app=WebAppInfo(url=web_app_url))])
+            else:
+                bot_url = f"https://t.me/{client.me.username}?start=bapp_{short_id}"
+                buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)})", url=bot_url)])
+        else:
+            logger.error("Skipped drawing Bulk Delivery button because Cloud Upload failed completely.")
+
     for file in results:
+        db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
-        if shortener_on: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{file.get('_id')} ")])
-        else: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{file.get('_id')} ")])
+        if shortener_on: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
+        else: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{db_id}")])
     
+    # 👉 RESTORED: Help Us button
     buttons.append([InlineKeyboardButton(text="🤝 Help Us!", callback_data="help_us_menu")])
     
     if len(filtered_results) > 10:
@@ -317,11 +388,23 @@ async def auto_filter(client: Client, message: Message):
             InlineKeyboardButton(text=f"Page 1 of {total_pages}", callback_data="pages_info"),
             InlineKeyboardButton(text="Next ▶️", callback_data=f"next_1_{query}")
         ])
+    
+    filter_notice = ""
+    if resolved_mode == "interactive" and (resolved_lang != "all" or resolved_size != "all"):
+        filter_notice = f"\n✨ **Filters Applied:** Size: `{resolved_size.upper()}` | Audio: `{resolved_lang.upper()}`"
 
-    filter_notice = f"\n✨ **Filters:** `{resolved_size.upper()}` | `{resolved_lang.upper()}`" if resolved_mode == "interactive" and (resolved_lang != "all" or resolved_size != "all") else ""
-    pm_notice = "\n\n*(Click a file to receive it securely in your Private Messages)*" if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP] else ""
+    if settings.get("filter_delete_enabled", False):
+        m_time = settings.get("filter_delete_time", 5)
+        filter_notice += f"\n\n⏳ *Note: This search result will automatically delete in {m_time} minutes.*"
 
-    caption = f"🎬 **{metadata['title']}**\n⭐️ Rating: `{metadata['rating']}`\n🎭 Genre: `{metadata['genre']}`\n\n📝 **Plot:** {metadata['plot']}\n\n🔍 Found {len(filtered_results)} matching files.{filter_notice}{pm_notice}"
+    pm_notice = ""
+    if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        pm_notice = "\n\n*(Click a file to receive it securely in your Private Messages)*"
+
+    caption = (
+        f"🎬 **{metadata['title']}**\n⭐️ Rating: `{metadata['rating']}`\n🎭 Genre: `{metadata['genre']}`\n\n"
+        f"📝 **Plot:** {metadata['plot']}\n\n🔍 Found {len(filtered_results)} matching files.{filter_notice}{pm_notice}"
+    )
     
     if loading_msg:
         try: await loading_msg.delete()
@@ -338,10 +421,11 @@ async def auto_filter(client: Client, message: Message):
 # ==========================================
 # 🌟 MULTI-SEARCH CALLBACKS
 # ==========================================
-@Client.on_callback_query(filters.regex(r"^bms_sel_(.+)_(.+)"))
+@Client.on_callback_query(filters.regex(r"^bms_sel_(.+)_(.+)_(\d+)"))
 async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
     session_id = callback.matches[0].group(1)
     movie_idx = int(callback.matches[0].group(2))
+    page = int(callback.matches[0].group(3))
     
     if session_id not in MULTI_SEARCH_CACHE or time.time() - MULTI_SEARCH_CACHE[session_id]["timestamp"] > MULTI_SEARCH_TTL:
         return await callback.answer("⏳ Session Expired! Please search again.", show_alert=True)
@@ -349,18 +433,61 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
     session_data = MULTI_SEARCH_CACHE[session_id]
     movie_name, files = session_data["found"][movie_idx]
     
-    await callback.answer(f"Fetching details for {movie_name}...", show_alert=False)
+    if page == 0: await callback.answer(f"Fetching details for {movie_name}...", show_alert=False)
+    else: await callback.answer()
     
     metadata = await fetch_imdb_tmdb(movie_name)
     settings = await db.get_settings()
     shortener_on = settings.get("shortener_enabled", False)
     
-    buttons = [[InlineKeyboardButton("⬅ Movie List", callback_data=f"bms_back_{session_id}")]]
+    # Get the paginated results for this specific movie
+    results = files[page * 10 : (page + 1) * 10]
     
-    for file in files[:10]: # Only show top 10 in bulk mode to keep it clean
+    buttons = []
+    user_id = callback.from_user.id
+    chat_type = callback.message.chat.type
+    
+    # 👉 RESTORED: Bulk WebApp Delivery explicitly added into Multi-Search!
+    if settings.get("bulk_enabled", True):
+        web_app_results = files[:1000] 
+        short_id = hashlib.md5(f"{user_id}_{movie_name}_{time.time()}".encode()).hexdigest()[:8]
+        webapp_data = [f"{f.get('title', 'Unknown')}|{format_size(f.get('size', 0))}" for f in web_app_results]
+        
+        data_url = await upload_json_payload(webapp_data)
+        
+        if data_url:
+            web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url)
+            
+            BULK_CACHE[short_id] = (time.time(), web_app_results, web_app_url)
+            for k in list(BULK_CACHE.keys()):
+                if time.time() - BULK_CACHE[k][0] > BULK_CACHE_TTL: del BULK_CACHE[k]
+
+            if chat_type == ChatType.PRIVATE:
+                buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)})", web_app=WebAppInfo(url=web_app_url))])
+            else:
+                bot_url = f"https://t.me/{client.me.username}?start=bapp_{short_id}"
+                buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)})", url=bot_url)])
+
+    for file in results:
+        db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
-        if shortener_on: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{file.get('_id')} ")])
-        else: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{file.get('_id')} ")])
+        if shortener_on: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
+        else: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{db_id}")])
+    
+    # 👉 RESTORED: Help Us Button in Multi-Search
+    buttons.append([InlineKeyboardButton(text="🤝 Help Us!", callback_data="help_us_menu")])
+    
+    # 👉 RESTORED: Pagination in Multi-Search
+    if len(files) > 10:
+        total_pages = math.ceil(len(files) / 10)
+        nav_buttons = []
+        if page > 0: nav_buttons.append(InlineKeyboardButton(text="◀️ Prev", callback_data=f"bms_sel_{session_id}_{movie_idx}_{page - 1}"))
+        nav_buttons.append(InlineKeyboardButton(text=f"Page {page + 1} of {total_pages}", callback_data="pages_info"))
+        if len(files) > (page + 1) * 10: nav_buttons.append(InlineKeyboardButton(text="Next ▶️", callback_data=f"bms_sel_{session_id}_{movie_idx}_{page + 1}"))
+        buttons.append(nav_buttons)
+
+    # Back to Movie List
+    buttons.append([InlineKeyboardButton("⬅ Back to Movie List", callback_data=f"bms_back_{session_id}")])
     
     caption = f"🎬 **{metadata['title']}**\n🗓 Year: `{metadata['release_date'][:4]}` | ⭐️ `{metadata['rating']}`\n🎭 Genre: `{metadata['genre']}`\n🗣 Language: `{metadata['language'].upper()}`\n\n📝 **Plot:** {metadata['plot']}\n\n🔍 Found {len(files)} matching files."
     
@@ -407,6 +534,7 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
 
     raw_results = await db.search_files(base_query, skip=0, limit=10000, exact=False)
     if not raw_results and " " in base_query: raw_results = await db.search_files(base_query.replace(" ", ""), skip=0, limit=10000, exact=False)
+    
     filtered_results = apply_search_filters(raw_results, resolved_mode, resolved_lang, resolved_size)
     
     results = filtered_results[page * 10 : (page + 1) * 10]
@@ -416,11 +544,34 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     settings = await db.get_settings()
     shortener_on = settings.get("shortener_enabled", False)
 
+    # 👉 RESTORED: Bulk Delivery in Single Search Pagination
+    if settings.get("bulk_enabled", True):
+        web_app_results = filtered_results[:1000] 
+        short_id = hashlib.md5(f"{user_id}_{base_query}_{time.time()}".encode()).hexdigest()[:8]
+        webapp_data = [f"{f.get('title', 'Unknown')}|{format_size(f.get('size', 0))}" for f in web_app_results]
+        
+        data_url = await upload_json_payload(webapp_data)
+        
+        if data_url:
+            web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url)
+            
+            BULK_CACHE[short_id] = (time.time(), web_app_results, web_app_url)
+            for k in list(BULK_CACHE.keys()):
+                if time.time() - BULK_CACHE[k][0] > BULK_CACHE_TTL: del BULK_CACHE[k]
+
+            if chat_type == ChatType.PRIVATE:
+                buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)})", web_app=WebAppInfo(url=web_app_url))])
+            else:
+                bot_url = f"https://t.me/{client.me.username}?start=bapp_{short_id}"
+                buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)})", url=bot_url)])
+
     for file in results:
+        db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
-        if shortener_on: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{file.get('_id')} ")])
-        else: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{file.get('_id')} ")])
+        if shortener_on: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
+        else: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{db_id}")])
     
+    # 👉 RESTORED: Help Us
     buttons.append([InlineKeyboardButton(text="🤝 Help Us!", callback_data="help_us_menu")])
     
     total_pages = math.ceil(len(filtered_results) / 10)
