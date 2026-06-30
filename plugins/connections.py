@@ -25,11 +25,10 @@ WAITING_FOR_CONNECTION = {}
 # ==========================================
 
 async def process_connect(client: Client, message: Message, user_id: int, target_chat_input: str, prompt_msg_id: int = None):
-    # --- BUG FIX: Convert string IDs to Integers ---
     try:
         target_chat = int(target_chat_input)
     except ValueError:
-        target_chat = target_chat_input # Keep as string if it's a @username
+        target_chat = target_chat_input 
         
     try:
         chat = await client.get_chat(target_chat)
@@ -89,6 +88,7 @@ async def process_connect(client: Client, message: Message, user_id: int, target
     success_text = (
         f"✅ **Successfully Connected!**\n\n"
         f"**Group:** `{chat_title}`\n"
+        f"**Admins Logged:** `{len(group_admins)}`\n"
         f"You are now registered as the **Primary Connector**. Only you have the authority to change this group's layout and themes!"
     )
     if prompt_msg_id:
@@ -98,7 +98,6 @@ async def process_connect(client: Client, message: Message, user_id: int, target
 
 
 async def process_disconnect(client: Client, message: Message, user_id: int, target_chat_input: str, prompt_msg_id: int = None):
-    # --- BUG FIX: Convert string IDs to Integers ---
     try:
         target_chat = int(target_chat_input)
     except ValueError:
@@ -112,7 +111,6 @@ async def process_disconnect(client: Client, message: Message, user_id: int, tar
         text = "❌ **Error:** Could not find that group."
         return await client.edit_message_text(message.chat.id, prompt_msg_id, text) if prompt_msg_id else await message.reply_text(text)
 
-    # 2. Fetch the current group connection status
     g_sett = await db.get_group_settings(target_chat_id)
     connected_by = g_sett.get("connected_by")
     
@@ -120,19 +118,16 @@ async def process_disconnect(client: Client, message: Message, user_id: int, tar
         text = "⚠️ This group is not currently connected to any administrator."
         return await client.edit_message_text(message.chat.id, prompt_msg_id, text) if prompt_msg_id else await message.reply_text(text)
 
-    # 3. Security Gatekeeper
     if connected_by != user_id and user_id not in Config.ADMINS:
         text = "🛑 **Access Denied:** Only the Primary Connector who linked this group can disconnect it."
         return await client.edit_message_text(message.chat.id, prompt_msg_id, text) if prompt_msg_id else await message.reply_text(text)
 
-    # 🔓 Send Hacker Unlock Sticker Animation
     try:
         loading_msg = await message.reply_sticker(random.choice(CODE_STICKERS))
         await asyncio.sleep(3)
         await loading_msg.delete()
     except Exception: pass
 
-    # 4. Erase the connection data
     await db.update_group_setting(target_chat_id, "connected_by", None)
     await db.update_group_setting(target_chat_id, "admins", [])
 
@@ -154,8 +149,6 @@ async def process_disconnect(client: Client, message: Message, user_id: int, tar
 @Client.on_message(filters.command("connect"))
 async def connect_group_command(client: Client, message: Message):
     user_id = message.from_user.id
-    
-    # 1. Determine Target Chat
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         target_chat_input = str(message.chat.id)
         await process_connect(client, message, user_id, target_chat_input)
@@ -167,12 +160,7 @@ async def connect_group_command(client: Client, message: Message):
                 "*(Or click Cancel to abort)*",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_connection_flow")]])
             )
-            # Save State
-            WAITING_FOR_CONNECTION[user_id] = {
-                "action": "connect",
-                "message_id": prompt.id,
-                "timestamp": time.time()
-            }
+            WAITING_FOR_CONNECTION[user_id] = {"action": "connect", "message_id": prompt.id, "timestamp": time.time()}
             return
         
         target_chat_input = message.command[1]
@@ -182,8 +170,6 @@ async def connect_group_command(client: Client, message: Message):
 @Client.on_message(filters.command("disconnect"))
 async def disconnect_group_command(client: Client, message: Message):
     user_id = message.from_user.id
-    
-    # 1. Determine Target Chat
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         target_chat_input = str(message.chat.id)
         await process_disconnect(client, message, user_id, target_chat_input)
@@ -195,17 +181,37 @@ async def disconnect_group_command(client: Client, message: Message):
                 "*(Or click Cancel to abort)*",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_connection_flow")]])
             )
-            # Save State
-            WAITING_FOR_CONNECTION[user_id] = {
-                "action": "disconnect",
-                "message_id": prompt.id,
-                "timestamp": time.time()
-            }
+            WAITING_FOR_CONNECTION[user_id] = {"action": "disconnect", "message_id": prompt.id, "timestamp": time.time()}
             return
             
         target_chat_input = message.command[1]
         await process_disconnect(client, message, user_id, target_chat_input)
     raise StopPropagation
+
+# 🚀 NEW FEATURE: Sync Admins without disconnecting
+@Client.on_message(filters.command("refreshadmins") & (filters.group | filters.supergroup))
+async def refresh_admins_command(client: Client, message: Message):
+    user_id = message.from_user.id
+    target_chat_id = message.chat.id
+    
+    # Verify Permissions
+    try:
+        user_member = await client.get_chat_member(target_chat_id, user_id)
+        if user_member.status not in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
+            return await message.reply_text("🛑 Only group admins can refresh the admin list.")
+    except Exception: return
+
+    # Rescrape Admins
+    group_admins = []
+    async for admin in client.get_chat_members(target_chat_id, filter=ChatMembersFilter.ADMINISTRATORS):
+        if not admin.user.is_bot:
+            group_admins.append(admin.user.id)
+            
+    # Update Database
+    await db.update_group_setting(target_chat_id, "admins", group_admins)
+    await message.reply_text(f"🔄 **Admin List Updated!**\n\nSuccessfully synced `{len(group_admins)}` active admins into the database for Emergency Reports.")
+    raise StopPropagation
+
 
 # ==========================================
 # INTERACTIVE STATE LISTENER
@@ -214,12 +220,8 @@ async def disconnect_group_command(client: Client, message: Message):
 @Client.on_message(filters.text & filters.private, group=-2)
 async def interactive_connection_listener(client: Client, message: Message):
     user_id = message.from_user.id
-    
-    # 1. CRITICAL FIX: If user is not setting up a connection, let the Search engine handle it!
-    if user_id not in WAITING_FOR_CONNECTION:
-        raise ContinuePropagation
+    if user_id not in WAITING_FOR_CONNECTION: raise ContinuePropagation
         
-    # Ignore commands if they somehow trigger this state
     if message.text.startswith("/"):
         del WAITING_FOR_CONNECTION[user_id]
         raise ContinuePropagation
@@ -229,38 +231,26 @@ async def interactive_connection_listener(client: Client, message: Message):
     timestamp = state["timestamp"]
     action = state["action"]
     
-    # Clear state
     del WAITING_FOR_CONNECTION[user_id]
     
-    # 48-Hour Security Check (172,800 Seconds)
     if time.time() - timestamp > 172800:
-        await client.edit_message_text(
-            chat_id=message.chat.id,
-            message_id=prompt_msg_id,
-            text="⚠️ **Session Expired.**\n\nThis prompt is older than 48 hours. Please run the command again."
-        )
+        await client.edit_message_text(chat_id=message.chat.id, message_id=prompt_msg_id, text="⚠️ **Session Expired.**\n\nThis prompt is older than 48 hours. Please run the command again.")
         try: await message.delete() 
         except Exception: pass
         return
         
     target_chat_input = message.text.strip()
-    
-    # Keep chat clean by deleting their text reply
     try: await message.delete() 
     except Exception: pass
 
-    if action == "connect":
-        await process_connect(client, message, user_id, target_chat_input, prompt_msg_id)
-    elif action == "disconnect":
-        await process_disconnect(client, message, user_id, target_chat_input, prompt_msg_id)
+    if action == "connect": await process_connect(client, message, user_id, target_chat_input, prompt_msg_id)
+    elif action == "disconnect": await process_disconnect(client, message, user_id, target_chat_input, prompt_msg_id)
     raise StopPropagation
 
 @Client.on_callback_query(filters.regex("^cancel_connection_flow$"))
 async def cancel_connection_callback(client: Client, callback: CallbackQuery):
     user_id = callback.from_user.id
-    
     if user_id in WAITING_FOR_CONNECTION:
         del WAITING_FOR_CONNECTION[user_id]
-        
     await callback.message.edit_text("❌ **Operation Cancelled.**\n\nYou can start over whenever you're ready.")
     await callback.answer("Cancelled", show_alert=False)
