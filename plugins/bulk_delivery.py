@@ -184,15 +184,10 @@ async def handle_bulk_delivery(client: Client, message: Message):
             for f_data in selected_files:
                 if f_data:
                     try:
-                        db_id = str(f_data.get("_id", ""))
-                        share_button = InlineKeyboardMarkup([
-                            [InlineKeyboardButton("📤 Share", switch_inline_query=f"share_{db_id}")]
-                        ])
                         sent_file = await client.send_cached_media(
                             chat_id=user_id, 
                             file_id=f_data.get("file_id"), 
-                            caption="✨ **Here is your requested file.**\n\n🛡 *Provided securely by the Auto-Filter System.*",
-                            reply_markup=share_button
+                            caption="✨ **Here is your requested file.**\n\n🛡 *Provided securely by the Auto-Filter System.*"
                         )
                         sent_message_ids.append(sent_file.id)
                         successful += 1
@@ -204,15 +199,10 @@ async def handle_bulk_delivery(client: Client, message: Message):
                         
                         # Try sending the file one more time after waking up
                         try:
-                            db_id = str(f_data.get("_id", ""))
-                            share_button = InlineKeyboardMarkup([
-                                [InlineKeyboardButton("📤 Share", switch_inline_query=f"share_{db_id}")]
-                            ])
                             sent_file = await client.send_cached_media(
                                 chat_id=user_id, 
                                 file_id=f_data.get("file_id"), 
-                                caption="✨ **Here is your requested file.**\n\n🛡 *Provided securely by the Auto-Filter System.*",
-                                reply_markup=share_button
+                                caption="✨ **Here is your requested file.**\n\n🛡 *Provided securely by the Auto-Filter System.*"
                             )
                             sent_message_ids.append(sent_file.id)
                             successful += 1

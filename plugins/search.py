@@ -13,7 +13,7 @@ from pyrogram import Client, filters, StopPropagation
 from pyrogram.enums import ChatType
 from pyrogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton, Message, 
-    InlineQuery, InlineQueryResultArticle, InputTextMessageContent, CallbackQuery, ReplyParameters, WebAppInfo, InputMediaPhoto, InlineQueryResultCachedDocument
+    InlineQuery, InlineQueryResultArticle, InputTextMessageContent, CallbackQuery, ReplyParameters, WebAppInfo, InputMediaPhoto
 )
 from database.multi_db import db
 from config import Config
@@ -596,24 +596,6 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     await callback.answer()
 
 @Client.on_inline_query()
-async def inline_search(client, query):
-    search_text = query.query.strip()
-    
-    # --- NEW SHARE INTERCEPTOR ---
-    if search_text.startswith("share_"):
-        file_id = search_text.replace("share_", "")
-        # Do a direct DB lookup for this exact file
-        file_data = await db.get_file_by_id(file_id)
-        
-        if file_data:
-            result = InlineQueryResultCachedDocument(
-                title=f"🎬 {file_data['file_name']}",
-                document_file_id=file_data['file_id'],
-                description=f"💾 {file_data['file_size']} | Send to chat natively",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🤖 Get More Movies", url=f"https://t.me/{client.me.username}")]])
-            )
-            await query.answer([result], cache_time=3600, is_personal=True)
-        return()
 async def inline_search(client: Client, query: InlineQuery):
     search_query = query.query.strip()
     if len(search_query) < 3: return await query.answer([])
