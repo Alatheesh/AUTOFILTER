@@ -595,7 +595,7 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
     await callback.answer()
 
-@Client.on_@Client.on_inline_query()
+@Client.on_inline_query()
 async def inline_search(client, query):
     search_text = query.query.strip()
     
