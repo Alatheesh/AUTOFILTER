@@ -29,12 +29,18 @@ async def check_double_fsub(client: Client, user_id: int) -> bool:
         except Exception: return False
     return True
 
-async def execute_file_delivery(client: Client, chat_id: int, file_id: str):
+# --- AFTER ---
+async def execute_file_delivery(client: Client, chat_id: int, file_id: str, db_id: str):
     try:
+        # 🚀 NEW: Add the Share button configured for Native Inline Sharing
+        share_button = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📤 Share", switch_inline_query=f"share_{db_id}")]
+        ])
         sent_file = await client.send_cached_media(
             chat_id=chat_id, 
             file_id=file_id, 
-            caption="✨ **Here is your requested file.**\n\n🛡 *Provided securely by the Auto-Filter System.*"
+            caption="✨ **Here is your requested file.**\n\n🛡 *Provided securely by the Auto-Filter System.*",
+            reply_markup=share_button
         )
         settings = await db.get_settings()
         if settings.get("file_delete_enabled", False):
