@@ -13,7 +13,7 @@ from pyrogram import Client, filters, StopPropagation
 from pyrogram.enums import ChatType
 from pyrogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton, Message, 
-    InlineQuery, InlineQueryResultArticle, InputTextMessageContent, CallbackQuery, ReplyParameters, WebAppInfo, InputMediaPhoto
+    InlineQuery, InlineQueryResultArticle, InputTextMessageContent, CallbackQuery, ReplyParameters, WebAppInfo, InputMediaPhoto, InlineQueryResultCachedDocument
 )
 from database.multi_db import db
 from config import Config
