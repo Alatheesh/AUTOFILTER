@@ -611,7 +611,6 @@ async def inline_search(client: Client, query: InlineQuery):
     
     if not is_joined:
         buttons = []
-        # Generate the invite links for required channels
         for idx, channel in enumerate(Config.FSUB_CHANNELS[:2], start=1):
             try:
                 chat = await client.get_chat(channel)
@@ -620,29 +619,23 @@ async def inline_search(client: Client, query: InlineQuery):
                 invite_link = "https://t.me/telegram"
             buttons.append([InlineKeyboardButton(text=f"Join Channel #{idx}", url=invite_link)])
         
-        # This button instantly re-opens the inline search with their previous query!
         buttons.append([InlineKeyboardButton(text="🔄 Try Again", switch_inline_query_current_chat=search_query)])
         
-        # Show a warning instead of the files
         join_article = InlineQueryResultArticle(
             id="fsub_warning",
             title="🛑 Join Required to Search!",
             description="Click here to join our channels and unlock searches.",
-            input_message_content=InputTextMessageContent(
-                "🛑 **Access Denied:**\nYou must join our official distribution channels to use the inline search."
-            ),
+            input_message_content=InputTextMessageContent("🛑 **Access Denied:**\nYou must join our official distribution channels to use the inline search."),
             reply_markup=InlineKeyboardMarkup(buttons),
             thumb_url="https://images.unsplash.com/photo-1560529870-1efc3a4080fd?q=80&w=150" 
         )
-        # cache_time=0 ensures it re-checks their status immediately when they click "Try Again"
         return await query.answer([join_article], cache_time=0, is_personal=True)
-
 
     # 🎬 2. IF SUBSCRIBED, SHOW ACTUAL FILES FOR DIRECT DELIVERY
     results = await db.search_files(search_query, skip=0, limit=Config.MAX_RESULTS, exact=False)
     articles = []
     
-    # 📝 Fetch the global/default custom caption ONCE before the loop to save database performance
+    # 📝 Fetch the global/default custom caption ONCE before the loop
     raw_caption = await db.get_custom_caption(None)
     
     for idx, file in enumerate(results):
