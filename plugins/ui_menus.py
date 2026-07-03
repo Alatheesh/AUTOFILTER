@@ -139,7 +139,7 @@ async def start_menu_handler(client: Client, message: Message):
         await db.update_user_setting(user_id, "joined_date", datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
         
         # Give them the Free VIP Trial (if enabled by admin)
-        await apply_new_user_trial(user_id)
+        # await apply_new_user_trial(user_id)
 
     try:
         loading_msg = await message.reply_sticker(random.choice(START_STICKERS))
