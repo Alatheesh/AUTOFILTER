@@ -7,13 +7,22 @@ import string
 import random
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+import math
 from pyrogram.errors import FloodWait, UserIsBlocked # 🚀 NEW: Critical safety imports
 from database.multi_db import db
 from config import Config
-from plugins.search import BULK_CACHE, format_size # 📝 Imported format_size for captions
+from plugins.search import BULK_CACHE
 
 # 🚀 Importing the new isolated engine!
 from plugins.shortener import VERIFICATION_TOKENS, get_shortlink
+
+def format_size(size_bytes):
+    if size_bytes == 0: return "0B"
+    size_name = ("B", "KB", "MB", "GB", "TB")
+    i = int(math.floor(math.log(size_bytes, 1024)))
+    p = math.pow(1024, i)
+    s = round(size_bytes / p, 2)
+    return f"{s} {size_name[i]}"
 
 logger = logging.getLogger(__name__)
 
