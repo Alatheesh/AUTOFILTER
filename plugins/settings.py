@@ -169,6 +169,20 @@ async def admin_input_catcher(client: Client, message: Message):
             await db.update_settings({"filter_delete_time": int(user_input)})
             await finish_input(f"✅ **Filter Delete Time Saved:** `{user_input} Minutes`", "set_autodelete")
         else: await message.reply_text("❌ **Invalid Input!** Please send only a number in minutes (e.g., `5`).")
+
+    # 📝 NEW: FILE CAPTION INPUT CATCHER
+    elif state.startswith("setup_caption_"):
+        scope = state.replace("setup_caption_", "")
+        
+        if scope == "global":
+            await db.set_custom_caption(None, user_input, is_global=True)
+            back_callback = "set_caption_global"
+        else:
+            chat_id = int(scope)
+            await db.set_custom_caption(chat_id, user_input, is_global=False)
+            back_callback = f"set_caption_local_{chat_id}"
+            
+        await finish_input(f"✅ **Custom Caption Saved!**\n\nPreview:\n{user_input}", back_callback)
             
     raise StopPropagation
 
@@ -191,6 +205,7 @@ async def settings_router(client: Client, message: Message):
         mode = g_sett.get("search_mode", "let_members_choose")
         buttons = [
             [InlineKeyboardButton("🛡️ Moderation Rules Hub", callback_data=f"set_mod_local_{message.chat.id}")],
+            [InlineKeyboardButton("📝 File Caption Settings", callback_data=f"set_caption_local_{message.chat.id}")], # <-- NEW BUTTON
             [InlineKeyboardButton(text=f"{'✅' if mode=='force_default' else '❌'} Force Default", callback_data=f"gset_mode_force_default_{message.chat.id}"),
              InlineKeyboardButton(text=f"{'✅' if mode=='force_interactive' else '❌'} Force Interactive", callback_data=f"gset_mode_force_interactive_{message.chat.id}")],
             [InlineKeyboardButton(text=f"{'✅' if mode=='let_members_choose' else '❌'} Let Members Choose", callback_data=f"gset_mode_let_members_choose_{message.chat.id}")]
@@ -216,6 +231,7 @@ async def admin_direct_command(client: Client, message: Message):
         [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests")],
         [InlineKeyboardButton("🕵️‍♂️ Inside Settings", callback_data="set_inside")], 
         [InlineKeyboardButton("🗑 Auto-Delete Filters", callback_data="set_autodelete")],
+        [InlineKeyboardButton("📝 Global File Caption", callback_data="set_caption_global")], # <-- NEW BUTTON
         [InlineKeyboardButton("🛡️ Global Moderation Hub", callback_data="set_mod_global")],
         [InlineKeyboardButton("🔙 Exit", callback_data="tier_root_fallback")]
     ]
@@ -326,12 +342,12 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
 # ==========================================
 # 👑 CREATOR & MODERATION CALLBACKS
 # ==========================================
-@Client.on_callback_query(filters.regex(r"^(set_home|set_inside|set_shortener|set_requests|set_autodelete|set_mod_|mod_|inside_|time_|toggle_|set_placements|toggle_place_)"))
+@Client.on_callback_query(filters.regex(r"^(set_home|set_inside|set_shortener|set_requests|set_autodelete|set_mod_|mod_|inside_|time_|toggle_|set_placements|toggle_place_|set_caption_|edit_caption_|del_caption_|guide_caption_)"))
 async def settings_callbacks(client: Client, callback: CallbackQuery):
     action = callback.data
     user_id = callback.from_user.id
 
-    if action in ["set_home", "set_inside", "set_shortener", "set_requests", "set_autodelete"] or action.startswith("set_mod_"):
+    if action in ["set_home", "set_inside", "set_shortener", "set_requests", "set_autodelete"] or action.startswith("set_mod_") or action.startswith("set_caption_"):
         if user_id in ADMIN_STATE: del ADMIN_STATE[user_id]
 
     if action == "set_home":
@@ -341,6 +357,7 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
             [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests")],
             [InlineKeyboardButton("🕵️‍♂️ Inside Settings", callback_data="set_inside")], 
             [InlineKeyboardButton("🗑 Auto-Delete Filters", callback_data="set_autodelete")],
+            [InlineKeyboardButton("📝 Global File Caption", callback_data="set_caption_global")], # <-- NEW BUTTON
             [InlineKeyboardButton("🛡️ Global Moderation Hub", callback_data="set_mod_global")],
             [InlineKeyboardButton("🔙 Exit", callback_data="tier_root_fallback")]
         ]
@@ -569,6 +586,71 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
     elif action == "time_filter_del":
         ADMIN_STATE[user_id] = {"state": "setup_filter_time", "msg_id": callback.message.id, "timestamp": time.time()}
         await callback.message.edit_text("✏️ **Send the Search Result Auto-Delete time in MINUTES.**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_autodelete")]]))
+
+    # 📝 NEW: FILE CAPTION MENUS & LOGIC
+    elif action.startswith("set_caption_"):
+        scope = action.replace("set_caption_", "")
+        
+        # Check if they have a custom caption currently
+        if scope == "global":
+            bot_settings = await db.settings.find_one({"_id": "bot_settings"})
+            has_custom = bot_settings and bot_settings.get("custom_caption") is not None
+            back_btn = "set_home"
+            title = "GLOBAL"
+        else:
+            chat_id = int(scope)
+            group = await db.groups.find_one({"chat_id": chat_id})
+            has_custom = group and group.get("custom_caption") is not None
+            back_btn = f"tier_gmanage_{chat_id}"
+            title = f"GROUP ({chat_id})"
+            
+        text = f"📝 **{title} File Caption Settings**\n\nCustomize the text sent alongside movie files."
+        if has_custom: text += "\n\n🟢 **Status:** Custom Caption Active"
+        else: text += "\n\n🟡 **Status:** Using Default/Fallback Caption"
+        
+        buttons = [
+            [InlineKeyboardButton("✏️ Change Caption", callback_data=f"edit_caption_{scope}")],
+            [InlineKeyboardButton("📖 Caption Guide", callback_data=f"guide_caption_{scope}")]
+        ]
+        if has_custom:
+            buttons.insert(1, [InlineKeyboardButton("🗑 Delete Custom Caption", callback_data=f"del_caption_{scope}")])
+            
+        buttons.append([InlineKeyboardButton("🔙 Back", callback_data=back_btn)])
+        await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+        
+    elif action.startswith("edit_caption_"):
+        scope = action.replace("edit_caption_", "")
+        ADMIN_STATE[user_id] = {"state": f"setup_caption_{scope}", "msg_id": callback.message.id, "timestamp": time.time()}
+        
+        text = "✏️ **Send me the new HTML Caption.**\n\nYou can use placeholders like `{file_name}`, `{size}`, and `{mention}`.\nCheck the Guide for more details."
+        await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data=f"set_caption_{scope}")]]))
+        
+    elif action.startswith("guide_caption_"):
+        scope = action.replace("guide_caption_", "")
+        text = (
+            "📖 **Caption Formatting Guide**\n\n"
+            "You can use standard HTML tags (like `<b>`, `<i>`, `<code>`, `<a href='url'>`).\n\n"
+            "**Dynamic Placeholders:**\n"
+            "• `{file_name}` : Original file name.\n"
+            "• `{size}` : File size (e.g., 1.5 GB).\n"
+            "• `{mention}` : Tags the user requesting the file.\n\n"
+            "**Example Setup:**\n"
+            "`<b>{file_name}</b>`\n"
+            "`Size: {size}`\n"
+            "`Requested by: {mention}`"
+        )
+        await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"set_caption_{scope}")]]))
+
+    elif action.startswith("del_caption_"):
+        scope = action.replace("del_caption_", "")
+        if scope == "global":
+            await db.delete_custom_caption(None, is_global=True)
+        else:
+            await db.delete_custom_caption(int(scope), is_global=False)
+            
+        await callback.answer("✅ Custom caption removed. Reverting to default.", show_alert=True)
+        callback.data = f"set_caption_{scope}"
+        await settings_callbacks(client, callback)
 
 # ==========================================
 # 📊 SYSTEM ADMIN COMMANDS & STATS DASHBOARDS
