@@ -13,8 +13,11 @@ from pyrogram import Client, filters, StopPropagation
 from pyrogram.enums import ChatType
 from pyrogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton, Message, 
-    InlineQuery, InlineQueryResultArticle, InputTextMessageContent, CallbackQuery, ReplyParameters, WebAppInfo, InputMediaPhoto
+    InlineQuery, InlineQueryResultArticle, InputTextMessageContent, 
+    CallbackQuery, ReplyParameters, WebAppInfo, InputMediaPhoto,
+    InlineQueryResultCachedDocument
 )
+from plugins.monetization import check_double_fsub
 from database.multi_db import db
 from config import Config
 from plugins.moderation import SCRAPER_TRACKER
@@ -598,10 +601,60 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
 @Client.on_inline_query()
 async def inline_search(client: Client, query: InlineQuery):
     search_query = query.query.strip()
-    if len(search_query) < 3: return await query.answer([])
+    user_id = query.from_user.id
+    
+    if len(search_query) < 3: 
+        return await query.answer([])
+
+    # 🛑 1. CHECK FORCE SUB (FSUB) FIRST
+    is_joined = await check_double_fsub(client, user_id)
+    
+    if not is_joined:
+        buttons = []
+        # Generate the invite links for required channels
+        for idx, channel in enumerate(Config.FSUB_CHANNELS[:2], start=1):
+            try:
+                chat = await client.get_chat(channel)
+                invite_link = chat.invite_link if chat.invite_link else await client.export_chat_invite_link(channel)
+            except Exception: 
+                invite_link = "https://t.me/telegram"
+            buttons.append([InlineKeyboardButton(text=f"Join Channel #{idx}", url=invite_link)])
+        
+        # This button instantly re-opens the inline search with their previous query!
+        buttons.append([InlineKeyboardButton(text="🔄 Try Again", switch_inline_query_current_chat=search_query)])
+        
+        # Show a warning instead of the files
+        join_article = InlineQueryResultArticle(
+            id="fsub_warning",
+            title="🛑 Join Required to Search!",
+            description="Click here to join our channels and unlock searches.",
+            input_message_content=InputTextMessageContent(
+                "🛑 **Access Denied:**\nYou must join our official distribution channels to use the inline search."
+            ),
+            reply_markup=InlineKeyboardMarkup(buttons),
+            thumb_url="https://images.unsplash.com/photo-1560529870-1efc3a4080fd?q=80&w=150" 
+        )
+        # cache_time=0 ensures it re-checks their status immediately when they click "Try Again"
+        return await query.answer([join_article], cache_time=0, is_personal=True)
+
+
+    # 🎬 2. IF SUBSCRIBED, SHOW ACTUAL FILES FOR DIRECT DELIVERY
     results = await db.search_files(search_query, skip=0, limit=Config.MAX_RESULTS, exact=False)
     articles = []
+    
     for idx, file in enumerate(results):
-        db_id = str(file.get("_id", ""))
-        articles.append(InlineQueryResultArticle(title=file.get("title", "Unknown File"), description=f"Size: {format_size(file.get('size', 0))}", input_message_content=InputTextMessageContent(message_text=f"**{file.get('title')}**\n\n📥 [Download File Here](https://t.me/{client.me.username}?start=getfile_{db_id})"), thumb_url="https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=150", id=str(idx)))
+        file_id = file.get("file_id")
+        if not file_id: 
+            continue
+            
+        articles.append(
+            InlineQueryResultCachedDocument(
+                id=str(idx),
+                title=file.get("title", "Unknown File"),
+                document_file_id=file_id,
+                description=f"Size: {format_size(file.get('size', 0))}",
+                caption=f"**{file.get('title')}**\n\n🛡 *Provided by {client.me.first_name}*"
+            )
+        )
+        
     await query.answer(articles, cache_time=3600, is_personal=True)
