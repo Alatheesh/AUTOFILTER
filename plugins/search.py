@@ -642,18 +642,28 @@ async def inline_search(client: Client, query: InlineQuery):
     results = await db.search_files(search_query, skip=0, limit=Config.MAX_RESULTS, exact=False)
     articles = []
     
+    # 📝 Fetch the global/default custom caption ONCE before the loop to save database performance
+    raw_caption = await db.get_custom_caption(None)
+    
     for idx, file in enumerate(results):
         file_id = file.get("file_id")
         if not file_id: 
             continue
             
+        # 📝 Format the custom caption placeholders for this specific file
+        f_name = file.get("title", "Unknown File")
+        f_size = format_size(file.get('size', 0))
+        mention = f"<a href='tg://user?id={user_id}'>{query.from_user.first_name}</a>"
+        
+        final_caption = raw_caption.replace("{file_name}", f_name).replace("{size}", f_size).replace("{mention}", mention)
+            
         articles.append(
             InlineQueryResultCachedDocument(
                 id=str(idx),
-                title=file.get("title", "Unknown File"),
+                title=f_name,
                 document_file_id=file_id,
-                description=f"Size: {format_size(file.get('size', 0))}",
-                caption=f"**{file.get('title')}**\n\n🛡 *Provided by {client.me.first_name}*"
+                description=f"Size: {f_size}",
+                caption=final_caption
             )
         )
         
