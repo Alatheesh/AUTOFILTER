@@ -31,3 +31,9 @@ class Config(object):
 
     # Logging channel
     LOG_CHANNEL: int = int(os.environ.get("LOG_CHANNEL", "0"))
+
+    # 📝 NEW: Default File Caption Engine
+    DEFAULT_CAPTION: str = os.environ.get(
+        "DEFAULT_CAPTION", 
+        "<b>{file_name}</b>\n\n📁 Size: {size}\n👤 Requested by: {mention}"
+    )
