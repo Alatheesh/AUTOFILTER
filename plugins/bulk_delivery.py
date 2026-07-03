@@ -10,7 +10,7 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, 
 from pyrogram.errors import FloodWait, UserIsBlocked # 🚀 NEW: Critical safety imports
 from database.multi_db import db
 from config import Config
-from plugins.search import BULK_CACHE
+from plugins.search import BULK_CACHE, format_size # 📝 Imported format_size for captions
 
 # 🚀 Importing the new isolated engine!
 from plugins.shortener import VERIFICATION_TOKENS, get_shortlink
@@ -180,14 +180,24 @@ async def handle_bulk_delivery(client: Client, message: Message):
             successful = 0
             sent_message_ids = []
             
+            # 📝 FETCH CUSTOM CAPTION ONCE FOR THE BATCH
+            raw_caption = await db.get_custom_caption(None) # PM delivery falls back to global/default
+            
             # 🚀 THE NEW DYNAMIC SAFETY LOOP
             for f_data in selected_files:
                 if f_data:
+                    # 📝 Format placeholders for this specific file
+                    f_name = f_data.get("title", "Unknown File")
+                    f_size = format_size(f_data.get("size", 0))
+                    mention = f"<a href='tg://user?id={user_id}'>{message.from_user.first_name}</a>"
+                    
+                    final_caption = raw_caption.replace("{file_name}", f_name).replace("{size}", f_size).replace("{mention}", mention)
+                    
                     try:
                         sent_file = await client.send_cached_media(
                             chat_id=user_id, 
                             file_id=f_data.get("file_id"), 
-                            caption="✨ **Here is your requested file.**\n\n🛡 *Provided securely by the Auto-Filter System.*"
+                            caption=final_caption
                         )
                         sent_message_ids.append(sent_file.id)
                         successful += 1
@@ -202,7 +212,7 @@ async def handle_bulk_delivery(client: Client, message: Message):
                             sent_file = await client.send_cached_media(
                                 chat_id=user_id, 
                                 file_id=f_data.get("file_id"), 
-                                caption="✨ **Here is your requested file.**\n\n🛡 *Provided securely by the Auto-Filter System.*"
+                                caption=final_caption
                             )
                             sent_message_ids.append(sent_file.id)
                             successful += 1
