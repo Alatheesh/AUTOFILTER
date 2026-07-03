@@ -657,4 +657,4 @@ async def inline_search(client: Client, query: InlineQuery):
             )
         )
         
-    await query.answer(articles, cache_time=0, is_personal=True)
+    await query.answer(articles, cache_time=300, is_personal=True)
