@@ -122,7 +122,8 @@ class MultiDB:
                 "chat_id": chat_id, "search_mode": "let_members_choose",
                 "quality_lock": "none", "language_lock": "none", "size_lock": "none", 
                 "admins": [],
-                "connected_by": None
+                "connected_by": None,
+                "custom_caption": None # 📝 NEW: Placeholder for group custom caption
             }
             await self.groups.insert_one(default)
             return default
@@ -178,7 +179,8 @@ class MultiDB:
                 "filter_delete_enabled": False,
                 "filter_delete_time": 5,
                 "bulk_enabled": True,
-                "multi_search_limit": 5
+                "multi_search_limit": 5,
+                "custom_caption": None # 📝 NEW: Placeholder for global bot custom caption
             }
             await self.settings.insert_one(default)
             return default
@@ -188,6 +190,43 @@ class MultiDB:
         if not self.clients: return False
         await self.settings.update_one({"_id": "bot_settings"}, {"$set": updates}, upsert=True)
         return True
+
+    # ==========================================
+    # 📝 DYNAMIC FILE CAPTION ENGINE
+    # ==========================================
+    async def get_custom_caption(self, chat_id: Optional[int] = None) -> str:
+        """Fetches the caption respecting the hierarchy: Group -> Global -> Default Config"""
+        if not self.clients: return Config.DEFAULT_CAPTION
+        
+        # 1. Check Group Specific Caption
+        if chat_id:
+            group = await self.groups.find_one({"chat_id": chat_id})
+            if group and group.get("custom_caption"):
+                return group["custom_caption"]
+                
+        # 2. Check Global Bot Caption
+        bot_settings = await self.settings.find_one({"_id": "bot_settings"})
+        if bot_settings and bot_settings.get("custom_caption"):
+            return bot_settings["custom_caption"]
+            
+        # 3. Fallback to Config
+        return Config.DEFAULT_CAPTION
+        
+    async def set_custom_caption(self, chat_id: Optional[int], text: str, is_global: bool = False):
+        """Saves a custom caption to either the specific group or globally."""
+        if not self.clients: return
+        if is_global:
+            await self.settings.update_one({"_id": "bot_settings"}, {"$set": {"custom_caption": text}}, upsert=True)
+        elif chat_id:
+            await self.groups.update_one({"chat_id": chat_id}, {"$set": {"custom_caption": text}}, upsert=True)
+            
+    async def delete_custom_caption(self, chat_id: Optional[int], is_global: bool = False):
+        """Wipes the custom caption, reverting it to the next level down in the hierarchy."""
+        if not self.clients: return
+        if is_global:
+            await self.settings.update_one({"_id": "bot_settings"}, {"$set": {"custom_caption": None}}, upsert=True)
+        elif chat_id:
+            await self.groups.update_one({"chat_id": chat_id}, {"$set": {"custom_caption": None}}, upsert=True)
 
     # ==========================================
     # ⚙️ WORKER 1: AUTO-ROUTING LOAD BALANCER
