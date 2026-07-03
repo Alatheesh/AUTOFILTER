@@ -6,12 +6,20 @@ import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, LinkPreviewOptions
 from pyrogram.errors import UserIsBlocked, PeerIdInvalid
+import math
 from database.multi_db import db
 from config import Config
-from plugins.search import format_size # 📝 NEW: Imported for file size formatting
 
 # 🚀 Import our new isolated engine!
 from plugins.shortener import VERIFICATION_TOKENS, get_shortlink
+
+def format_size(size_bytes):
+    if size_bytes == 0: return "0B"
+    size_name = ("B", "KB", "MB", "GB", "TB")
+    i = int(math.floor(math.log(size_bytes, 1024)))
+    p = math.pow(1024, i)
+    s = round(size_bytes / p, 2)
+    return f"{s} {size_name[i]}"
 
 logger = logging.getLogger(__name__)
 
