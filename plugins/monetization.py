@@ -8,6 +8,7 @@ from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineK
 from pyrogram.errors import UserIsBlocked, PeerIdInvalid
 from database.multi_db import db
 from config import Config
+from plugins.search import format_size # 📝 NEW: Imported for file size formatting
 
 # 🚀 Import our new isolated engine!
 from plugins.shortener import VERIFICATION_TOKENS, get_shortlink
@@ -29,12 +30,20 @@ async def check_double_fsub(client: Client, user_id: int) -> bool:
         except Exception: return False
     return True
 
-async def execute_file_delivery(client: Client, chat_id: int, file_id: str):
+async def execute_file_delivery(client: Client, chat_id: int, file_data: dict, user_first_name: str):
     try:
+        # 📝 FETCH & FORMAT CUSTOM CAPTION
+        raw_caption = await db.get_custom_caption(None) # PM delivery uses global/default fallback
+        f_name = file_data.get("title", "Unknown File")
+        f_size = format_size(file_data.get("size", 0))
+        mention = f"<a href='tg://user?id={chat_id}'>{user_first_name}</a>"
+        
+        final_caption = raw_caption.replace("{file_name}", f_name).replace("{size}", f_size).replace("{mention}", mention)
+        
         sent_file = await client.send_cached_media(
             chat_id=chat_id, 
-            file_id=file_id, 
-            caption="✨ **Here is your requested file.**\n\n🛡 *Provided securely by the Auto-Filter System.*"
+            file_id=file_data.get("file_id"), 
+            caption=final_caption
         )
         settings = await db.get_settings()
         if settings.get("file_delete_enabled", False):
@@ -98,7 +107,7 @@ async def direct_send_callback(client: Client, callback: CallbackQuery):
     if not file_data: return await callback.answer("❌ Error: File not found in database.", show_alert=True)
 
     try:
-        await execute_file_delivery(client, user_id, file_data.get("file_id"))
+        await execute_file_delivery(client, user_id, file_data, callback.from_user.first_name)
         if callback.message.chat.type.name in ["GROUP", "SUPERGROUP"]:
             await callback.answer("✅ File sent securely to your Private Messages!", show_alert=True)
         else:
@@ -159,7 +168,7 @@ async def deep_link_start(client: Client, message: Message):
                     pending_file = token_data.get("pending_file")
                     if pending_file:
                         file_data = await db.get_file(pending_file)
-                        if file_data: await execute_file_delivery(client, user_id, file_data.get("file_id"))
+                        if file_data: await execute_file_delivery(client, user_id, file_data, message.from_user.first_name)
                 return
             else:
                 return await message.reply_text("❌ **Invalid or Expired Token.** Please search for the movie again.")
@@ -222,7 +231,7 @@ async def deep_link_start(client: Client, message: Message):
 
             file_data = await db.get_file(db_id)
             if not file_data: return await message.reply_text("❌ **Error:** File not found in database or has been deleted.")
-            await execute_file_delivery(client, user_id, file_data.get("file_id"))
+            await execute_file_delivery(client, user_id, file_data, message.from_user.first_name)
 
 @Client.on_callback_query(filters.regex(r"^retry_getfile_(.+)"))
 async def retry_getfile_callback(client: Client, callback: CallbackQuery):
@@ -240,7 +249,7 @@ async def retry_getfile_callback(client: Client, callback: CallbackQuery):
     file_data = await db.get_file(db_id)
     if not file_data: return await callback.answer("❌ Error: File not found.", show_alert=True)
     await callback.message.delete()
-    await execute_file_delivery(client, user_id, file_data.get("file_id"))
+    await execute_file_delivery(client, user_id, file_data, callback.from_user.first_name)
 
 @Client.on_callback_query(filters.regex(r"^check_membership_retry$"))
 async def standard_retry_callback(client: Client, callback: CallbackQuery):
