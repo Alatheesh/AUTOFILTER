@@ -9,6 +9,8 @@ logger = logging.getLogger(__name__)
 
 # 🧠 State Machine for Clean Interactive Requests
 REQUEST_STATE = {}
+# 🧠 Ram Tracker for Request Cooldowns
+USER_LAST_REQUEST = {}
 
 # ==========================================
 # 📢 DIRECT COMMAND AND INTERACTIVE WIZARD
@@ -21,6 +23,21 @@ async def request_command(client: Client, message: Message):
         raise StopPropagation
         
     user = message.from_user
+    
+    # 💎 NEW: Enforce VIP Request Cooldowns
+    from plugins.vip_system import DEFAULT_PLANS, FREE_USER_LIMITS
+    active_plan = await db.get_active_vip_plan(user.id)
+    user_limits = DEFAULT_PLANS.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan else FREE_USER_LIMITS
+    cooldown_minutes = user_limits.get("movie_request_cooldown", 60)
+    
+    if cooldown_minutes > 0:
+        last_req = USER_LAST_REQUEST.get(user.id, 0)
+        time_passed = time.time() - last_req
+        cooldown_seconds = cooldown_minutes * 60
+        if time_passed < cooldown_seconds:
+            remaining_mins = int((cooldown_seconds - time_passed) / 60)
+            await message.reply_text(f"⏳ **Cooldown Active:**\n\nYou must wait **{remaining_mins} more minutes** before submitting another request.\n\n_Want zero cooldowns? Upgrade to a VIP plan!_")
+            raise StopPropagation
         
     # Fast Route (If they provided the name in the command)
     if len(message.command) >= 2:
@@ -30,6 +47,7 @@ async def request_command(client: Client, message: Message):
         if hasattr(Config, "LOG_CHANNEL") and Config.LOG_CHANNEL:
             try:
                 await client.send_message(Config.LOG_CHANNEL, req_text)
+                USER_LAST_REQUEST[user.id] = time.time() # 💎 Mark cooldown
                 await message.reply_text("✅ **Success!** Your request has been delivered to the admin team.")
             except Exception: 
                 await message.reply_text("❌ **Error:** Could not deliver request. Make sure I am an Admin in the Logs Channel!")
@@ -93,6 +111,7 @@ async def interactive_request_listener(client: Client, message: Message):
     if hasattr(Config, "LOG_CHANNEL") and Config.LOG_CHANNEL:
         try:
             await client.send_message(Config.LOG_CHANNEL, admin_text)
+            USER_LAST_REQUEST[user_id] = time.time() # 💎 Mark cooldown
             success_msg = f"✅ **Request Sent Successfully!**\n\n**Your Request:**\n_{user_request_text}_\n\nThe admin team has been notified!"
             try: await client.edit_message_text(message.chat.id, prompt_msg_id, success_msg)
             except Exception: await message.reply_text(success_msg)
@@ -125,12 +144,28 @@ async def request_button_callback(client: Client, callback: CallbackQuery):
         return await callback.answer("❌ Requests are currently disabled.", show_alert=True)
         
     user = callback.from_user
+    
+    # 💎 NEW: Enforce VIP Request Cooldowns on Button
+    from plugins.vip_system import DEFAULT_PLANS, FREE_USER_LIMITS
+    active_plan = await db.get_active_vip_plan(user.id)
+    user_limits = DEFAULT_PLANS.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan else FREE_USER_LIMITS
+    cooldown_minutes = user_limits.get("movie_request_cooldown", 60)
+    
+    if cooldown_minutes > 0:
+        last_req = USER_LAST_REQUEST.get(user.id, 0)
+        time_passed = time.time() - last_req
+        cooldown_seconds = cooldown_minutes * 60
+        if time_passed < cooldown_seconds:
+            remaining_mins = int((cooldown_seconds - time_passed) / 60)
+            return await callback.answer(f"⏳ Cooldown Active! Please wait {remaining_mins} more minutes before requesting.", show_alert=True)
+
     movie_name = callback.data.split("req_", 1)[1]
     req_text = f"#Movie_Request\n\n🔔 **NEW MOVIE REQUEST (From Search Button)**\n\n👤 **User:** {user.first_name} (`{user.id}`)\n🎬 **Requested:** `{movie_name}`"
     
     if hasattr(Config, "LOG_CHANNEL") and Config.LOG_CHANNEL:
         try:
             await client.send_message(Config.LOG_CHANNEL, req_text)
+            USER_LAST_REQUEST[user.id] = time.time() # 💎 Mark cooldown
             await callback.message.edit_text(f"✅ **You successfully requested:**\n`{movie_name}`\n\nThe admins have been notified!")
             await callback.answer("✅ Request successfully delivered!", show_alert=True)
         except Exception: 
