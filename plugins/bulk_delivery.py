@@ -184,6 +184,22 @@ async def handle_bulk_delivery(client: Client, message: Message):
                     
             if not selected_files: return await message.reply_text("⚠️ No valid files were selected.")
             
+            # 🛑 NEW: BACKEND SECURITY CHECK (Prevents Web App bypass)
+            try:
+                from plugins.vip_system import DEFAULT_PLANS, FREE_USER_LIMITS
+                active_plan = await db.get_active_vip_plan(user_id)
+                user_limits = DEFAULT_PLANS.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan else FREE_USER_LIMITS
+                bulk_limit = user_limits.get("bulk_select_limit", 10)
+            except Exception:
+                # Fallback limit just in case
+                bulk_limit = 10 
+                
+            if len(selected_files) > bulk_limit:
+                return await message.reply_text(
+                    f"🛑 **Security Lock:** You requested **{len(selected_files)}** files, but your current tier is limited to **{bulk_limit}** files per batch.\n\n"
+                    f"_Please select fewer files or upgrade to a VIP plan to unlock larger batch downloads!_"
+                )
+            
             status_msg = await message.reply_text(f"📦 **Processing {len(selected_files)} files...**\nSending them securely to your PM.")
             
             successful = 0
