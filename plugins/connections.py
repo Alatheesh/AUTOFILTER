@@ -67,6 +67,17 @@ async def process_connect(client: Client, message: Message, user_id: int, target
         text = "⚠️ This group is already connected by you!" if connected_by == user_id else "⚠️ This group is already connected to the database by another administrator."
         return await client.edit_message_text(message.chat.id, prompt_msg_id, text) if prompt_msg_id else await message.reply_text(text)
 
+    # 💎 NEW: Evaluate VIP Group Connect Limits
+    from plugins.vip_system import DEFAULT_PLANS, FREE_USER_LIMITS
+    active_plan = await db.get_active_vip_plan(user_id)
+    user_limits = DEFAULT_PLANS.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan else FREE_USER_LIMITS
+    max_groups = user_limits.get("group_connect_limit", 1)
+    
+    current_groups = await db.get_connected_groups(user_id)
+    if len(current_groups) >= max_groups:
+        limit_text = f"🛑 **Connection Limit Reached!**\n\nYour current plan only allows you to connect **{max_groups}** group(s).\n\n_Please upgrade your VIP plan to connect more groups._"
+        return await client.edit_message_text(message.chat.id, prompt_msg_id, limit_text) if prompt_msg_id else await message.reply_text(limit_text)
+
     # 🔓 Send Hacker Unlock Sticker Animation
     try:
         loading_msg = await message.reply_sticker(random.choice(CODE_STICKERS))
