@@ -142,13 +142,13 @@ async def upload_json_payload(data_list):
     except Exception as e: logger.error(f"Rentry Cloud Upload Failed: {e}")
     return None
 
-def build_safe_webapp_url(client_username, short_id, data_url):
+def build_safe_webapp_url(client_username, short_id, data_url, user_limit):
     base_link = getattr(Config, "BULK_LINK", "https://yourusername.github.io/autofilter-web/").strip()
     if not base_link.startswith("http"):
         base_link = f"https://{base_link}"
     safe_url = urllib.parse.quote(data_url)
     bot_username = client_username or "Bot"
-    return f"{base_link}?bot={bot_username}&id={short_id}&url={safe_url}"
+    return f"{base_link}?bot={bot_username}&id={short_id}&limit={user_limit}&url={safe_url}"
 
 def get_progress_bar(current, total):
     percent = current / total if total > 0 else 0
@@ -375,14 +375,16 @@ async def auto_filter(client: Client, message: Message):
     # 👉 RESTORED: Bulk Delivery for Single Search
     if settings.get("bulk_enabled", True):
         bulk_limit = user_limits.get("bulk_select_limit", 10)
-        web_app_results = filtered_results[:bulk_limit] 
+        # 🚀 CHANGE: Upload up to 10,000 files to the cloud so they can see everything
+        web_app_results = filtered_results[:10000] 
         short_id = hashlib.md5(f"{user_id}_{query}_{time.time()}".encode()).hexdigest()[:8]
         webapp_data = [f"{f.get('title', 'Unknown')}|{format_size(f.get('size', 0))}" for f in web_app_results]
         
         data_url = await upload_json_payload(webapp_data)
         
         if data_url:
-            web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url)
+            # 🚀 CHANGE: Pass the user's bulk_limit to the URL builder
+            web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url, bulk_limit)
             
             BULK_CACHE[short_id] = (time.time(), web_app_results, web_app_url)
             for k in list(BULK_CACHE.keys()):
