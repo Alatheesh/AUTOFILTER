@@ -29,20 +29,33 @@ vip_history = db.vip_history
 vip_recovery = db.vip_recovery
 vip_plans_db = db.vip_plans
 vip_subscriptions = db.vip_subscriptions
-vip_features = db.vip_features  # 🚀 Feature Registry
+# 🚀 NEW: Dynamic Limits Registry (Replacing old boolean features)
 
 DEFAULT_PLANS = {
-    "bronze": {"name": "🥉 Bronze", "days": 30, "price": 99},
-    "silver": {"name": "🥈 Silver", "days": 90, "price": 249},
-    "gold": {"name": "🥇 Gold", "days": 365, "price": 799},
-    "lifetime": {"name": "💎 Lifetime", "days": 36500, "price": 1999}
+    "bronze": {
+        "name": "🥉 Bronze", "days": 30, "price": 99,
+        "limits": {"shortlink_bypass": True, "multi_search_limit": 3, "bulk_select_limit": 50, "movie_request_cooldown": 30, "group_connect_limit": 2}
+    },
+    "silver": {
+        "name": "🥈 Silver", "days": 90, "price": 249,
+        "limits": {"shortlink_bypass": True, "multi_search_limit": 5, "bulk_select_limit": 100, "movie_request_cooldown": 15, "group_connect_limit": 5}
+    },
+    "gold": {
+        "name": "🥇 Gold", "days": 365, "price": 799,
+        "limits": {"shortlink_bypass": True, "multi_search_limit": 10, "bulk_select_limit": 500, "movie_request_cooldown": 5, "group_connect_limit": 15}
+    },
+    "lifetime": {
+        "name": "💎 Lifetime", "days": 36500, "price": 1999,
+        "limits": {"shortlink_bypass": True, "multi_search_limit": 20, "bulk_select_limit": 1000, "movie_request_cooldown": 0, "group_connect_limit": 50}
+    }
 }
 
-DEFAULT_FEATURES = {
-    "no_ads": {"name": "No Ads", "allowed_plans": ["bronze", "silver", "gold", "lifetime"]},
-    "fast_queue": {"name": "Fast Queue", "allowed_plans": ["silver", "gold", "lifetime"]},
-    "unlimited_batch": {"name": "Unlimited Batch", "allowed_plans": ["gold", "lifetime"]},
-    "ocr_search": {"name": "OCR Image Search", "allowed_plans": ["silver", "gold", "lifetime"]}
+FREE_USER_LIMITS = {
+    "shortlink_bypass": False,
+    "multi_search_limit": 1,
+    "bulk_select_limit": 10,
+    "movie_request_cooldown": 60,
+    "group_connect_limit": 1
 }
 
 # ==========================================
@@ -189,8 +202,14 @@ async def buy_vip_command(client, message):
     plans = await get_all_plans()
     out = "💎 **PREMIUM VIP MEMBERSHIPS**\n\n"
     for k, p in plans.items():
-        feats = await get_plan_features(k)
-        feat_str = "\n".join([f"  ✓ {f}" for f in feats])
+        limits = p.get("limits", {})
+        feat_str = (
+            f"  ✓ No Ads / Direct Files\n"
+            f"  ✓ Multi-Search: {limits.get('multi_search_limit', 1)} Movies\n"
+            f"  ✓ Bulk Download: {limits.get('bulk_select_limit', 10)} Files\n"
+            f"  ✓ Connect Groups: {limits.get('group_connect_limit', 1)}\n"
+            f"  ✓ Request Cooldown: {limits.get('movie_request_cooldown', 60)} Mins"
+        )
         out += f"**{p['name']}** - ₹{p['price']} ({p['days']} Days)\n{feat_str}\n\n"
         
     markup = InlineKeyboardMarkup([[InlineKeyboardButton(f"🛒 Buy {p['name']} (₹{p['price']})", callback_data=f"vip_buy_{k}", style=ButtonStyle.PRIMARY)] for k, p in plans.items()])
@@ -384,8 +403,8 @@ async def vip_panel_router(client, callback: CallbackQuery):
         plans = await get_all_plans()
         text = "📦 **Plans Configuration**\n\n"
         for k, p in plans.items():
-            feats = await get_plan_features(k)
-            text += f"**{p['name']}**\n₹{p['price']} | {p['days']} Days | {len(feats)} Features\n━━━━━━━━━━\n"
+            lims = p.get("limits", {})
+            text += f"**{p['name']}**\n₹{p['price']} | {p['days']} Days\nLimits: Multi:{lims.get('multi_search_limit',1)} | Bulk:{lims.get('bulk_select_limit',10)}\n━━━━━━━━━━\n"
             
         markup = InlineKeyboardMarkup([
             # 🚀 UPGRADE: Added "Edit Plan" Button next to Add Plan
@@ -572,7 +591,15 @@ async def admin_wizards_router(client, callback: CallbackQuery):
         plans = await get_all_plans()
         p = plans[plan_key]
         USER_STATES[callback.from_user.id] = {"action": "wiz_editplan", "msg_id": msg_id, "plan_key": plan_key}
-        await callback.message.edit_text(f"✏️ **Editing Plan:** `{p['name']}`\n\nCurrent Price: ₹{p['price']}\nCurrent Days: {p['days']}\n\nReply with new details separated by comma:\n`New Price, New Days, New Display Name`\n\nExample: `199, 30, 🌟 Premium Bronze`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="vipdb_plans", style=ButtonStyle.DANGER)]]))
+        
+        prompt = (
+            f"✏️ **Editing Plan:** `{p['name']}`\n"
+            f"Current Price: ₹{p['price']} | Days: {p['days']}\n\n"
+            "Reply with 7 new values separated by commas:\n"
+            "`Price, Days, Name, MultiSearch, BulkLimit, RequestCooldown, GroupLimit`\n\n"
+            "**Example:** `199, 30, 🌟 Premium Bronze, 5, 100, 15, 2`"
+        )
+        await callback.message.edit_text(prompt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="vipdb_plans", style=ButtonStyle.DANGER)]]))
 
     # --- DELETE PLAN WIZARD ---
     elif action == "delplan_init":
@@ -744,12 +771,20 @@ async def catch_payment_proof(client, message: Message):
             elif action == "wiz_editplan":
                 plan_key = state["plan_key"]
                 parts = [p.strip() for p in message.text.split(",")]
-                if len(parts) >= 3:
+                if len(parts) >= 7:
                     price, days, name = int(parts[0]), int(parts[1]), parts[2]
-                    await vip_plans_db.update_one({"_id": plan_key}, {"$set": {"name": name, "price": price, "days": days}}, upsert=True)
-                    await client.edit_message_text(message.chat.id, msg_id, f"✅ Successfully updated Plan `{name}`.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Plans", callback_data="vipdb_plans", style=ButtonStyle.PRIMARY)]]))
+                    multi_l, bulk_l, req_c, grp_l = int(parts[3]), int(parts[4]), int(parts[5]), int(parts[6])
+                    
+                    new_limits = {
+                        "shortlink_bypass": True, "multi_search_limit": multi_l,
+                        "bulk_select_limit": bulk_l, "movie_request_cooldown": req_c,
+                        "group_connect_limit": grp_l
+                    }
+                    
+                    await vip_plans_db.update_one({"_id": plan_key}, {"$set": {"name": name, "price": price, "days": days, "limits": new_limits}}, upsert=True)
+                    await client.edit_message_text(message.chat.id, msg_id, f"✅ Successfully updated Plan `{name}` with new dynamic limits.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Plans", callback_data="vipdb_plans", style=ButtonStyle.PRIMARY)]]))
                 else:
-                    await client.edit_message_text(message.chat.id, msg_id, "❌ Error parsing format. Cancelled.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Plans", callback_data="vipdb_plans", style=ButtonStyle.DANGER)]]))
+                    await client.edit_message_text(message.chat.id, msg_id, "❌ Error parsing format. Please provide all 7 values separated by commas.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Plans", callback_data="vipdb_plans", style=ButtonStyle.DANGER)]]))
 
             elif action == "wiz_delcoup":
                 code = message.text.strip().upper()
