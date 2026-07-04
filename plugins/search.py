@@ -249,6 +249,11 @@ async def auto_filter(client: Client, message: Message):
     resolved_mode, resolved_lang, resolved_size = await get_filter_settings(user_id, chat_id, chat_type)
     settings = await db.get_settings()
     
+    # 💎 NEW: Fetch Dynamic VIP Limits
+    from plugins.vip_system import DEFAULT_PLANS, FREE_USER_LIMITS
+    active_plan = await db.get_active_vip_plan(user_id)
+    user_limits = DEFAULT_PLANS.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan else FREE_USER_LIMITS
+    
     # ==========================================
     # 🌟 MULTI-MOVIE BULK SEARCH LOGIC
     # ==========================================
@@ -258,10 +263,10 @@ async def auto_filter(client: Client, message: Message):
         if m not in unique_movies: unique_movies.append(m)
         
     if len(unique_movies) > 1:
-        multi_limit = settings.get("multi_search_limit", 5)
-        if multi_limit == 0: return await message.reply_text("❌ Multi-movie search is currently disabled by admins.")
+        multi_limit = user_limits.get("multi_search_limit", 1)
+        if multi_limit == 0: return await message.reply_text("❌ Multi-movie search is currently disabled.")
         if len(unique_movies) > multi_limit:
-            return await message.reply_text(f"❌ **Maximum allowed movies per search exceeded.**\n\nAllowed : `{multi_limit}`\nRequested : `{len(unique_movies)}`")
+            return await message.reply_text(f"❌ **Maximum allowed movies per search exceeded.**\n\nYour Limit : `{multi_limit}`\nRequested : `{len(unique_movies)}`\n\n_Upgrade to a higher VIP tier to search more at once!_")
 
         start_time = time.time()
         session_id = str(uuid.uuid4())[:8]
@@ -361,11 +366,16 @@ async def auto_filter(client: Client, message: Message):
 
     metadata = await fetch_imdb_tmdb(query)
     buttons = []
-    shortener_on = settings.get("shortener_enabled", False)
+    
+    # 💎 NEW: Evaluate Shortlink Bypass & Verification Pass
+    has_bypass = user_limits.get("shortlink_bypass", False)
+    if not has_bypass: has_bypass = await db.has_active_verification_pass(user_id)
+    shortener_on = settings.get("shortener_enabled", False) and not has_bypass
 
     # 👉 RESTORED: Bulk Delivery for Single Search
     if settings.get("bulk_enabled", True):
-        web_app_results = filtered_results[:10000] 
+        bulk_limit = user_limits.get("bulk_select_limit", 10)
+        web_app_results = filtered_results[:bulk_limit] 
         short_id = hashlib.md5(f"{user_id}_{query}_{time.time()}".encode()).hexdigest()[:8]
         webapp_data = [f"{f.get('title', 'Unknown')}|{format_size(f.get('size', 0))}" for f in web_app_results]
         
@@ -450,20 +460,29 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
     if page == 0: await callback.answer(f"Fetching details for {movie_name}...", show_alert=False)
     else: await callback.answer()
     
+    # 💎 NEW: Fetch Limits for Callback
+    from plugins.vip_system import DEFAULT_PLANS, FREE_USER_LIMITS
+    user_id = callback.from_user.id
+    active_plan = await db.get_active_vip_plan(user_id)
+    user_limits = DEFAULT_PLANS.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan else FREE_USER_LIMITS
+    
     metadata = await fetch_imdb_tmdb(movie_name)
     settings = await db.get_settings()
-    shortener_on = settings.get("shortener_enabled", False)
+    
+    has_bypass = user_limits.get("shortlink_bypass", False)
+    if not has_bypass: has_bypass = await db.has_active_verification_pass(user_id)
+    shortener_on = settings.get("shortener_enabled", False) and not has_bypass
     
     # Get the paginated results for this specific movie
     results = files[page * 10 : (page + 1) * 10]
     
     buttons = []
-    user_id = callback.from_user.id
     chat_type = callback.message.chat.type
     
     # 👉 RESTORED: Bulk WebApp Delivery explicitly added into Multi-Search!
     if settings.get("bulk_enabled", True):
-        web_app_results = files[:1000] 
+        bulk_limit = user_limits.get("bulk_select_limit", 10)
+        web_app_results = files[:bulk_limit]
         short_id = hashlib.md5(f"{user_id}_{movie_name}_{time.time()}".encode()).hexdigest()[:8]
         webapp_data = [f"{f.get('title', 'Unknown')}|{format_size(f.get('size', 0))}" for f in web_app_results]
         
@@ -556,11 +575,20 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
         
     buttons = []
     settings = await db.get_settings()
-    shortener_on = settings.get("shortener_enabled", False)
+    
+    # 💎 NEW: Fetch Limits for Pagination
+    from plugins.vip_system import DEFAULT_PLANS, FREE_USER_LIMITS
+    active_plan = await db.get_active_vip_plan(user_id)
+    user_limits = DEFAULT_PLANS.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan else FREE_USER_LIMITS
+    
+    has_bypass = user_limits.get("shortlink_bypass", False)
+    if not has_bypass: has_bypass = await db.has_active_verification_pass(user_id)
+    shortener_on = settings.get("shortener_enabled", False) and not has_bypass
 
     # 👉 RESTORED: Bulk Delivery in Single Search Pagination
     if settings.get("bulk_enabled", True):
-        web_app_results = filtered_results[:1000] 
+        bulk_limit = user_limits.get("bulk_select_limit", 10)
+        web_app_results = filtered_results[:bulk_limit]
         short_id = hashlib.md5(f"{user_id}_{base_query}_{time.time()}".encode()).hexdigest()[:8]
         webapp_data = [f"{f.get('title', 'Unknown')}|{format_size(f.get('size', 0))}" for f in web_app_results]
         
