@@ -138,8 +138,8 @@ async def start_menu_handler(client: Client, message: Message):
         await log_to_channel(client, f"#new_user\n👤 Name: `{message.from_user.first_name}`\n🆔 ID: `{user_id}`\n🔗 Username: @{message.from_user.username or 'None'}")
         await db.update_user_setting(user_id, "joined_date", datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
         
-        # Give them the Free VIP Trial (if enabled by admin)
-        # await apply_new_user_trial(user_id)
+        # 💎 NEW: Trigger the Dynamic Free VIP Trial from the new Database Engine
+        await db.apply_new_user_trial(user_id)
 
     try:
         loading_msg = await message.reply_sticker(random.choice(START_STICKERS))
