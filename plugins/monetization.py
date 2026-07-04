@@ -154,15 +154,15 @@ async def deep_link_start(client: Client, message: Message):
                 token_data = VERIFICATION_TOKENS[token]
                 
                 if token_data["user_id"] == user_id:
-                    pass_expiry = time.time() + (24 * 3600)
-                    await db.update_user_setting(user_id, "shortener_pass", pass_expiry)
+                    # 💎 NEW: Grant Dynamic Verification Pass using the new database engine
+                    await db.grant_verification_pass(user_id)
                     del VERIFICATION_TOKENS[token]
                     
                     settings = await db.get_settings()
                     del_enabled = settings.get("filter_delete_enabled", False)
                     del_time = settings.get("filter_delete_time", 5)
 
-                    v_text = "✅ **Verification Successful!** You have unlimited access for 24 hours."
+                    v_text = "✅ **Verification Successful!** You now have temporary unlimited access to direct files."
                     if del_enabled: v_text += f"\n\n⏳ *Note: This message will automatically delete in {del_time} minutes.*"
 
                     success_msg = await message.reply_text(v_text)
@@ -197,11 +197,16 @@ async def deep_link_start(client: Client, message: Message):
                 return await message.reply_text("🛑 **Lock Warning:**\nYou must join our official distribution channels before downloading files.", reply_markup=InlineKeyboardMarkup(buttons))
 
             settings = await db.get_settings()
-            if settings.get("shortener_enabled", False):
-                u_sett = await db.get_user_settings(user_id)
-                pass_time = u_sett.get("shortener_pass", 0)
-                
-                if time.time() > pass_time:
+            
+            # 💎 NEW: Evaluate VIP Limits & Verification Pass
+            from plugins.vip_system import DEFAULT_PLANS, FREE_USER_LIMITS
+            active_plan = await db.get_active_vip_plan(user_id)
+            user_limits = DEFAULT_PLANS.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan else FREE_USER_LIMITS
+            
+            has_bypass = user_limits.get("shortlink_bypass", False)
+            if not has_bypass: has_bypass = await db.has_active_verification_pass(user_id)
+            
+            if settings.get("shortener_enabled", False) and not has_bypass:
                     token = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
                     VERIFICATION_TOKENS[token] = {"user_id": user_id, "pending_file": db_id}
                     bot_me = await client.get_me()
