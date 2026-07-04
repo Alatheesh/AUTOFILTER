@@ -61,11 +61,6 @@ FREE_USER_LIMITS = {
 # ==========================================
 # 🛡️ FEATURE REGISTRY & DYNAMIC PLANS
 # ==========================================
-async def init_feature_registry():
-    if await vip_features.count_documents({}) == 0:
-        for k, v in DEFAULT_FEATURES.items():
-            await vip_features.update_one({"_id": k}, {"$set": v}, upsert=True)
-
 async def get_all_plans():
     plans = {}
     async for p in vip_plans_db.find({}): plans[p["_id"]] = p
@@ -74,13 +69,6 @@ async def get_all_plans():
             await vip_plans_db.update_one({"_id": k}, {"$set": v}, upsert=True)
             plans[k] = v
     return plans
-
-async def get_plan_features(plan_id):
-    await init_feature_registry()
-    feats = []
-    async for f in vip_features.find({"allowed_plans": plan_id}):
-        feats.append(f["name"])
-    return feats
 
 async def log_vip_event(action, user_id, details, admin_id="System"):
     await vip_history.insert_one({"action": action, "user_id": user_id, "details": details, "admin_id": admin_id, "timestamp": datetime.datetime.now()})
@@ -577,7 +565,13 @@ async def admin_wizards_router(client, callback: CallbackQuery):
     # --- ADD PLAN WIZARD ---
     elif action == "addplan_init":
         USER_STATES[callback.from_user.id] = {"action": "wiz_addplan", "msg_id": msg_id}
-        await callback.message.edit_text("📦 **Wizard: Add New Plan**\n\nReply with details separated by comma:\n`Plan_ID, Price, Days, Display Name`\n\nExample: `platinum, 1499, 180, 🌟 Platinum`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="vipdb_plans", style=ButtonStyle.DANGER)]]))
+        prompt = (
+            "📦 **Wizard: Add New Plan**\n\n"
+            "Reply with 8 values separated by commas:\n"
+            "`Plan_ID, Price, Days, Name, MultiSearch, BulkLimit, RequestCooldown, GroupLimit`\n\n"
+            "**Example:** `platinum, 1499, 180, 🌟 Platinum, 15, 1000, 0, 10`"
+        )
+        await callback.message.edit_text(prompt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="vipdb_plans", style=ButtonStyle.DANGER)]]))
 
     # 🚀 UPGRADE: --- EDIT PLAN WIZARD ---
     elif action == "editplan_init":
@@ -760,12 +754,20 @@ async def catch_payment_proof(client, message: Message):
 
             elif action == "wiz_addplan":
                 parts = [p.strip() for p in message.text.split(",")]
-                if len(parts) >= 4:
+                if len(parts) >= 8:
                     k, price, days, name = parts[0].lower(), int(parts[1]), int(parts[2]), parts[3]
-                    await vip_plans_db.update_one({"_id": k}, {"$set": {"name": name, "price": price, "days": days, "features": []}}, upsert=True)
-                    await client.edit_message_text(message.chat.id, msg_id, f"✅ Added New Plan `{k}`.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Plans", callback_data="vipdb_plans", style=ButtonStyle.PRIMARY)]]))
+                    multi_l, bulk_l, req_c, grp_l = int(parts[4]), int(parts[5]), int(parts[6]), int(parts[7])
+                    
+                    new_limits = {
+                        "shortlink_bypass": True, "multi_search_limit": multi_l,
+                        "bulk_select_limit": bulk_l, "movie_request_cooldown": req_c,
+                        "group_connect_limit": grp_l
+                    }
+                    
+                    await vip_plans_db.update_one({"_id": k}, {"$set": {"name": name, "price": price, "days": days, "limits": new_limits}}, upsert=True)
+                    await client.edit_message_text(message.chat.id, msg_id, f"✅ Added New Plan `{name}`.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Plans", callback_data="vipdb_plans", style=ButtonStyle.PRIMARY)]]))
                 else:
-                    await client.edit_message_text(message.chat.id, msg_id, "❌ Error parsing format. Cancelled.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Plans", callback_data="vipdb_plans", style=ButtonStyle.DANGER)]]))
+                    await client.edit_message_text(message.chat.id, msg_id, "❌ Error parsing format. Please provide all 8 values.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Plans", callback_data="vipdb_plans", style=ButtonStyle.DANGER)]]))
 
             # 🚀 UPGRADE: --- EDIT PLAN CATCHER ---
             elif action == "wiz_editplan":
@@ -918,4 +920,26 @@ async def user_redeem_coupon(client, message: Message):
     await add_vip(message.from_user, plan_meta["name"], plan_meta["days"], method=f"Coupon ({code})")
     await log_vip_event("Coupon", message.from_user.id, f"Redeemed {code}")
     await message.reply(f"🎉 **Redemption Success!** Activated tier `{plan_meta['name']}`.")
+    raise StopPropagation
+
+# ==========================================
+# 🎁 FREE TRIAL COMMAND
+# ==========================================
+@Client.on_message(filters.command("freetrial") & filters.user(Config.ADMINS))
+async def set_free_trial_command(client: Client, message: Message):
+    if len(message.command) < 2:
+        settings = await db.get_settings()
+        current = settings.get("free_trial_days", 7)
+        status = f"{current} Days" if current > 0 else "Disabled"
+        return await message.reply_text(f"🎁 **Free Trial Settings**\n\nCurrent Trial: `{status}`\n\nTo change, use:\n`/freetrial <days>` (e.g., `/freetrial 7`)\n`/freetrial 0` (to disable completely)")
+    
+    try:
+        days = int(message.command[1])
+        await db.update_settings({"free_trial_days": days})
+        if days == 0:
+            await message.reply_text("🚫 Free trial for new users has been **disabled**.")
+        else:
+            await message.reply_text(f"✅ New users will now automatically receive a **{days}-day Free Gold VIP Trial**.")
+    except ValueError:
+        await message.reply_text("❌ Please provide a valid number of days.")
     raise StopPropagation
