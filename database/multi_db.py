@@ -114,6 +114,46 @@ class MultiDB:
         if not self.clients: return
         await self.users.update_one({"user_id": user_id}, {"$set": {key: value}}, upsert=True)
 
+# ==========================================
+# 💎 DYNAMIC VIP & VERIFICATION ENGINE
+# ==========================================
+    async def apply_new_user_trial(self, user_id: int):
+        """Grants a new user a free VIP trial if enabled."""
+        if not self.clients: return
+        settings = await self.get_settings()
+        trial_days = settings.get("free_trial_days", 7)
+        if trial_days > 0:
+            expiry_ts = time.time() + (trial_days * 86400)
+            await self.vip_users.update_one(
+                {"user_id": user_id},
+                {"$set": {"user_id": user_id, "plan_id": "gold", "expires_at": expiry_ts, "started_at": time.time()}},
+                upsert=True
+            )
+
+    async def get_active_vip_plan(self, user_id: int) -> Optional[str]:
+        """Checks if a user is an active VIP and returns their plan_id."""
+        if not self.clients: return None
+        vip_doc = await self.vip_users.find_one({"user_id": user_id})
+        if vip_doc and vip_doc.get("expires_at", 0) > time.time():
+            return vip_doc.get("plan_id")
+        return None
+
+    async def grant_verification_pass(self, user_id: int):
+        """Grants a temporary bypass pass to a free user who completed verification."""
+        if not self.clients: return
+        settings = await self.get_settings()
+        reward_hours = settings.get("verification_reward_hours", 12)
+        expiry_ts = time.time() + (reward_hours * 3600)
+        await self.users.update_one({"user_id": user_id}, {"$set": {"verification_pass_expires": expiry_ts}}, upsert=True)
+
+    async def has_active_verification_pass(self, user_id: int) -> bool:
+        """Checks if a free user's temporary verification pass is still active."""
+        if not self.clients: return False
+        user = await self.users.find_one({"user_id": user_id})
+        if user and user.get("verification_pass_expires", 0) > time.time():
+            return True
+        return False
+
     async def get_group_settings(self, chat_id: int):
         if not self.clients: return {}
         group = await self.groups.find_one({"chat_id": chat_id})
