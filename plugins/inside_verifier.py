@@ -127,9 +127,13 @@ async def catch_forwarded_verification(client: Client, message: Message):
     if any(w in user_text.lower() for w in words):
         del VERIFIER_STATE[user_id]
         
+        # 💎 NEW: Grant Dynamic Verification Pass using the new database engine
+        await db.grant_verification_pass(user_id)
+        
         success_text = (
             f"🎉 **Thank you so much!**\n\n"
-            f"Your support means the world to us and helps keep this bot alive for everyone.\n\n"
+            f"Your support means the world to us and helps keep this bot alive.\n\n"
+            f"**✅ Reward Unlocked:** You now have temporary unlimited access to direct files!\n\n"
             f"Enjoy your movies! 🍿"
         )
         try: await client.edit_message_text(message.chat.id, prompt_msg_id, success_text)
