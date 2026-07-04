@@ -890,17 +890,49 @@ async def admin_reject(client, callback: CallbackQuery):
     await log_vip_event("Rejected", order["user_id"], f"Order {order_id} rejected", callback.from_user.id)
 
 # ==========================================
-# 🙋‍♂️ USER REDEEM & CHECK COMMANDS
+# 🙋‍♂️ USER STATUS CHECK COMMAND
 # ==========================================
 @Client.on_message(filters.command("checkvip"), group=-1)
 async def check_vip_cmd(client, message: Message):
     target = message.from_user.id
-    if len(message.command) > 1 and message.from_user.id in Config.ADMINS: target = int(message.command[1])
-    is_vip, user = await check_vip_status(target)
-    if not is_vip: return await message.reply("❌ **No Active VIP Membership.**\nUse `/buyvip` to browse options!")
-    rem = user['expiry'] - datetime.datetime.now()
-    rem_days = "Infinite" if user["plan"] == "💎 Lifetime" else f"{rem.days} Days"
-    text = (f"💎 **VIP STATUS**\n📦 **Plan:** `{user['plan']}`\n🟢 **Status:** `{user['status']}`\n📅 **Joined:** `{user['joined'].strftime('%Y-%m-%d')}`\n⏳ **Expiry:** `{user['expiry'].strftime('%Y-%m-%d')}`\n⏱ **Remaining:** `{rem_days}`\n💳 **Order ID:** `{user.get('order_id','N/A')}`")
+    if len(message.command) > 1 and message.from_user.id in Config.ADMINS:
+        try: target = int(message.command[1])
+        except: pass
+
+    # 1. Fetch Plan Status
+    active_plan_id = await db.get_active_vip_plan(target)
+    user_doc = await vip_users.find_one({"user_id": target})
+    
+    # 2. Determine Plan Details & Limits
+    if active_plan_id and active_plan_id in DEFAULT_PLANS:
+        p = DEFAULT_PLANS[active_plan_id]
+        limits = p["limits"]
+        plan_name = p["name"]
+        price = f"₹{p['price']}"
+        days = f"{p['days']} Days"
+        expiry = user_doc.get("expiry").strftime('%Y-%m-%d') if user_doc and user_doc.get("expiry") else "Unknown"
+    else:
+        plan_name = "Free User"
+        limits = FREE_USER_LIMITS
+        price = "0"
+        days = "N/A"
+        expiry = "Never"
+
+    # 3. Format Response
+    text = (
+        f"💎 **ACCOUNT STATUS**\n\n"
+        f"📦 **Plan:** `{plan_name}`\n"
+        f"📅 **Expiry:** `{expiry}`\n"
+        f"💵 **Price:** {price}\n"
+        f"⏳ **Duration:** {days}\n\n"
+        f"⚙️ **Your Active Limits:**\n"
+        f"• Multi-Search Limit: `{limits.get('multi_search_limit')}` movies\n"
+        f"• Bulk Download Limit: `{limits.get('bulk_select_limit')}` files\n"
+        f"• Request Cooldown: `{limits.get('movie_request_cooldown')} Mins`\n"
+        f"• Max Connected Groups: `{limits.get('group_connect_limit')}`\n"
+        f"• Shortlink Bypass: `{'✅ Enabled' if limits.get('shortlink_bypass') else '❌ Disabled'}`"
+    )
+    
     await message.reply(text)
     raise StopPropagation
 
