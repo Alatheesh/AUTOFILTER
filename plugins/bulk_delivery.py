@@ -156,7 +156,7 @@ async def handle_bulk_delivery(client: Client, message: Message):
                                     text_data = await resp.text()
                                     selected_indices = json.loads(text_data)
                                 else:
-                                    return await status_msg.edit_text("❌ **Error:** Npoint fetch failed.")
+                                    return await status_msg.edit_text(f"❌ **Error:** Npoint fetch failed (Code: {resp.status}).")
                                     
                         elif payload.startswith("dp_"):
                             dp_id = payload.replace("dp_", "")
@@ -165,7 +165,7 @@ async def handle_bulk_delivery(client: Client, message: Message):
                                     text_data = await resp.text()
                                     selected_indices = json.loads(text_data)
                                 else:
-                                    return await status_msg.edit_text("❌ **Error:** Dpaste fetch failed.")
+                                    return await status_msg.edit_text(f"❌ **Error:** Dpaste fetch failed (Code: {resp.status}).")
                         else:
                             # 🚀 SMART FALLBACK: Just Npoint and Dpaste (No Bytebin)
                             async with session.get(f"https://api.npoint.io/{payload}") as resp:
@@ -178,12 +178,17 @@ async def handle_bulk_delivery(client: Client, message: Message):
                                             text_data = await resp2.text()
                                             selected_indices = json.loads(text_data)
                                         else:
-                                            return await status_msg.edit_text("❌ **Error:** Cloud fetch failed (Old Format).")
+                                            # THIS WILL TELL US EXACTLY WHY IT IS FAILING!
+                                            return await status_msg.edit_text(
+                                                f"❌ **Error:** Cloud fetch failed.\n\n"
+                                                f"🛠 **Debug Info:** Npoint `[{resp.status}]`, Dpaste `[{resp2.status}]`\n"
+                                                f"**Received ID:** `{payload}`"
+                                            )
                     await status_msg.delete()
                     
                 except Exception as e:
                     logger.error(f"Bulk Cloud Fetch Error: {e}")
-                    return await status_msg.edit_text("❌ **Error:** Network error contacting cloud.")
+                    return await status_msg.edit_text(f"❌ **Error:** Network error contacting cloud. Details: {e}")
 
             selected_files = []
             for i in selected_indices:
