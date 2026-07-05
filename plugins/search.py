@@ -251,10 +251,11 @@ async def auto_filter(client: Client, message: Message):
     resolved_mode, resolved_lang, resolved_size = await get_filter_settings(user_id, chat_id, chat_type)
     settings = await db.get_settings()
     
-    # 💎 NEW: Fetch Dynamic VIP Limits
-    from plugins.vip_system import DEFAULT_PLANS, FREE_USER_LIMITS
+   # 💎 NEW: Fetch Dynamic VIP Limits
+    from plugins.vip_system import get_all_plans, FREE_USER_LIMITS
     active_plan = await db.get_active_vip_plan(user_id)
-    user_limits = DEFAULT_PLANS.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan else FREE_USER_LIMITS
+    plans = await get_all_plans()
+    user_limits = plans.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan and active_plan in plans else FREE_USER_LIMITS
     
     # ==========================================
     # 🌟 MULTI-MOVIE BULK SEARCH LOGIC
