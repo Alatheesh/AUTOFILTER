@@ -149,17 +149,7 @@ async def handle_bulk_delivery(client: Client, message: Message):
                 status_msg = await message.reply_text("☁️ **Fetching your massive selection from the secure cloud...**")
                 try:
                     async with aiohttp.ClientSession() as session:
-                        # 🚀 NEW: Check for Bytebin Cloud
-                        if payload.startswith("bb_"):
-                            bb_id = payload.replace("bb_", "")
-                            async with session.get(f"https://bytebin.lucko.me/{bb_id}") as resp:
-                                if resp.status == 200:
-                                    text_data = await resp.text()
-                                    selected_indices = json.loads(text_data)
-                                else:
-                                    return await status_msg.edit_text("❌ **Error:** Bytebin fetch failed.")
-                                    
-                        elif payload.startswith("np_"):
+                        if payload.startswith("np_"):
                             np_id = payload.replace("np_", "")
                             async with session.get(f"https://api.npoint.io/{np_id}") as resp:
                                 if resp.status == 200:
@@ -177,7 +167,7 @@ async def handle_bulk_delivery(client: Client, message: Message):
                                 else:
                                     return await status_msg.edit_text("❌ **Error:** Dpaste fetch failed.")
                         else:
-                            # 🚀 SMART FALLBACK: Try both old clouds if no prefix is found
+                            # 🚀 SMART FALLBACK: Just Npoint and Dpaste (No Bytebin)
                             async with session.get(f"https://api.npoint.io/{payload}") as resp:
                                 if resp.status == 200:
                                     text_data = await resp.text()
@@ -202,11 +192,12 @@ async def handle_bulk_delivery(client: Client, message: Message):
                     
             if not selected_files: return await message.reply_text("⚠️ No valid files were selected.")
             
-            # 🛑 NEW: BACKEND SECURITY CHECK (Prevents Web App bypass)
+            # 🛑 VIP BACKEND SECURITY CHECK (Fixed to properly read the 50-file limit!)
             try:
-                from plugins.vip_system import DEFAULT_PLANS, FREE_USER_LIMITS
+                from plugins.vip_system import get_all_plans, FREE_USER_LIMITS
                 active_plan = await db.get_active_vip_plan(user_id)
-                user_limits = DEFAULT_PLANS.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan else FREE_USER_LIMITS
+                plans = await get_all_plans()
+                user_limits = plans.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan and active_plan in plans else FREE_USER_LIMITS
                 bulk_limit = user_limits.get("bulk_select_limit", 10)
             except Exception:
                 # Fallback limit just in case
