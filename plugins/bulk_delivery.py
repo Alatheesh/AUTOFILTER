@@ -149,7 +149,17 @@ async def handle_bulk_delivery(client: Client, message: Message):
                 status_msg = await message.reply_text("☁️ **Fetching your massive selection from the secure cloud...**")
                 try:
                     async with aiohttp.ClientSession() as session:
-                        if payload.startswith("np_"):
+                        # 🚀 NEW: Check for Bytebin Cloud
+                        if payload.startswith("bb_"):
+                            bb_id = payload.replace("bb_", "")
+                            async with session.get(f"https://bytebin.lucko.me/{bb_id}") as resp:
+                                if resp.status == 200:
+                                    text_data = await resp.text()
+                                    selected_indices = json.loads(text_data)
+                                else:
+                                    return await status_msg.edit_text("❌ **Error:** Bytebin fetch failed.")
+                                    
+                        elif payload.startswith("np_"):
                             np_id = payload.replace("np_", "")
                             async with session.get(f"https://api.npoint.io/{np_id}") as resp:
                                 if resp.status == 200:
@@ -157,6 +167,7 @@ async def handle_bulk_delivery(client: Client, message: Message):
                                     selected_indices = json.loads(text_data)
                                 else:
                                     return await status_msg.edit_text("❌ **Error:** Npoint fetch failed.")
+                                    
                         elif payload.startswith("dp_"):
                             dp_id = payload.replace("dp_", "")
                             async with session.get(f"https://dpaste.com/{dp_id}.txt") as resp:
@@ -166,24 +177,9 @@ async def handle_bulk_delivery(client: Client, message: Message):
                                 else:
                                     return await status_msg.edit_text("❌ **Error:** Dpaste fetch failed.")
                         else:
-                            # 🚀 FIX: Smart Fallback for Cached Web Apps
-                            async with session.get(f"https://api.npoint.io/{payload}") as resp:
-                                if resp.status == 200:
-                                    text_data = await resp.text()
-                                    selected_indices = json.loads(text_data)
-                                else:
-                                    # Try dpaste if npoint fails!
-                                    async with session.get(f"https://dpaste.com/{payload}.txt") as resp2:
-                                        if resp2.status == 200:
-                                            text_data = await resp2.text()
-                                            selected_indices = json.loads(text_data)
-                                        else:
-                                            return await status_msg.edit_text("❌ **Error:** Cloud fetch failed.")
+                            return await status_msg.edit_text("❌ **Error:** Unknown cloud provider format.")
                     await status_msg.delete()
-                except Exception as e:
-                    logger.error(f"Bulk Cloud Fetch Error: {e}")
-                    return await status_msg.edit_text("❌ **Error:** Network error contacting cloud.")
-                    await status_msg.delete()
+                    
                 except Exception as e:
                     logger.error(f"Bulk Cloud Fetch Error: {e}")
                     return await status_msg.edit_text("❌ **Error:** Network error contacting cloud.")
