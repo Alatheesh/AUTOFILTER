@@ -134,8 +134,31 @@ class MultiDB:
         """Checks if a user is an active VIP and returns their plan_id."""
         if not self.clients: return None
         vip_doc = await self.vip_users.find_one({"user_id": user_id})
-        if vip_doc and vip_doc.get("expires_at", 0) > time.time():
-            return vip_doc.get("plan_id")
+        
+        if not vip_doc: return None
+        
+        import datetime
+        
+        # 1. Standard VIP Check (Created by Payments / Coupons)
+        if vip_doc.get("status") == "Active" and "expiry" in vip_doc:
+            expiry = vip_doc["expiry"]
+            if isinstance(expiry, datetime.datetime) and expiry > datetime.datetime.now():
+                plan_name = vip_doc.get("plan", "").lower()
+                if "bronze" in plan_name: return "bronze"
+                if "silver" in plan_name: return "silver"
+                if "gold" in plan_name: return "gold"
+                if "lifetime" in plan_name: return "lifetime"
+                
+                # Fallback for dynamic custom plans
+                parts = plan_name.split()
+                if parts: return parts[-1]
+                return None
+                
+        # 2. Free Trial Check (Created by the Trial System)
+        if "expires_at" in vip_doc and isinstance(vip_doc["expires_at"], (int, float)):
+            if vip_doc["expires_at"] > time.time():
+                return vip_doc.get("plan_id")
+                
         return None
 
     async def grant_verification_pass(self, user_id: int):
