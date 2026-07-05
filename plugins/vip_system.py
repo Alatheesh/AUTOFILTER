@@ -900,25 +900,26 @@ async def check_vip_cmd(client, message: Message):
         except: pass
 
     # 1. Fetch Plan Status
-        active_plan_id = await db.get_active_vip_plan(target)
-        user_doc = await vip_users.find_one({"user_id": target})
-        
-        # 2. Determine Plan Details & Limits
-        plans = await get_all_plans() # 🚀 FIX: Fetch ALL plans, not just defaults!
-        
-        if active_plan_id and active_plan_id in plans:
-            p = plans[active_plan_id]
-            limits = p.get("limits", FREE_USER_LIMITS)
-            plan_name = p["name"]
-            price = f"₹{p['price']}"
-            days = f"{p['days']} Days"
-            expiry = user_doc.get("expiry").strftime('%Y-%m-%d') if user_doc and user_doc.get("expiry") else "Unknown"
-        else:
-            plan_name = "Free User"
-            limits = FREE_USER_LIMITS
-            price = "0"
-            days = "N/A"
-            expiry = "Never"
+    active_plan_id = await db.get_active_vip_plan(target)
+    user_doc = await vip_users.find_one({"user_id": target})
+    
+    # 2. Determine Plan Details & Limits
+    plans = await get_all_plans() # 🚀 FIX: Fetch ALL plans, not just defaults!
+    
+    # 🛡️ FIX: Pre-assign default values to completely prevent UnboundLocalError
+    plan_name = "Free User"
+    limits = FREE_USER_LIMITS
+    price = "0"
+    days = "N/A"
+    expiry = "Never"
+    
+    if active_plan_id and active_plan_id in plans:
+        p = plans[active_plan_id]
+        limits = p.get("limits", FREE_USER_LIMITS)
+        plan_name = p.get("name", "Unknown Plan")
+        price = f"₹{p.get('price', 0)}"
+        days = f"{p.get('days', 0)} Days"
+        expiry = user_doc.get("expiry").strftime('%Y-%m-%d') if user_doc and user_doc.get("expiry") else "Unknown"
 
     # 3. Format Response
     text = (
@@ -928,10 +929,10 @@ async def check_vip_cmd(client, message: Message):
         f"💵 **Price:** {price}\n"
         f"⏳ **Duration:** {days}\n\n"
         f"⚙️ **Your Active Limits:**\n"
-        f"• Multi-Search Limit: `{limits.get('multi_search_limit')}` movies\n"
-        f"• Bulk Download Limit: `{limits.get('bulk_select_limit')}` files\n"
-        f"• Request Cooldown: `{limits.get('movie_request_cooldown')} Mins`\n"
-        f"• Max Connected Groups: `{limits.get('group_connect_limit')}`\n"
+        f"• Multi-Search Limit: `{limits.get('multi_search_limit', 1)} movies`\n"
+        f"• Bulk Download Limit: `{limits.get('bulk_select_limit', 10)} files`\n"
+        f"• Request Cooldown: `{limits.get('movie_request_cooldown', 60)} Mins`\n"
+        f"• Max Connected Groups: `{limits.get('group_connect_limit', 1)}`\n"
         f"• Shortlink Bypass: `{'✅ Enabled' if limits.get('shortlink_bypass') else '❌ Disabled'}`"
     )
     
