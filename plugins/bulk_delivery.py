@@ -166,12 +166,23 @@ async def handle_bulk_delivery(client: Client, message: Message):
                                 else:
                                     return await status_msg.edit_text("❌ **Error:** Dpaste fetch failed.")
                         else:
+                            # 🚀 FIX: Smart Fallback for Cached Web Apps
                             async with session.get(f"https://api.npoint.io/{payload}") as resp:
                                 if resp.status == 200:
                                     text_data = await resp.text()
                                     selected_indices = json.loads(text_data)
                                 else:
-                                    return await status_msg.edit_text("❌ **Error:** Cloud fetch failed.")
+                                    # Try dpaste if npoint fails!
+                                    async with session.get(f"https://dpaste.com/{payload}.txt") as resp2:
+                                        if resp2.status == 200:
+                                            text_data = await resp2.text()
+                                            selected_indices = json.loads(text_data)
+                                        else:
+                                            return await status_msg.edit_text("❌ **Error:** Cloud fetch failed.")
+                    await status_msg.delete()
+                except Exception as e:
+                    logger.error(f"Bulk Cloud Fetch Error: {e}")
+                    return await status_msg.edit_text("❌ **Error:** Network error contacting cloud.")
                     await status_msg.delete()
                 except Exception as e:
                     logger.error(f"Bulk Cloud Fetch Error: {e}")
