@@ -148,7 +148,12 @@ def build_safe_webapp_url(client_username, short_id, data_url, user_limit):
         base_link = f"https://{base_link}"
     safe_url = urllib.parse.quote(data_url)
     bot_username = client_username or "Bot"
-    return f"{base_link}?bot={bot_username}&id={short_id}&limit={user_limit}&url={safe_url}"
+    
+    # 🚀 FIX: Automatically generate a unique version every millisecond!
+    import time
+    dynamic_version = int(time.time())
+    
+    return f"{base_link}?v={dynamic_version}&bot={bot_username}&id={short_id}&limit={user_limit}&url={safe_url}"
 
 def get_progress_bar(current, total):
     percent = current / total if total > 0 else 0
