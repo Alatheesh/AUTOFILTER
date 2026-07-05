@@ -900,23 +900,25 @@ async def check_vip_cmd(client, message: Message):
         except: pass
 
     # 1. Fetch Plan Status
-    active_plan_id = await db.get_active_vip_plan(target)
-    user_doc = await vip_users.find_one({"user_id": target})
-    
-    # 2. Determine Plan Details & Limits
-    if active_plan_id and active_plan_id in DEFAULT_PLANS:
-        p = DEFAULT_PLANS[active_plan_id]
-        limits = p["limits"]
-        plan_name = p["name"]
-        price = f"₹{p['price']}"
-        days = f"{p['days']} Days"
-        expiry = user_doc.get("expiry").strftime('%Y-%m-%d') if user_doc and user_doc.get("expiry") else "Unknown"
-    else:
-        plan_name = "Free User"
-        limits = FREE_USER_LIMITS
-        price = "0"
-        days = "N/A"
-        expiry = "Never"
+        active_plan_id = await db.get_active_vip_plan(target)
+        user_doc = await vip_users.find_one({"user_id": target})
+        
+        # 2. Determine Plan Details & Limits
+        plans = await get_all_plans() # 🚀 FIX: Fetch ALL plans, not just defaults!
+        
+        if active_plan_id and active_plan_id in plans:
+            p = plans[active_plan_id]
+            limits = p.get("limits", FREE_USER_LIMITS)
+            plan_name = p["name"]
+            price = f"₹{p['price']}"
+            days = f"{p['days']} Days"
+            expiry = user_doc.get("expiry").strftime('%Y-%m-%d') if user_doc and user_doc.get("expiry") else "Unknown"
+        else:
+            plan_name = "Free User"
+            limits = FREE_USER_LIMITS
+            price = "0"
+            days = "N/A"
+            expiry = "Never"
 
     # 3. Format Response
     text = (
