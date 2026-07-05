@@ -187,22 +187,46 @@ async def vip_background_worker(client: Client):
 # ==========================================
 @Client.on_message(filters.command("buyvip"), group=-1)
 async def buy_vip_command(client, message):
+    user_id = message.from_user.id
+    active_plan_id = await db.get_active_vip_plan(user_id)
+    user_doc = await vip_users.find_one({"user_id": user_id})
     plans = await get_all_plans()
-    out = "💎 **PREMIUM VIP MEMBERSHIPS**\n\n"
+
+    # Generate Top Status Banner
+    status_text = "🆓 **Free User**"
+    if active_plan_id and active_plan_id in plans and user_doc:
+        exp_date = user_doc.get("expiry")
+        now = datetime.datetime.now()
+        if exp_date and exp_date > now:
+            plan_name = plans[active_plan_id].get("name", active_plan_id.title())
+            rem_days = (exp_date - now).days
+            rem_display = "♾️ Lifetime" if rem_days > 36000 else f"{rem_days} Days"
+            status_text = f"📦 Plan: {plan_name}\n⏳ Remaining: {rem_display}"
+
+    text = (
+        "💎 **PREMIUM VIP MEMBERSHIPS**\n\n"
+        "👤 **Your Current Status:**\n"
+        f"{status_text}\n\n"
+        "👇 *Select a plan below to view limits and generate your order:*"
+    )
+
+    # Build 2-column Grid of Plan Buttons
+    buttons = []
+    row = []
     for k, p in plans.items():
-        limits = p.get("limits", {})
-        feat_str = (
-            f"  ✓ No Ads / Direct Files\n"
-            f"  ✓ Multi-Search: {limits.get('multi_search_limit', 1)} Movies\n"
-            f"  ✓ Bulk Download: {limits.get('bulk_select_limit', 10)} Files\n"
-            f"  ✓ Connect Groups: {limits.get('group_connect_limit', 1)}\n"
-            f"  ✓ Request Cooldown: {limits.get('movie_request_cooldown', 60)} Mins"
-        )
-        out += f"**{p['name']}** - ₹{p['price']} ({p['days']} Days)\n{feat_str}\n\n"
-        
-    markup = InlineKeyboardMarkup([[InlineKeyboardButton(f"🛒 Buy {p['name']} (₹{p['price']})", callback_data=f"vip_buy_{k}", style=ButtonStyle.PRIMARY)] for k, p in plans.items()])
-    await message.reply(out + "👇 **Select a plan below to securely generate your order:**", reply_markup=markup)
-    raise StopPropagation
+        row.append(InlineKeyboardButton(p["name"], callback_data=f"vip_show_{k}", style=ButtonStyle.PRIMARY))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+
+    # Handles both normal command and "Back" button presses
+    if hasattr(message, "data"): 
+        await message.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+    else:
+        await message.reply(text, reply_markup=InlineKeyboardMarkup(buttons))
+        raise StopPropagation
 
 @Client.on_callback_query(filters.regex(r"^vip_buy_"))
 async def vip_buy_callback(client, callback: CallbackQuery):
@@ -239,6 +263,81 @@ async def vip_buy_callback(client, callback: CallbackQuery):
         f"⚠️ *After sending exactly ₹{plan['price']}, you MUST click '✅ I have Paid' within 30 mins.*"
     )
     await callback.message.edit_text(text, reply_markup=markup, link_preview_options=LinkPreviewOptions(is_disabled=False))
+
+@Client.on_callback_query(filters.regex(r"^vip_show_"))
+async def show_vip_plan_details(client: Client, callback: CallbackQuery):
+    plan_key = callback.data.split("_")[2]
+    plans = await get_all_plans()
+    
+    if plan_key not in plans:
+        return await callback.answer("Plan not found!", show_alert=True)
+
+    selected_plan = plans[plan_key]
+    user_id = callback.from_user.id
+    user_plan_id = await db.get_active_vip_plan(user_id)
+    user_doc = await vip_users.find_one({"user_id": user_id})
+    
+    current_time = datetime.datetime.now()
+    expiry_date = user_doc.get("expiry") if user_doc else None
+    
+    # Calculate current remaining days
+    remaining_days = 0
+    if expiry_date and expiry_date > current_time:
+        remaining_days = (expiry_date - current_time).days
+
+    plan_duration = selected_plan.get("days", 30)
+    limits = selected_plan.get("limits", {})
+    caution_msg = ""
+    
+    # 🧠 Dynamic Extend vs Override Math Engine
+    if user_plan_id == plan_key:
+        new_total_days = remaining_days + plan_duration
+        new_expiry = current_time + datetime.timedelta(days=new_total_days)
+        duration_str = "Lifetime" if new_total_days > 36000 else f"{new_total_days} Days"
+        caution_msg = (
+            "⚠️ **Notice: Plan Extension**\n"
+            "You are currently using this exact plan. Buying this will stack your days!\n"
+            f"• Current Remaining: `{remaining_days} Days`\n"
+            f"• Adding: `+{plan_duration} Days`\n"
+            f"📅 **New Expiry Date:** `{new_expiry.strftime('%Y-%m-%d')}` ({duration_str})\n\n"
+        )
+    elif user_plan_id and user_plan_id in plans:
+        current_plan_name = plans[user_plan_id].get("name", user_plan_id.title())
+        new_expiry = current_time + datetime.timedelta(days=plan_duration)
+        duration_str = "Lifetime" if plan_duration > 36000 else f"{plan_duration} Days"
+        caution_msg = (
+            "⚠️ **Notice: Plan Replacement**\n"
+            f"You are currently on **{current_plan_name}**. Buying this will immediately upgrade your limits, but will replace your active plan days.\n"
+            f"📅 **New Expiry Date:** `{new_expiry.strftime('%Y-%m-%d')}` ({duration_str})\n\n"
+        )
+    else:
+        new_expiry = current_time + datetime.timedelta(days=plan_duration)
+        duration_str = "Lifetime" if plan_duration > 36000 else f"{plan_duration} Days"
+        caution_msg = f"📅 **New Expiry Date:** `{new_expiry.strftime('%Y-%m-%d')}` ({duration_str})\n\n"
+
+    text = (
+        f"💳 **Plan Checkout: {selected_plan['name']}**\n"
+        f"💵 **Price:** `₹{selected_plan['price']}`\n\n"
+        f"{caution_msg}"
+        "✨ **Plan Features:**\n"
+        "  ✓ No Ads / Direct Files\n"
+        f"  ✓ Multi-Search: `{limits.get('multi_search_limit', 1)} Movies`\n"
+        f"  ✓ Bulk Download: `{limits.get('bulk_select_limit', 10)} Files`\n"
+        f"  ✓ Connect Groups: `{limits.get('group_connect_limit', 1)}`\n"
+        f"  ✓ Request Cooldown: `{limits.get('movie_request_cooldown', 60)} Mins`\n\n"
+        "👇 *Click below to securely generate your order.*"
+    )
+
+    # Note: This hooks perfectly into your EXISTING vip_buy callback!
+    buttons = [
+        [InlineKeyboardButton(f"🛒 Generate Order (₹{selected_plan['price']})", callback_data=f"vip_buy_{plan_key}", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton("⬅️ Back to Plans", callback_data="vip_back_menu", style=ButtonStyle.PRIMARY)]
+    ]
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+@Client.on_callback_query(filters.regex(r"^vip_back_menu$"))
+async def back_to_vip_menu(client: Client, callback: CallbackQuery):
+    await buy_vip_command(client, callback)
 
 @Client.on_callback_query(filters.regex(r"^vip_cancel_"))
 async def vip_cancel_callback(client, callback: CallbackQuery):
@@ -902,32 +1001,39 @@ async def check_vip_cmd(client, message: Message):
     # 1. Fetch Plan Status
     active_plan_id = await db.get_active_vip_plan(target)
     user_doc = await vip_users.find_one({"user_id": target})
+    plans = await get_all_plans() 
     
-    # 2. Determine Plan Details & Limits
-    plans = await get_all_plans() # 🚀 FIX: Fetch ALL plans, not just defaults!
-    
-    # 🛡️ FIX: Pre-assign default values to completely prevent UnboundLocalError
+    # 2. Pre-assign default values
     plan_name = "Free User"
     limits = FREE_USER_LIMITS
     price = "0"
-    days = "N/A"
     expiry = "Never"
+    remaining_text = "N/A"
     
+    # 3. Dynamic Calculation
     if active_plan_id and active_plan_id in plans:
         p = plans[active_plan_id]
         limits = p.get("limits", FREE_USER_LIMITS)
         plan_name = p.get("name", "Unknown Plan")
         price = f"₹{p.get('price', 0)}"
-        days = f"{p.get('days', 0)} Days"
-        expiry = user_doc.get("expiry").strftime('%Y-%m-%d') if user_doc and user_doc.get("expiry") else "Unknown"
+        
+        if user_doc and user_doc.get("expiry"):
+            exp_date = user_doc.get("expiry")
+            expiry = exp_date.strftime('%Y-%m-%d')
+            now = datetime.datetime.now()
+            
+            if exp_date > now:
+                rem_days = (exp_date - now).days
+                remaining_text = "♾️ Lifetime" if rem_days > 36000 else f"{rem_days} Days"
+            else:
+                remaining_text = "Expired"
 
-    # 3. Format Response
     text = (
         f"💎 **ACCOUNT STATUS**\n\n"
         f"📦 **Plan:** `{plan_name}`\n"
         f"📅 **Expiry:** `{expiry}`\n"
-        f"💵 **Price:** {price}\n"
-        f"⏳ **Duration:** {days}\n\n"
+        f"💵 **Price Paid:** {price}\n"
+        f"⏳ **Remaining:** `{remaining_text}`\n\n"
         f"⚙️ **Your Active Limits:**\n"
         f"• Multi-Search Limit: `{limits.get('multi_search_limit', 1)} movies`\n"
         f"• Bulk Download Limit: `{limits.get('bulk_select_limit', 10)} files`\n"
