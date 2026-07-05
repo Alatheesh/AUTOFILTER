@@ -142,15 +142,18 @@ async def upload_json_payload(data_list):
     except Exception as e: logger.error(f"Rentry Cloud Upload Failed: {e}")
     return None
 
-def build_safe_webapp_url(client_username, short_id, data_url, user_limit):
+# 🚀 UPDATE: Added 'is_vip' to the function parameters
+def build_safe_webapp_url(client_username, short_id, data_url, user_limit, is_vip=False):
     base_link = getattr(Config, "BULK_LINK", "https://yourusername.github.io/autofilter-web/").strip()
     if not base_link.startswith("http"):
         base_link = f"https://{base_link}"
     safe_url = urllib.parse.quote(data_url)
     bot_username = client_username or "Bot"
     
-    # Back to the clean, original URL format from yesterday
-    return f"{base_link}?bot={bot_username}&id={short_id}&limit={user_limit}&url={safe_url}"
+    # 🚀 UPDATE: Check VIP status and assign tier
+    tier = "premium" if is_vip else "free"
+    
+    return f"{base_link}?bot={bot_username}&id={short_id}&limit={user_limit}&tier={tier}&url={safe_url}"
 
 def get_progress_bar(current, total):
     percent = current / total if total > 0 else 0
@@ -386,8 +389,11 @@ async def auto_filter(client: Client, message: Message):
         data_url = await upload_json_payload(webapp_data)
         
         if data_url:
-            # 🚀 CHANGE: Pass the user's bulk_limit to the URL builder
-            web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url, bulk_limit)
+            # 🚀 UPDATE: Determine if they have an active plan
+            is_vip = True if active_plan else False
+            
+            # 🚀 UPDATE: Pass is_vip to the builder
+            web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url, bulk_limit, is_vip)
             
             BULK_CACHE[short_id] = (time.time(), web_app_results, web_app_url)
             for k in list(BULK_CACHE.keys()):
