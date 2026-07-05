@@ -44,6 +44,15 @@ async def handle_bulk_delivery(client: Client, message: Message):
         try: await message.delete()
         except Exception: pass
         
+        # 🚀 INSERT THE NEW CODE EXACTLY HERE 🚀
+        if cmd == "buyvip":
+            from plugins.vip_system import buy_vip_command
+            try:
+                return await buy_vip_command(client, message)
+            except StopPropagation:
+                return # Safely catches the stop signal from your VIP menu
+        # ----------------------------------------
+
         if cmd.startswith("bapp_"):
             short_id = cmd.split("_")[1]
             if short_id not in BULK_CACHE:
