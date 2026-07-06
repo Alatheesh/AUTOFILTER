@@ -632,7 +632,10 @@ async def admin_wizards_router(client, callback: CallbackQuery):
         target, days = int(parts[2]), int(parts[3])
         user = await vip_users.find_one({"user_id": target})
         if user:
-            new_exp = user["expiry"] + datetime.timedelta(days=days)
+            # 🚀 FIX: Safely fallback to current time if expiry is missing
+            base_expiry = user.get("expiry", datetime.datetime.now())
+            new_exp = base_expiry + datetime.timedelta(days=days)
+            
             await vip_users.update_one({"user_id": target}, {"$set": {"expiry": new_exp}})
             await log_vip_event("Extended", target, f"Added {days} days", callback.from_user.id)
             await callback.message.edit_text(f"✅ Added {days} days to `{target}`.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Memberships", callback_data="vipdb_members", style=ButtonStyle.PRIMARY)]]))
@@ -649,7 +652,10 @@ async def admin_wizards_router(client, callback: CallbackQuery):
         target, days = int(parts[2]), int(parts[3])
         user = await vip_users.find_one({"user_id": target})
         if user:
-            new_exp = user["expiry"] - datetime.timedelta(days=days)
+            # 🚀 FIX: Safely fallback to current time if expiry is missing
+            base_expiry = user.get("expiry", datetime.datetime.now())
+            new_exp = base_expiry - datetime.timedelta(days=days)
+            
             await vip_users.update_one({"user_id": target}, {"$set": {"expiry": new_exp}})
             await log_vip_event("Reduced", target, f"Removed {days} days", callback.from_user.id)
             await callback.message.edit_text(f"✅ Removed {days} days from `{target}`.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Memberships", callback_data="vipdb_members", style=ButtonStyle.PRIMARY)]]))
@@ -779,7 +785,10 @@ async def admin_wizards_router(client, callback: CallbackQuery):
         for uid in target_list:
             user = await vip_users.find_one({"user_id": uid})
             if user:
-                new_exp = user["expiry"] + datetime.timedelta(days=days)
+                # 🚀 FIX: Safely fallback to current time if expiry is missing
+                base_expiry = user.get("expiry", datetime.datetime.now())
+                new_exp = base_expiry + datetime.timedelta(days=days)
+                
                 await vip_users.update_one({"user_id": uid}, {"$set": {"expiry": new_exp}})
                 await log_vip_event("Compensated", uid, f"Added {days} extra days via Wizard", callback.from_user.id)
                 count += 1
