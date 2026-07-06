@@ -111,7 +111,7 @@ async def add_vip(user, plan_name, days, method="Admin Added", gifted_by=None, o
     await vip_subscriptions.insert_one({
         "user_id": user_id, "plan": plan_name, "days": days, "method": method,
         "order_id": order_id, "trx_id": trx_id, "activated_at": datetime.datetime.now(), "expires_at": expiry,
-        "is_promo": is_promo
+        "is_promo": is_promo # 🚀 Tracks promo history
     })
 
     existing = await vip_users.find_one({"user_id": user_id})
@@ -359,7 +359,7 @@ async def back_to_vip_menu(client: Client, callback: CallbackQuery):
 
 @Client.on_callback_query(filters.regex(r"^vip_cancel_"))
 async def vip_cancel_callback(client, callback: CallbackQuery):
-    USER_STATES.pop(callback.from_user.id, None)
+    USER_STATES.pop(callback.from_user.id, None) 
     order_id = callback.data.split("_")[2]
     await update_order_state(order_id, "Rejected")
     await callback.message.edit_text("❌ Order Cancelled successfully.")
@@ -400,7 +400,7 @@ def get_dashboard_main_markup():
 
 @Client.on_message(filters.command("vippanel") & filters.user(Config.ADMINS), group=-1)
 async def open_vip_panel(client, message):
-    USER_STATES.pop(message.from_user.id, None)
+    USER_STATES.pop(message.from_user.id, None) 
     await message.reply("💎 **VIP ENTERPRISE DASHBOARD**\nSelect a module to manage:", reply_markup=get_dashboard_main_markup())
     raise StopPropagation
 
@@ -1103,6 +1103,111 @@ async def catch_payment_proof(client, message: Message):
             raise StopPropagation
 
 # ==========================================
+# 👑 ADMIN REVIEW LOGIC
+# ==========================================
+@Client.on_callback_query(filters.regex(r"^vip_approve_") & filters.user(Config.ADMINS))
+async def admin_approve(client, callback: CallbackQuery):
+    order_id = callback.data.split("_")[2]
+    order = await vip_orders.find_one({"order_id": order_id})
+    if order["status"] == "Approved": return await callback.answer("Already approved!", show_alert=True)
+        
+    await update_order_state(order_id, "Approved", {"approved_by": callback.from_user.id, "approved_at": datetime.datetime.now()})
+    
+    plans = await get_all_plans()
+    plan = plans.get(order["plan"], DEFAULT_PLANS["bronze"])
+    
+    try: user_obj = await client.get_users(order["user_id"])
+    except: user_obj = order["user_id"]
+    
+    await add_vip(user_obj, plan["name"], plan["days"], method="UPI", order_id=order_id, trx_id=order.get("utr"))
+    
+    await callback.message.edit_reply_markup(InlineKeyboardMarkup([[InlineKeyboardButton("✅ APPROVED", callback_data="noop", style=ButtonStyle.SUCCESS)]]))
+    await send_vip_receipt(client, order["user_id"], order_id, plan["name"], order["amount"], order.get("utr", "N/A"), callback.from_user.id)
+
+@Client.on_callback_query(filters.regex(r"^vip_reject_") & filters.user(Config.ADMINS))
+async def admin_reject(client, callback: CallbackQuery):
+    order_id = callback.data.split("_")[2]
+    order = await vip_orders.find_one({"order_id": order_id})
+    await update_order_state(order_id, "Rejected")
+    await callback.message.edit_reply_markup(InlineKeyboardMarkup([[InlineKeyboardButton("❌ REJECTED", callback_data="noop", style=ButtonStyle.DANGER)]]))
+    await client.send_message(order["user_id"], f"❌ **Payment Rejected**\n\nYour payment for Order `{order_id}` could not be verified. Please double check and reorder.")
+    await log_vip_event("Rejected", order["user_id"], f"Order {order_id} rejected", callback.from_user.id)
+
+# ==========================================
+# 🙋‍♂️ USER STATUS CHECK COMMAND
+# ==========================================
+@Client.on_message(filters.command("checkvip"), group=-1)
+async def check_vip_cmd(client, message: Message):
+    target = message.from_user.id
+    if len(message.command) > 1 and message.from_user.id in Config.ADMINS:
+        try: target = int(message.command[1])
+        except: pass
+
+    active_plan_id = await db.get_active_vip_plan(target)
+    user_doc = await vip_users.find_one({"user_id": target})
+    plans = await get_all_plans() 
+    
+    plan_name = "Free User"
+    limits = FREE_USER_LIMITS
+    price = "0"
+    expiry = "Never"
+    remaining_text = "N/A"
+    
+    if active_plan_id and active_plan_id in plans:
+        p = plans[active_plan_id]
+        limits = p.get("limits", FREE_USER_LIMITS)
+        plan_name = p.get("name", "Unknown Plan")
+        price = f"₹{p.get('price', 0)}"
+        
+        if user_doc and user_doc.get("expiry"):
+            exp_date = user_doc.get("expiry")
+            expiry = exp_date.strftime('%Y-%m-%d')
+            now = datetime.datetime.now()
+            
+            if exp_date > now:
+                rem_days = (exp_date - now).days
+                remaining_text = "♾️ Lifetime" if rem_days > 36000 else f"{rem_days} Days"
+            else:
+                remaining_text = "Expired"
+
+    text = (
+        f"💎 **ACCOUNT STATUS**\n\n"
+        f"📦 **Plan:** `{plan_name}`\n"
+        f"📅 **Expiry:** `{expiry}`\n"
+        f"💵 **Price Paid:** {price}\n"
+        f"⏳ **Remaining:** `{remaining_text}`\n\n"
+        f"⚙️ **Your Active Limits:**\n"
+        f"• Multi-Search Limit: `{limits.get('multi_search_limit', 1)} movies`\n"
+        f"• Bulk Download Limit: `{limits.get('bulk_select_limit', 10)} files`\n"
+        f"• Request Cooldown: `{limits.get('movie_request_cooldown', 60)} Mins`\n"
+        f"• Max Connected Groups: `{limits.get('group_connect_limit', 1)}`\n"
+        f"• Shortlink Bypass: `{'✅ Enabled' if limits.get('shortlink_bypass') else '❌ Disabled'}`"
+    )
+    
+    await message.reply(text)
+    raise StopPropagation
+
+@Client.on_message(filters.command("redeem"), group=-1)
+async def user_redeem_coupon(client, message: Message):
+    if len(message.command) < 2: return await message.reply("⚠️ Usage: `/redeem <COUPON-CODE>`")
+    code = message.command[1].strip().upper()
+    coupon = await vip_coupons.find_one({"code": code, "status": "Active", "remaining_uses": {"$gt": 0}})
+    if not coupon or coupon["expiry"] < datetime.datetime.now(): return await message.reply("❌ **Invalid or Expired Coupon.**")
+    
+    plans = await get_all_plans()
+    plan_meta = plans.get(coupon["plan_target"], DEFAULT_PLANS["bronze"])
+    
+    rem_uses = coupon["remaining_uses"] - 1
+    status = "Used" if rem_uses <= 0 else "Active"
+    await vip_coupons.update_one({"code": code}, {"$set": {"remaining_uses": rem_uses, "status": status}})
+    
+    # 🚀 Applying is_promo to coupon redemption
+    await add_vip(message.from_user, plan_meta["name"], plan_meta["days"], method=f"Coupon ({code})", is_promo=True)
+    await log_vip_event("Coupon", message.from_user.id, f"Redeemed {code}")
+    await message.reply(f"🎉 **Redemption Success!** Activated tier `{plan_meta['name']}`.")
+    raise StopPropagation
+
+# ==========================================
 # 🎁 FREE TRIAL COMMAND
 # ==========================================
 @Client.on_message(filters.command("freetrial") & filters.user(Config.ADMINS))
@@ -1119,7 +1224,6 @@ async def set_free_trial_command(client: Client, message: Message):
         if days == 0:
             await message.reply_text("🚫 Free trial for new users has been **disabled**.")
         else:
-            # 🚀 UPDATED: Uses the new isolated trial plan name!
             await message.reply_text(f"✅ New users will now automatically receive a **{days}-day 🎁 Gold (Trial)**.")
     except ValueError:
         await message.reply_text("❌ Please provide a valid number of days.")
