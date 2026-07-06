@@ -52,6 +52,7 @@ class MultiDB:
             self.vip_plans = self.clients[0][resolved_db_name]["vip_plans"]
             self.vip_subscriptions = self.clients[0][resolved_db_name]["vip_subscriptions"]
             self.vip_features = self.clients[0][resolved_db_name]["vip_features"]
+            self.vip_increments = self.clients[0][resolved_db_name]["vip_increments"]
         # ==========================================
         # ⚙️ MULTI-SHARD CAPACITY CONSTANTS
         # ==========================================
