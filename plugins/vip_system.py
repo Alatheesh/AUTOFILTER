@@ -536,6 +536,7 @@ async def vip_panel_router(client, callback: CallbackQuery):
         text = "🎁 **Promotion Center**\n\nManage compensation, holiday events, and free access blasts."
         markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("🎁 Compensate Users", callback_data="vipwiz_comp_init", style=ButtonStyle.SUCCESS)],
+            [InlineKeyboardButton("🛑 Revoke Global Promo", callback_data="vipwiz_revokepromo_init", style=ButtonStyle.DANGER)], # 🚀 NEW BUTTON
             [InlineKeyboardButton("🔙 Back to Dashboard", callback_data="vipdb_home", style=ButtonStyle.DANGER), InlineKeyboardButton("🔄 Refresh", callback_data="vipdb_promos", style=ButtonStyle.SUCCESS)]
         ])
         await callback.message.edit_text(text, reply_markup=markup)
@@ -831,6 +832,28 @@ async def admin_wizards_router(client, callback: CallbackQuery):
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Promos", callback_data="vipdb_promos", style=ButtonStyle.PRIMARY)]])
         )
 
+    # --- REVOKE PROMO WIZARD ---
+    elif action == "revokepromo_init":
+        markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⚠️ YES, Revoke from All", callback_data="vipwiz_revokepromo_exec", style=ButtonStyle.DANGER)],
+            [InlineKeyboardButton("❌ Cancel", callback_data="vipdb_promos", style=ButtonStyle.PRIMARY)]
+        ])
+        await callback.message.edit_text(
+            "🛑 **Wizard: Revoke Global Promo**\n\nAre you sure you want to completely cancel and remove VIP status from EVERY free user who received it via the 'Global Promo Event'?\n\n*(Note: This is completely safe and will NOT harm your actual paying VIPs).*", 
+            reply_markup=markup
+        )
+
+    elif action == "revokepromo_exec":
+        # 🚀 Surigically find and delete only the users tagged from the free blast
+        result = await vip_users.delete_many({"acquisition_method": "Global Promo Event"})
+        count = result.deleted_count
+        
+        await log_vip_event("Mass Revoke", "System", f"Revoked Global Promo from {count} free users", callback.from_user.id)
+        
+        await callback.message.edit_text(
+            f"✅ **Revoke Complete!**\n\nSuccessfully removed the promo VIP status from `{count}` free users. They have been returned to standard limits.", 
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Promos", callback_data="vipdb_promos", style=ButtonStyle.PRIMARY)]])
+        )
 
 # ==========================================
 # 📸 CATCH USER INPUT (UTR & TEXT WIZARDS)
