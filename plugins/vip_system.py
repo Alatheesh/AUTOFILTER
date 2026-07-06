@@ -109,17 +109,29 @@ async def add_vip(user, plan_name, days, method="Admin Added", gifted_by=None, o
 
     existing = await vip_users.find_one({"user_id": user_id})
     if existing:
-        base_expiry = max(existing["expiry"], datetime.datetime.now())
+        base_expiry = max(existing.get("expiry", datetime.datetime.now()), datetime.datetime.now())
         new_expiry = base_expiry + datetime.timedelta(days=days)
         await vip_users.update_one(
             {"user_id": user_id},
-            {"$set": {"expiry": new_expiry, "plan": plan_name, "status": "Active", "username": username, "first_name": first_name, "notice_24h": False}, "$inc": {"renewals": 1}}
+            {
+                "$set": {
+                    "expiry": new_expiry, 
+                    "plan": plan_name, 
+                    "status": "Active", 
+                    "username": username, 
+                    "first_name": first_name, 
+                    "notice_24h": False,
+                    "acquisition_method": method  # 🚀 NEW: Tracks how they got it!
+                }, 
+                "$inc": {"renewals": 1}
+            }
         )
         await log_vip_event("Renewed/Extended", user_id, f"Added {days} days to {plan_name}", admin_id=gifted_by)
     else:
         await vip_users.insert_one({
             "user_id": user_id, "username": username, "first_name": first_name, "plan": plan_name, "status": "Active",
-            "joined": datetime.datetime.now(), "expiry": expiry, "renewals": 1, "coupons_used": [], "notice_24h": False
+            "joined": datetime.datetime.now(), "expiry": expiry, "renewals": 1, "coupons_used": [], "notice_24h": False,
+            "acquisition_method": method  # 🚀 NEW: Stamps it permanently in your DB!
         })
         await log_vip_event("Created", user_id, f"Joined {plan_name} for {days} days", admin_id=gifted_by)
 
@@ -780,20 +792,44 @@ async def admin_wizards_router(client, callback: CallbackQuery):
         parts = action.split("_")
         target, days = parts[2], int(parts[3])
         
+        # We will give free users the Bronze tier during global promos
+        plans = await get_all_plans()
+        promo_plan_name = plans.get("bronze", {}).get("name", "🥉 Bronze")
+        
         target_list = await parse_target_users(client, [target])
         count = 0
+        
         for uid in target_list:
-            user = await vip_users.find_one({"user_id": uid})
-            if user:
-                # 🚀 FIX: Safely fallback to current time if expiry is missing
-                base_expiry = user.get("expiry", datetime.datetime.now())
+            user_doc = await vip_users.find_one({"user_id": uid})
+            
+            if user_doc and user_doc.get("status") == "Active":
+                # They are already VIP, just extend their days
+                base_expiry = user_doc.get("expiry", datetime.datetime.now())
                 new_exp = base_expiry + datetime.timedelta(days=days)
                 
-                await vip_users.update_one({"user_id": uid}, {"$set": {"expiry": new_exp}})
-                await log_vip_event("Compensated", uid, f"Added {days} extra days via Wizard", callback.from_user.id)
+                await vip_users.update_one(
+                    {"user_id": uid}, 
+                    {"$set": {"expiry": new_exp, "acquisition_method": "Promo Extension"}}
+                )
+                await log_vip_event("Compensated", uid, f"Added {days} days via Wizard", callback.from_user.id)
                 count += 1
+            else:
+                # 🚀 NEW: If they are a Free User and you selected "All Users" or "NonVIP"
+                if target in ["all", "nonvip"]:
+                    # Creates a brand new VIP profile for them!
+                    await add_vip(
+                        user=uid, 
+                        plan_name=promo_plan_name, 
+                        days=days, 
+                        method="Global Promo Event", 
+                        gifted_by=callback.from_user.id
+                    )
+                    count += 1
                 
-        await callback.message.edit_text(f"✅ **Compensation Complete!**\n\nAdded {days} days to `{count}` active accounts.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Promos", callback_data="vipdb_promos", style=ButtonStyle.PRIMARY)]]))
+        await callback.message.edit_text(
+            f"✅ **Promo Complete!**\n\nGranted {days} days of VIP access to `{count}` users.", 
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Promos", callback_data="vipdb_promos", style=ButtonStyle.PRIMARY)]])
+        )
 
 
 # ==========================================
