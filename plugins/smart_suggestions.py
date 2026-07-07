@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 # ==========================================
 # 1. TIER 3: MONGODB RAPIDFUZZ (FINAL FALLBACK)
 # ==========================================
-async def get_mongodb_fallback(query: str, limit=3, threshold=65):
+async def get_mongodb_fallback(query: str, limit=10, threshold=65):
     """
     Scans local database and uses Percentage Match (RapidFuzz).
     """
@@ -52,7 +52,7 @@ async def get_mongodb_fallback(query: str, limit=3, threshold=65):
 # ==========================================
 # 2. TIER 1 & 2: TMDB & IMDB WATERFALL
 # ==========================================
-async def fetch_smart_spellcheck(query: str, limit=3):
+async def fetch_smart_spellcheck(query: str, limit=10):
     """
     THE 3-TIER WATERFALL:
     1. Tries TMDB.
