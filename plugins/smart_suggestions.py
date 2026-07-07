@@ -4,47 +4,46 @@ import logging
 import re
 from pyrogram import Client, filters
 from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from rapidfuzz import process, fuzz
 from database.multi_db import db
 from config import Config
 
 logger = logging.getLogger(__name__)
 
 # ==========================================
-# 1. HIGH SPEED LOCAL BACKUP PROTOCOL
+# 1. HIGH SPEED LOCAL BACKUP PROTOCOL (RAPIDFUZZ)
 # ==========================================
-def levenshtein_distance(s1: str, s2: str) -> int:
-    if len(s1) < len(s2): return levenshtein_distance(s2, s1)
-    if len(s2) == 0: return len(s1)
-    previous_row = range(len(s2) + 1)
-    for i, c1 in enumerate(s1):
-        current_row = [i + 1]
-        for j, c2 in enumerate(s2):
-            insertions = previous_row[j + 1] + 1
-            deletions = current_row[j] + 1
-            substitutions = previous_row[j] + (c1 != c2)
-            current_row.append(min(insertions, deletions, substitutions))
-        previous_row = current_row
-    return previous_row[-1]
+async def get_mongodb_fallback(query: str, limit=3, threshold=65):
+    """
+    BACKUP PROTOCOL: Scans your local MongoDB unique file titles 
+    and applies a high-speed fuzzy check to find the closest match.
+    """
+    try:
+        # Pull distinct titles directly from your local database
+        unique_titles = await db.files.distinct("title")
+        clean_titles = [str(t).strip() for t in unique_titles if t]
+        
+        if not clean_titles:
+            return []
 
-async def get_mongodb_fallback(query: str, limit=3):
-    first_word = query.split()[0] if query else query
-    pool_query = first_word[:4] if len(first_word) >= 4 else first_word
-    titles = await db.search_files(pool_query, skip=0, limit=300, exact=False)
-    
-    suggestions = []
-    query_lower = query.lower()
-    for item in titles:
-        title = item.get("title", "")
-        if not title: continue
-        title_lower = title.lower()
-        if all(word in title_lower for word in query_lower.split()):
-            suggestions.append(title)
-            continue
-        dist = levenshtein_distance(query_lower, title_lower)
-        if dist <= max(2, len(query_lower) // 4):
-            suggestions.append(title)
-            
-    return list(dict.fromkeys(suggestions))[:limit]
+        # Run rapidfuzz across your local database titles
+        results = process.extract(
+            query.lower(), 
+            [t.lower() for t in clean_titles], 
+            scorer=fuzz.WRatio, 
+            limit=limit
+        )
+        
+        suggestions = []
+        for match_lower, score, index in results:
+            if score >= threshold:
+                # Map back to original casing from the database
+                suggestions.append(clean_titles[index])
+                
+        return suggestions
+    except Exception as e:
+        logger.error(f"MongoDB Backup Protocol Error: {e}")
+        return []
 
 # ==========================================
 # 2. TMDB / IMDB EXTERNAL FETCHERS
@@ -69,11 +68,15 @@ async def fetch_smart_spellcheck(query: str, limit=3):
                             if title and title not in suggestions:
                                 suggestions.append(title)
                                 if len(suggestions) >= limit: break
-                        return suggestions
+                        
+                        # 🚀 BUG FIX: If TMDB responds but finds 0 results for the typo,
+                        # do NOT give up. Break the loop and let MongoDB try to fix it!
+                        if suggestions:
+                            return suggestions
             except Exception:
                 continue # Key failed or timed out, move to the next key
                 
-    # If all TMDB keys fail, use Backup Protocol
+    # If all TMDB keys fail OR TMDB returns 0 matches for the typo, use Backup Protocol
     return await get_mongodb_fallback(query, limit)
 
 async def get_imdb_poster_fallback(movie_name):
