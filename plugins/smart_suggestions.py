@@ -102,30 +102,26 @@ async def get_imdb_poster_fallback(movie_name):
 
 @Client.on_callback_query(filters.regex(r"^(fuz_|fuzzy_)"))
 async def handle_all_fuzzy_clicks(client: Client, callback: CallbackQuery):
-    # Extract the movie name regardless of which prefix was used
+    # 1. Extract the movie name
     if callback.data.startswith("fuzzy_"):
-        correct_name = callback.data.replace("fuzzy_", "")
+        correct_name = callback.data.split("fuzzy_", 1)[1]
     else:
-        correct_name = callback.data.replace("fuz_", "")
+        correct_name = callback.data.split("fuz_", 1)[1]
         
-    # 1. Acknowledge the click so the loading circle stops
+    # 2. 🚀 CRITICAL FIX: DO NOT DELETE THE MESSAGE! 
+    # Just remove the buttons so auto_filter has a message to reply to.
+    await callback.message.edit_reply_markup(reply_markup=None)
     await callback.answer(f"🔍 Fetching: {correct_name}...", show_alert=False)
     
-    # 2. Delete the old "Did you mean?" message / Broadcast message
-    try:
-        await callback.message.delete()
-    except Exception:
-        pass
-        
-    # 3. Clean the query to make sure the database can read it perfectly
+    # 3. Clean the query
+    import re
     clean_query = re.sub(r"[_+\[\]\(\)\{\}\-.:']", " ", correct_name)
     clean_query = " ".join(clean_query.split())
     
-    # 4. 🚀 THE MAGIC: Trick the bot into executing a normal search instantly!
+    # 4. Trick the bot into executing a normal search instantly!
     message = callback.message
     message.text = clean_query
     message.from_user = callback.from_user 
     
-    # Pass the fake message directly back into your core search engine
     from plugins.search import auto_filter
     await auto_filter(client, message)
