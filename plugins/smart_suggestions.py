@@ -135,12 +135,14 @@ async def handle_all_fuzzy_clicks(client: Client, callback: CallbackQuery):
     else:
         correct_name = callback.data.split("fuz_", 1)[1]
         
-    await callback.message.edit_reply_markup(reply_markup=None)
+    # 1. Answer the callback to stop the loading circle (BUTTONS WILL NOT BE DELETED)
     await callback.answer(f"🔍 Fetching: {correct_name}...", show_alert=False)
     
+    # 2. Clean the query
     clean_query = re.sub(r"[_+\[\]\(\)\{\}\-.:']", " ", correct_name)
     clean_query = " ".join(clean_query.split())
     
+    # 3. Trick the bot into executing a normal search instantly!
     message = callback.message
     message.text = clean_query
     message.from_user = callback.from_user 
