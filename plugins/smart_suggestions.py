@@ -15,18 +15,28 @@ logger = logging.getLogger(__name__)
 # ==========================================
 async def get_mongodb_fallback(query: str, limit=3, threshold=65):
     """
-    BACKUP PROTOCOL: Scans your local MongoDB unique file titles 
-    and applies a high-speed fuzzy check to find the closest match.
+    BACKUP PROTOCOL: Safely pulls files from your MultiDB and applies 
+    RapidFuzz (percentage math) to find the closest match.
     """
     try:
-        # Pull distinct titles directly from your local database
-        unique_titles = await db.files.distinct("title")
-        clean_titles = [str(t).strip() for t in unique_titles if t]
+        # 1. Safely pull a pool of potential matches using your DB's native search
+        first_word = query.split()[0] if query else query
+        pool_query = first_word[:4] if len(first_word) >= 4 else first_word
         
+        # 🚀 CRITICAL FIX: Use your native db.search_files instead of db.files!
+        raw_files = await db.search_files(pool_query, skip=0, limit=300, exact=False)
+        
+        # Extract clean, unique titles
+        clean_titles = []
+        for item in raw_files:
+            title = item.get("title")
+            if title and title not in clean_titles:
+                clean_titles.append(str(title).strip())
+                
         if not clean_titles:
             return []
 
-        # Run rapidfuzz across your local database titles
+        # 2. 🚀 THE PERCENTAGE MATH (RapidFuzz WRatio)
         results = process.extract(
             query.lower(), 
             [t.lower() for t in clean_titles], 
@@ -36,8 +46,7 @@ async def get_mongodb_fallback(query: str, limit=3, threshold=65):
         
         suggestions = []
         for match_lower, score, index in results:
-            if score >= threshold:
-                # Map back to original casing from the database
+            if score >= threshold: # Only accept if the percentage match is >= 65%
                 suggestions.append(clean_titles[index])
                 
         return suggestions
