@@ -149,3 +149,17 @@ async def handle_all_fuzzy_clicks(client: Client, callback: CallbackQuery):
     
     from plugins.search import auto_filter
     await auto_filter(client, message)
+
+# ==========================================
+# 4. GLOBAL CANCEL / CLOSE BUTTON HANDLER
+# ==========================================
+@Client.on_callback_query(filters.regex(r"^close_data$"))
+async def close_menu_callback(client: Client, callback: CallbackQuery):
+    try:
+        # Deletes the message where the Cancel button was clicked
+        await callback.message.delete()
+    except Exception:
+        pass
+    
+    # Answers the callback so the button stops "loading" / spinning
+    await callback.answer("Cancelled.", show_alert=False)
