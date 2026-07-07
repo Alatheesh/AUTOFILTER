@@ -23,7 +23,11 @@ class Config(object):
     PREMIUM_TIER: bool = os.environ.get("PREMIUM_TIER", "False").lower() == "true"
     MAX_RESULTS: int = int(os.environ.get("MAX_RESULTS", "50"))
     
-    # 🚀 NEW: Web App Link Configuration
+    # 🚀 NEW: TMDB Multi-Key & Poster Config
+    TMDB_API_KEYS: List[str] = [k.strip() for k in os.environ.get("TMDB_API_KEYS", "").split(",") if k.strip()]
+    DEFAULT_POSTER: str = os.environ.get("DEFAULT_POSTER", "https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=600")
+
+    # Web App Link Configuration
     BULK_LINK: str = os.environ.get("BULK_LINK", "https://YOUR_GITHUB_USERNAME.github.io/autofilter-web/")
     
     # Ghost mode parameter (Auto-delete links)
@@ -32,7 +36,7 @@ class Config(object):
     # Logging channel
     LOG_CHANNEL: int = int(os.environ.get("LOG_CHANNEL", "0"))
 
-    # 📝 NEW: Default File Caption Engine
+    # Default File Caption Engine
     DEFAULT_CAPTION: str = os.environ.get(
         "DEFAULT_CAPTION", 
         "<b>{file_name}</b>\n\n📁 Size: {size}\n👤 Requested by: {mention}"
