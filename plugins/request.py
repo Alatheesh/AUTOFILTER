@@ -4,6 +4,7 @@ from pyrogram import Client, filters, ContinuePropagation, StopPropagation
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from database.multi_db import db
 from config import Config
+from plugins.search import fetch_imdb_tmdb
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +146,6 @@ async def request_button_callback(client: Client, callback: CallbackQuery):
         
     user = callback.from_user
     
-    # 💎 NEW: Enforce VIP Request Cooldowns on Button
     from plugins.vip_system import DEFAULT_PLANS, FREE_USER_LIMITS
     active_plan = await db.get_active_vip_plan(user.id)
     user_limits = DEFAULT_PLANS.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan else FREE_USER_LIMITS
@@ -160,15 +160,30 @@ async def request_button_callback(client: Client, callback: CallbackQuery):
             return await callback.answer(f"⏳ Cooldown Active! Please wait {remaining_mins} more minutes before requesting.", show_alert=True)
 
     movie_name = callback.data.split("req_", 1)[1]
-    req_text = f"#Movie_Request\n\n🔔 **NEW MOVIE REQUEST (From Search Button)**\n\n👤 **User:** {user.first_name} (`{user.id}`)\n🎬 **Requested:** `{movie_name}`"
+    
+    # 🚀 NEW: Clean the data using TMDB before sending to Admin
+    await callback.answer("⏳ Sending your request...", show_alert=False)
+    metadata = await fetch_imdb_tmdb(movie_name)
+    clean_title = metadata.get("title", movie_name)
+    year = metadata.get("release_date", "Unknown")[:4]
+    poster = metadata.get("poster", Config.DEFAULT_POSTER)
+    
+    admin_text = (
+        f"#Movie_Request\n\n"
+        f"🔔 **NEW MOVIE REQUEST**\n\n"
+        f"👤 **User:** {user.first_name} (`{user.id}`)\n"
+        f"🎬 **TMDB Match:** `{clean_title} ({year})`\n"
+        f"🔍 **User Typed:** `{movie_name}`"
+    )
     
     if hasattr(Config, "LOG_CHANNEL") and Config.LOG_CHANNEL:
         try:
-            await client.send_message(Config.LOG_CHANNEL, req_text)
-            USER_LAST_REQUEST[user.id] = time.time() # 💎 Mark cooldown
-            await callback.message.edit_text(f"✅ **You successfully requested:**\n`{movie_name}`\n\nThe admins have been notified!")
-            await callback.answer("✅ Request successfully delivered!", show_alert=True)
-        except Exception: 
+            # 🚀 Send a high-quality Photo instead of just text!
+            await client.send_photo(Config.LOG_CHANNEL, photo=poster, caption=admin_text)
+            USER_LAST_REQUEST[user.id] = time.time()
+            await callback.message.edit_text(f"✅ **You successfully requested:**\n`{clean_title}`\n\nThe admins have been notified!")
+        except Exception as e: 
+            logger.error(f"Request Error: {e}")
             await callback.answer("❌ Error delivering request to Logs.", show_alert=True)
     else: 
         await callback.answer("❌ No log channel configured.", show_alert=True)
