@@ -97,43 +97,35 @@ async def get_imdb_poster_fallback(movie_name):
     return None
 
 # ==========================================
-# 3. BUTTON ROUTING (BROADCASTS VS TYPOS)
+# 3. BUTTON ROUTING (BROADCASTS & TYPOS)
 # ==========================================
 
-# ▶️ ROUTE A: The Broadcasting Trigger (Uses "fuz_")
-# When you send a broadcast with a movie button, this forces the bot to search it.
-@Client.on_callback_query(filters.regex(r"^fuz_(.+)$"))
-async def handle_fuz_broadcast_click(client: Client, callback: CallbackQuery):
-    suggested_query = callback.data.split("fuz_", 1)[1]
+@Client.on_callback_query(filters.regex(r"^(fuz_|fuzzy_)"))
+async def handle_all_fuzzy_clicks(client: Client, callback: CallbackQuery):
+    # Extract the movie name regardless of which prefix was used
+    if callback.data.startswith("fuzzy_"):
+        correct_name = callback.data.replace("fuzzy_", "")
+    else:
+        correct_name = callback.data.replace("fuz_", "")
+        
+    # 1. Acknowledge the click so the loading circle stops
+    await callback.answer(f"🔍 Fetching: {correct_name}...", show_alert=False)
     
-    # 1. Remove the buttons so the user knows it registered, preventing the "Deleted Message" crash!
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.answer(f"🔍 Searching for: {suggested_query}...", show_alert=False)
-    
-    # 2. Clean the query
-    clean_query = re.sub(r"[_+\[\]\(\)\{\}\-.:']", " ", suggested_query)
+    # 2. Delete the old "Did you mean?" message / Broadcast message
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+        
+    # 3. Clean the query to make sure the database can read it perfectly
+    clean_query = re.sub(r"[_+\[\]\(\)\{\}\-.:']", " ", correct_name)
     clean_query = " ".join(clean_query.split())
     
-    # 3. Trick the bot into executing a normal search
+    # 4. 🚀 THE MAGIC: Trick the bot into executing a normal search instantly!
     message = callback.message
     message.text = clean_query
     message.from_user = callback.from_user 
     
+    # Pass the fake message directly back into your core search engine
     from plugins.search import auto_filter
     await auto_filter(client, message)
-
-
-# ▶️ ROUTE B: The Typo Corrector (Uses "fuzzy_")
-# When a user makes a typo, this button fixes their spelling via inline query.
-@Client.on_callback_query(filters.regex(r"^fuzzy_"))
-async def handle_fuzzy_typo_click(client: Client, callback: CallbackQuery):
-    correct_name = callback.data.replace("fuzzy_", "")
-    await callback.message.delete()
-    
-    await client.send_message(
-        callback.message.chat.id, 
-        f"✨ **Did you mean:** `{correct_name}`\n\nClick below to search again!",
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("🔍 Fetch Files", switch_inline_query_current_chat=correct_name)
-        ]])
-    )
