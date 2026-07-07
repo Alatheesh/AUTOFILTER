@@ -65,30 +65,37 @@ def levenshtein_distance(s1: str, s2: str) -> int:
     return previous_row[-1]
 
 async def fetch_imdb_tmdb(query: str) -> dict:
-    tmdb_api_key = os.environ.get("TMDB_API_KEY", "")
-    if not tmdb_api_key:
-        return {
-            "title": query.title(), "rating": "8.2/10", 
-            "poster": "https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=600", 
-            "genre": "Sci-Fi", "plot": "Connect TMDB_API_KEY to unlock actual movie details.",
-            "release_date": "Unknown", "runtime": "N/A", "language": "en"
-        }
-    url = f"https://api.themoviedb.org/3/search/movie?api_key={tmdb_api_key}&query={query}"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get("results"):
-                        movie = data["results"][0]
-                        poster_url = f"https://image.tmdb.org/t/p/w500{movie.get('poster_path')}" if movie.get("poster_path") else "https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=600"
-                        return {
-                            "title": movie.get("title", query), "rating": f"{movie.get('vote_average', 'N/A')}/10", 
-                            "poster": poster_url, "genre": "Drama", "plot": movie.get("overview", "No overview available."),
-                            "release_date": movie.get("release_date", "Unknown"), "language": movie.get("original_language", "en")
-                        }
-    except Exception: pass
-    return {"title": query.title(), "rating": "N/A", "poster": "https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=600", "genre": "Unknown", "plot": f"Matches for: {query}", "release_date": "Unknown", "language": "Unknown"}
+    tmdb_keys = Config.TMDB_API_KEYS
+    default_meta = {
+        "title": query.title(), "rating": "N/A", 
+        "poster": Config.DEFAULT_POSTER, 
+        "genre": "Unknown", "plot": f"Matches for: {query}", 
+        "release_date": "Unknown", "language": "Unknown"
+    }
+    
+    if not tmdb_keys:
+        from plugins.smart_suggestions import get_imdb_poster_fallback
+        poster = await get_imdb_poster_fallback(query)
+        if poster: default_meta["poster"] = poster
+        return default_meta
+        
+    for key in tmdb_keys:
+        url = f"https://api.themoviedb.org/3/search/movie?api_key={key}&query={urllib.parse.quote(query)}"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=3) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get("results"):
+                            movie = data["results"][0]
+                            poster_url = f"https://image.tmdb.org/t/p/w500{movie.get('poster_path')}" if movie.get("poster_path") else default_meta["poster"]
+                            return {
+                                "title": movie.get("title", query.title()), "rating": f"{movie.get('vote_average', 'N/A')}/10", 
+                                "poster": poster_url, "genre": "Drama", "plot": movie.get("overview", "No overview available."),
+                                "release_date": movie.get("release_date", "Unknown"), "language": movie.get("original_language", "en")
+                            }
+        except Exception: continue
+    return default_meta
 
 async def get_fuzzy_suggestions(query: str) -> list:
     first_word = query.split()[0] if query else query
@@ -362,12 +369,32 @@ async def auto_filter(client: Client, message: Message):
         if loading_msg:
             try: await loading_msg.delete()
             except Exception: pass
-        suggestions = await get_fuzzy_suggestions(query)
+            
+        from plugins.smart_suggestions import fetch_smart_spellcheck
+        suggestions = await fetch_smart_spellcheck(query)
+        req_enabled = settings.get("requests_enabled", True)
+        
         btn_list = []
-        for s in suggestions: btn_list.append([InlineKeyboardButton(f"🔍 Search: {s}", callback_data=f"fuz_{s[:50]}")])
-        btn_list.append([InlineKeyboardButton("🔔 Request this Movie", callback_data=f"req_{query[:40]}")])
-        try: await message.reply_text("😔 **No exact matches found.**", reply_markup=InlineKeyboardMarkup(btn_list), reply_parameters=ReplyParameters(message_id=message.id))
-        except Exception: await client.send_message(chat_id, "😔 **No matches found.**", reply_markup=InlineKeyboardMarkup(btn_list))
+        if suggestions:
+            for s in suggestions: 
+                btn_list.append([InlineKeyboardButton(f"🎬 {s[:40]}", callback_data=f"fuzzy_{s[:40]}")])
+        
+        # 🚀 ONLY show Request Button if toggle is ON
+        if req_enabled:
+            btn_list.append([InlineKeyboardButton("🔔 Request this Movie", callback_data=f"req_{query[:40]}")])
+            
+        if suggestions:
+            btn_list.append([InlineKeyboardButton("❌ Cancel", callback_data="close_data")])
+            text = f"❌ **No exact match found for '{query}'.**\n\n*Did you mean to search for one of these?*"
+        else:
+            if req_enabled:
+                text = f"😔 **No exact matches found for '{query}'.**"
+            else:
+                # 🚀 OPTION A: When Requests are disabled
+                text = f"😔 We searched everywhere, but **{query}** isn't in our catalog right now. We add hundreds of new movies automatically every day, so please check back soon!"
+
+        try: await message.reply_text(text, reply_markup=InlineKeyboardMarkup(btn_list) if btn_list else None, reply_parameters=ReplyParameters(message_id=message.id))
+        except Exception: await client.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(btn_list) if btn_list else None)
         return
 
     metadata = await fetch_imdb_tmdb(query)
