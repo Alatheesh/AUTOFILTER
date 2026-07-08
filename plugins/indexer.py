@@ -62,32 +62,34 @@ async def auto_indexer(client: Client, message: Message):
 async def trigger_indexing_job(client: Client, message: Message, target_chat, prompt_msg_id=None, known_msg_id=None):
     """Processes the target chat, finds the absolute latest message, and queues the job."""
     
-    # 🚀 FIX 1: Advanced URL Parser for Public AND Private Links
+    extracted_msg_id = None
+    
+    # 🚀 Advanced Link Parser 
     if isinstance(target_chat, str):
         target_chat = target_chat.strip()
         if "t.me/" in target_chat:
-            parts = target_chat.split("t.me/")[1].split("/")
+            parts = target_chat.split("t.me/")[1].split("?")[0].split("/")
             if parts[0] == "c" and len(parts) > 1:
-                # It's a Private Link (t.me/c/1234567890/10) -> Convert to -100 format
                 target_chat = f"-100{parts[1]}"
+                if len(parts) > 2 and parts[2].isdigit():
+                    extracted_msg_id = int(parts[2])
             else:
-                # It's a Public Link (t.me/ChannelName/10)
-                target_chat = f"@{parts[0].split('?')[0]}"
+                target_chat = f"@{parts[0]}"
+                if len(parts) > 1 and parts[1].isdigit():
+                    extracted_msg_id = int(parts[1])
         elif not target_chat.startswith("@") and not target_chat.replace("-", "").isdigit():
             target_chat = f"@{target_chat}"
 
-    # Try converting purely numeric strings to integers
+    if extracted_msg_id and not known_msg_id:
+        known_msg_id = extracted_msg_id
+
     try: target_chat = int(target_chat)
     except ValueError: pass
 
     try:
         chat_info = await client.get_chat(target_chat)
         target_chat_name = chat_info.title or str(target_chat)
-        
-        if chat_info.username:
-            target_chat_id = f"@{chat_info.username}"
-        else:
-            target_chat_id = chat_info.id
+        target_chat_id = f"@{chat_info.username}" if chat_info.username else chat_info.id
             
     except PeerIdInvalid:
         err = (
@@ -105,20 +107,62 @@ async def trigger_indexing_job(client: Client, message: Message, target_chat, pr
         else: await message.reply_text(err)
         return
 
-    # 🚀 FIX 2: ALWAYS fetch the absolute newest message in the channel
     actual_last_msg_id = None
+    
+    # METHOD A: Standard History Request
     try:
         async for m in client.get_chat_history(target_chat_id, limit=1):
             actual_last_msg_id = m.id
             break
-    except Exception as e:
+    except Exception:
         pass 
         
+    # METHOD B: The "Radar Probe" (Bypasses Admin Restrictions using your logic!)
+    if not actual_last_msg_id:
+        try:
+            if prompt_msg_id: 
+                await client.edit_message_text(message.chat.id, prompt_msg_id, "📡 **Bypassing Security... Probing Channel Size...**")
+            
+            # Ping a massive net of random IDs in one single API call
+            test_ids = [100, 500, 1000, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000]
+            msgs = await client.get_messages(target_chat_id, test_ids)
+            
+            highest_found = 0
+            for i, msg in enumerate(msgs):
+                # If Telegram returns a valid message, record the ID
+                if msg and not getattr(msg, "empty", False):  
+                    highest_found = test_ids[i]
+            
+            if highest_found > 0:
+                # Zoom in on the target area to find a more precise ceiling
+                next_idx = test_ids.index(highest_found) + 1
+                upper_bound = test_ids[next_idx] if next_idx < len(test_ids) else highest_found + 50000
+                step = max(1, (upper_bound - highest_found) // 10)
+                fine_test_ids = [highest_found + (step * i) for i in range(1, 11)]
+                
+                fine_msgs = await client.get_messages(target_chat_id, fine_test_ids)
+                for i, msg in enumerate(fine_msgs):
+                    if msg and not getattr(msg, "empty", False):
+                        highest_found = fine_test_ids[i]
+                        
+                # Set the ceiling slightly higher just in case the absolute latest message was deleted
+                actual_last_msg_id = highest_found + 100  
+        except Exception as e:
+            logger.error(f"Radar Probe failed: {e}")
+            pass
+
+    # FALLBACK
     if not actual_last_msg_id:
         if known_msg_id:
             actual_last_msg_id = known_msg_id
         else:
-            err = "❌ **Error:** That channel appears to be completely empty or I lack history access."
+            err = (
+                "❌ **Telegram Security Block:** I cannot scan this channel from the outside.\n\n"
+                "**How to Fix This:**\n"
+                "1️⃣ Add me to the channel as an Admin, OR\n"
+                "2️⃣ **Forward the absolute newest file** from the channel to me, OR\n"
+                "3️⃣ Send a **direct link** to the newest post (e.g., `t.me/ChannelName/1500`)."
+            )
             if prompt_msg_id: await client.edit_message_text(message.chat.id, prompt_msg_id, err)
             else: await message.reply_text(err)
             return
@@ -164,7 +208,7 @@ async def mass_indexer_command(client: Client, message: Message):
     prompt = await message.reply_text(
         "📦 **Mass Indexing Wizard**\n\n"
         "How would you like to target the channel?\n"
-        "1️⃣ **Forward** any file from the channel here.\n"
+        "1️⃣ **Forward** the *newest* file from the channel here.\n"
         "2️⃣ **Type** the Channel ID (e.g., `-10012345678`).\n"
         "3️⃣ **Type** the Link or Username (e.g., `@MyChannel` or `t.me/c/...`).\n\n"
         "*(Or click Cancel to abort)*",
@@ -301,7 +345,7 @@ async def process_indexing_queue(client: Client):
 
             for msg in messages:
                 scanned += 1
-                if msg.empty: continue
+                if not msg or getattr(msg, "empty", False): continue
 
                 media = msg.document or msg.video or msg.audio
                 if not media: continue
