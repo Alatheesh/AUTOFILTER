@@ -590,18 +590,97 @@ async def ghost_update(client: Client, message: Message):
 @Client.on_message(filters.command("user_broadcast") & filters.user(Config.ADMINS) & filters.reply)
 async def direct_support(client: Client, message: Message):
     try:
-        target_user = int(message.command[1])
-        await message.reply_to_message.copy(target_user)
-        await message.reply_text(f"✅ Securely dropped into `{target_user}`'s PMs.")
+        command_parts = message.text.split(" ", 2)
+        if len(command_parts) < 2:
+            await message.reply_text("⚠️ **Format:** `/user_broadcast <user_id> [-silent] [-ask 10m]`")
+            raise StopPropagation 
+            
+        target_user = int(command_parts[1])
+        command_text = command_parts[2].lower() if len(command_parts) > 2 else ""
+        
+        command_text = command_text.replace("—", "-").replace("–", "-") 
+        is_silent = "-silent" in command_text
+        
+        ask_match = re.search(r'-ask\s+(\d+)([smh])', command_text)
+        auto_delete_seconds = 0
+        if ask_match:
+            val = int(ask_match.group(1))
+            unit = ask_match.group(2)
+            if unit == 's': auto_delete_seconds = val
+            elif unit == 'm': auto_delete_seconds = val * 60
+            elif unit == 'h': auto_delete_seconds = val * 3600
+
+        target_msg = message.reply_to_message
+        
+        base_text = ""
+        if target_msg.text:
+            base_text = target_msg.text.markdown if hasattr(target_msg.text, 'markdown') else str(target_msg.text)
+        elif target_msg.caption:
+            base_text = target_msg.caption.markdown if hasattr(target_msg.caption, 'markdown') else str(target_msg.caption)
+
+        parsed_text, parsed_markup = parse_inline_buttons(base_text)
+        
+        final_markup = []
+        if parsed_markup: final_markup.extend(parsed_markup.inline_keyboard)
+        elif target_msg.reply_markup: final_markup.extend(target_msg.reply_markup.inline_keyboard)
+            
+        base_markup = InlineKeyboardMarkup(final_markup) if final_markup else None
+
+        has_tags = "{first_name}" in parsed_text or "{last_name}" in parsed_text or "{full_name}" in parsed_text
+        if has_tags:
+            user_data = await db.users.find_one({"user_id": target_user}) or {}
+            first_name_raw = user_data.get("first_name")
+            last_name_raw = user_data.get("last_name")
+            
+            if not first_name_raw or first_name_raw == "User":
+                try:
+                    tg_user = await client.get_users(target_user)
+                    first_name = tg_user.first_name or "User"
+                    last_name = tg_user.last_name or ""
+                except Exception:
+                    first_name, last_name = "User", ""
+            else:
+                first_name = str(first_name_raw)
+                last_name = str(last_name_raw) if last_name_raw else ""
+                
+            full_name = f"{first_name} {last_name}".strip()
+            parsed_text = parsed_text.replace("{first_name}", first_name).replace("{last_name}", last_name).replace("{full_name}", full_name)
+
+        if target_msg.media:
+            sent_msg = await target_msg.copy(target_user, caption=parsed_text, disable_notification=is_silent, reply_markup=base_markup)
+        else:
+            sent_msg = await client.send_message(target_user, text=parsed_text, disable_notification=is_silent, reply_markup=base_markup)
+            
+        # 🚀 FIX 1: Save the Direct Message to the Vault so it can be deleted later!
+        await db.log_broadcast("DIRECT_PM", target_user, sent_msg.id)
+        
+        confirm_text = f"✅ Securely dropped into `{target_user}`'s PMs."
+        if auto_delete_seconds > 0:
+            asyncio.create_task(schedule_auto_delete(client, target_user, sent_msg.id, auto_delete_seconds))
+            confirm_text += f"\n*(Will auto-delete in {auto_delete_seconds}s)*"
+            
+        await message.reply_text(confirm_text)
+        
+    except StopPropagation:
+        raise
+    except ValueError:
+        await message.reply_text("❌ Failed: Invalid User ID format.")
     except Exception as e:
         await message.reply_text(f"❌ Failed: `{e}`")
     raise StopPropagation 
 
+
 @Client.on_message(filters.command("delbroadcastuser") & filters.user(Config.ADMINS))
 async def surgical_wipe(client: Client, message: Message):
     try:
+        # 🚀 FIX 2: Check if the ID is missing so it doesn't crash with "list index out of range"
+        if len(message.command) < 2:
+            await message.reply_text("⚠️ **Format:** `/delbroadcastuser <user_id>`")
+            raise StopPropagation
+            
         target_user = int(message.command[1])
         latest_log = await db.get_user_latest_broadcast(target_user)
+        
         if not latest_log:
             await message.reply_text("❌ No recent broadcasts found for this user in the vault.")
             raise StopPropagation 
@@ -609,13 +688,13 @@ async def surgical_wipe(client: Client, message: Message):
         telegram_deleted = True
         try:
             await client.delete_messages(target_user, latest_log["message_id"])
-        except Exception as e:
+        except Exception:
             telegram_deleted = False
             
         await db.delete_single_broadcast_log(target_user, latest_log["message_id"])
         
         if telegram_deleted:
-            await message.reply_text(f"✅ **SURGICAL WIPE COMPLETE**\nThe last ad was scrubbed from `{target_user}`'s chat and the database.")
+            await message.reply_text(f"✅ **SURGICAL WIPE COMPLETE**\nThe last message was scrubbed from `{target_user}`'s chat and the database.")
         else:
             await message.reply_text(
                 f"⚠️ **PARTIAL WIPE SUCCESSFUL**\n\n"
@@ -623,11 +702,15 @@ async def surgical_wipe(client: Client, message: Message):
                 f"However, the record has been **successfully permanently erased** from your database vault."
             )
             
+    except StopPropagation:
+        # 🚀 FIX 3: Ignore Pyrogram's silent exit command so it doesn't print a blank error
+        raise
+    except ValueError:
+        await message.reply_text("❌ **Failed:** Invalid User ID. Please provide a valid number.")
+        raise StopPropagation
     except Exception as e:
         await message.reply_text(f"❌ **Failed:** `{e}`")
-        
-    raise StopPropagation 
-
+        raise StopPropagation
 # ==========================================
 # 💬 TWO-WAY BROADCAST COMMUNICATION
 # ==========================================
@@ -673,6 +756,10 @@ async def smart_admin_reply(client: Client, message: Message):
         raise StopPropagation 
         
     raw_text = message.text.split(" ", 1)[1]
+    
+    # 🚀 FIX: Sanitize Mobile Keyboards for this command too
+    raw_text = raw_text.replace("—", "-").replace("–", "-")
+    
     ask_match = re.search(r'-ask\s+(\d+)([smh])', raw_text)
     auto_delete_seconds = 48 * 3600 
     
