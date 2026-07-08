@@ -8,60 +8,62 @@ from database.multi_db import db
 from plugins.moderation import log_to_channel
 from config import Config
 
-# --- DYNAMIC TEXT TEMPLATES ---
+# ==========================================
+# 📝 DYNAMIC TEXT TEMPLATES
+# ==========================================
 START_TEXT = """👋 **Welcome to {bot_name}!**
 
 I am a highly-optimized Telegram repository search system. I help you instantly find movies, files, and data by indexing available public channels.
 
-✨ Use the interactive buttons below to explore my built-in commands and specifications:"""
+✨ Use the category hubs below to explore my features:"""
+
+MEDIA_MENU_TEXT = """🎬 **Media Hub**
+
+Everything you need to find and track your favorite movies.
+• View your past search history
+• Request movies that aren't in the database"""
+
+PROFILE_MENU_TEXT = """💎 **My Profile**
+
+Manage your personal account, check your search stats, or upgrade to a VIP plan for premium features."""
+
+INFO_MENU_TEXT = """ℹ️ **Information Hub**
+
+Select a topic below to read more about my policies, how to use my commands, and my source code."""
+
+ADMIN_MENU_TEXT = """👨‍💻 **Admin Command Center**
+
+Welcome back, Boss! Here are your quick-reference system commands:
+
+📢 `/broadcast` - Mass deploy messages
+👻 `/broadcast_edit` - Silently update an active broadcast
+🗑 `/broadcast_del` - Erase a broadcast from the Vault
+🎯 `/user_broadcast` - Secure 1-on-1 direct message
+🧹 `/delbroadcastuser` - Scrub an ad from a single user
+📊 `/info` - Check user database stats
+
+*(Use the settings menu for database/optimization controls)*"""
 
 ABOUT_TEXT = """🤖 **Bot Name:** {bot_name}
 🧑‍💻 **Creator:** [LATHEESH](https://t.me/LATHEESH)
 ⚙️ **Engine:** Kurigram (Python)
-📊 **Status:** Active & Running
-
-Choose an option below to view more details about the bot's policies and source:"""
-
-FEATURES_TEXT = """✨ **Bot Features:**
-
-• Use `/history` to view your past searches.
-• Instant inline file retrieval and matching.
-• Deeply customizable settings based on user admin rights.
-
-Click below to configure your user or group settings:"""
+📊 **Status:** Active & Running"""
 
 HELP_TEXT = """🛠 **How to Use This Bot:**
 
 **1.** Add me to your group using the button on the main menu.
 **2.** Make me an admin so I can read messages.
-**3.** Simply type the name of the movie or file you want in the chat.
-**4.** I will automatically reply with the matching files!
+**3.** Simply type the name of the movie or file you want.
+**4.** I will automatically reply with the matching files!"""
 
-Use `/settings` directly in the chat to adjust filters."""
+SOURCE_TEXT = "🔒 **Source Code Status:**\n\nThis bot's source code is strictly **private** and will not be published publicly. If you have business inquiries, contact the admin."
+DISCLAIMER_TEXT = "⚠️ **Disclaimer:**\n\nThis bot only indexes data that is publicly uploaded on Telegram by other users. The creator holds no responsibility for user-generated content."
+DMCA_TEXT = "⚖️ **DMCA & Takedown Requests:**\n\nIf you are a copyright owner and wish to place a request to remove a specific file or link from our database, please contact our admin directly.\n\n**Contact:** [@ntmadminbot](https://t.me/ntmadminbot)"
+PRIVACY_TEXT = "🔒 **Privacy Policy:**\n\nWe respect your privacy. This bot only collects basic usage statistics to optimize search performance. We do not store sensitive personal information."
 
-SOURCE_TEXT = """🔒 **Source Code Status:**
-
-This bot's source code is strictly **private** and will not be published publicly. 
-
-If you have business inquiries or require a custom bot, please contact the admin."""
-
-DISCLAIMER_TEXT = """⚠️ **Disclaimer:**
-
-This bot only indexes data that is publicly uploaded on Telegram by other users. 
-
-The creator of this bot has **not** uploaded any of the files provided in the search results and holds no responsibility for user-generated content."""
-
-DMCA_TEXT = """⚖️ **DMCA & Takedown Requests:**
-
-If you are a copyright owner and wish to place a request to remove a specific file or link from our database, please contact our admin directly.
-
-**Contact:** [@ntmadminbot](https://t.me/ntmadminbot)"""
-
-PRIVACY_TEXT = """🔒 **Privacy Policy:**
-
-We respect your privacy. This bot only collects basic usage statistics to optimize search performance. We do not store sensitive personal information or private messages."""
-
-# --- STICKER & MEDIA PACKS ---
+# ==========================================
+# 🎨 STICKER & MEDIA PACKS
+# ==========================================
 START_STICKERS = [
     "CAACAgUAAxkBAAERawdqNXyW6Tqft1iZtgABiTVGhBohxgIAApwAA8iUZBRzjwAB89rFhfw8BA",
     "CAACAgIAAxkBAAERawlqNXy1AwABuumeSFheCDM2d624y90AAiYPAAL7WShJIl_khPeHLac8BA"
@@ -84,39 +86,40 @@ START_BANNER_IMAGES = [
     "https://telegra.ph/file/90ea7771a7c61e2d45d72.jpg"
 ]
 
-# --- KEYBOARD MARKUPS (WITH KURIGRAM COLORS) ---
-def get_start_markup(bot_username: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ ADD ME IN YOUR GROUP", url=f"http://t.me/{bot_username}?startgroup=true", style=ButtonStyle.SUCCESS)],
-        [InlineKeyboardButton("📊 MY STATS", callback_data="ui_stats", style=ButtonStyle.PRIMARY), InlineKeyboardButton("✨ FEATURES", callback_data="ui_features", style=ButtonStyle.PRIMARY)],
-        [InlineKeyboardButton("ℹ️ ABOUT", callback_data="ui_about", style=ButtonStyle.PRIMARY), InlineKeyboardButton("🛠 HELP", callback_data="ui_help", style=ButtonStyle.PRIMARY)],
+# ==========================================
+# 🎛️ CATEGORY KEYBOARDS (HUB & SPOKE)
+# ==========================================
+def get_start_markup(bot_username: str, user_id: int) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton("➕ ADD ME TO YOUR GROUP", url=f"http://t.me/{bot_username}?startgroup=true", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton("🎬 Media Hub", callback_data="ui_media_menu", style=ButtonStyle.PRIMARY), InlineKeyboardButton("💎 My Profile", callback_data="ui_profile_menu", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("⚙️ Settings", callback_data="ui_settings_menu", style=ButtonStyle.PRIMARY), InlineKeyboardButton("ℹ️ Help & Info", callback_data="ui_info_menu", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton("🌐 VISIT OUR WEBSITE", url="https://alatheesh.github.io/NTMONLINE", style=ButtonStyle.PRIMARY)]
-    ])
+    ]
+    # 🔥 Admin Secret Button!
+    if user_id in Config.ADMINS:
+        buttons.append([InlineKeyboardButton("👨‍💻 Admin Command Center", callback_data="ui_admin_menu", style=ButtonStyle.DANGER)])
+    return InlineKeyboardMarkup(buttons)
 
-def about_keyboard():
+def info_category_keyboard():
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🛠 Help Guide", callback_data="ui_help", style=ButtonStyle.PRIMARY), InlineKeyboardButton("🤖 About Bot", callback_data="ui_about", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton("📝 Source Code", callback_data="ui_source", style=ButtonStyle.PRIMARY), InlineKeyboardButton("⚠️ Disclaimer", callback_data="ui_disclaimer", style=ButtonStyle.PRIMARY)],
-        [InlineKeyboardButton("⚖️ DMCA", callback_data="ui_dmca", style=ButtonStyle.PRIMARY), InlineKeyboardButton("🔒 Privacy Policy", callback_data="ui_privacy", style=ButtonStyle.PRIMARY)],
-        [InlineKeyboardButton("📞 Contact Admin", url="https://t.me/ntmadminbot", style=ButtonStyle.PRIMARY)],
-        [InlineKeyboardButton("🔙 Back", callback_data="ui_back", style=ButtonStyle.DANGER)]
+        [InlineKeyboardButton("⚖️ DMCA", callback_data="ui_dmca", style=ButtonStyle.PRIMARY), InlineKeyboardButton("🔒 Privacy", callback_data="ui_privacy", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back", style=ButtonStyle.DANGER)]
     ])
 
-def features_keyboard():
+def profile_category_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚙️ Settings", callback_data="ui_settings_menu", style=ButtonStyle.PRIMARY)],
-        [InlineKeyboardButton("🔙 Back", callback_data="ui_back", style=ButtonStyle.DANGER)]
+        [InlineKeyboardButton("📊 My Stats", callback_data="ui_stats", style=ButtonStyle.PRIMARY), InlineKeyboardButton("👑 VIP Status", callback_data="vip_panel_router", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back", style=ButtonStyle.DANGER)]
     ])
 
-def back_to_start_keyboard():
+def media_category_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔙 Back", callback_data="ui_back", style=ButtonStyle.DANGER)]
+        [InlineKeyboardButton("🕰 Search History", callback_data="ui_history", style=ButtonStyle.PRIMARY), InlineKeyboardButton("🔔 Request Movie", callback_data="ui_request", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back", style=ButtonStyle.DANGER)]
     ])
-
-def back_to_about_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔙 Back", callback_data="ui_about", style=ButtonStyle.DANGER)]
-    ])
-
 
 # ==========================================
 # 📢 USER COMMAND HANDLERS
@@ -138,19 +141,11 @@ async def start_menu_handler(client: Client, message: Message):
         await log_to_channel(client, f"#new_user\n👤 Name: `{message.from_user.first_name}`\n🆔 ID: `{user_id}`\n🔗 Username: @{message.from_user.username or 'None'}")
         await db.update_user_setting(user_id, "joined_date", datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
         
-        # 💎 UPGRADED: Trigger Free Trial with the Promo Shield!
         settings = await db.get_settings()
         trial_days = settings.get("free_trial_days", 0)
-        
         if trial_days > 0:
             from plugins.vip_system import add_vip
-            await add_vip(
-                user=message.from_user, 
-                plan_name="🎁 Gold (Trial)", 
-                days=trial_days, 
-                method="Auto Free Trial",
-                is_promo=True # 🚀 THIS PROTECTS YOUR PAID USERS
-            )
+            await add_vip(user=message.from_user, plan_name="🎁 Gold (Trial)", days=trial_days, method="Auto Free Trial", is_promo=True)
 
     try:
         loading_msg = await message.reply_sticker(random.choice(START_STICKERS))
@@ -159,50 +154,23 @@ async def start_menu_handler(client: Client, message: Message):
     except Exception: pass
         
     bot_me = await client.get_me()
-    bot_name = bot_me.first_name
-    bot_username = bot_me.username
+    formatted_start = START_TEXT.format(bot_name=bot_me.first_name)
+    markup = get_start_markup(bot_me.username, user_id)
     
-    formatted_start = START_TEXT.format(bot_name=bot_name)
-    
-    try: await message.reply_photo(photo=random.choice(START_BANNER_IMAGES), caption=formatted_start, reply_markup=get_start_markup(bot_username))
-    except Exception: await message.reply_text(text=formatted_start, reply_markup=get_start_markup(bot_username))
+    try: await message.reply_photo(photo=random.choice(START_BANNER_IMAGES), caption=formatted_start, reply_markup=markup)
+    except Exception: await message.reply_text(text=formatted_start, reply_markup=markup)
     raise StopPropagation
+
 
 @Client.on_message(filters.command("help") & filters.private)
 async def help_command_handler(client: Client, message: Message):
-    try:
-        loading_msg = await message.reply_sticker(random.choice(ROBO_STICKERS))
-        await asyncio.sleep(2); await loading_msg.delete()
-    except Exception: pass
-    await message.reply_text(text=HELP_TEXT, reply_markup=back_to_start_keyboard())
+    await message.reply_text(text=HELP_TEXT, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Info Hub", callback_data="ui_info_menu", style=ButtonStyle.DANGER)]]))
     raise StopPropagation
 
 @Client.on_message(filters.command("about") & filters.private)
 async def about_command_handler(client: Client, message: Message):
-    try:
-        loading_msg = await message.reply_sticker(random.choice(ROBO_STICKERS))
-        await asyncio.sleep(2); await loading_msg.delete()
-    except Exception: pass
-    
     bot_me = await client.get_me()
-    formatted_about = ABOUT_TEXT.format(bot_name=bot_me.first_name)
-    
-    await message.reply_text(text=formatted_about, reply_markup=about_keyboard(), link_preview_options=LinkPreviewOptions(is_disabled=True))
-    raise StopPropagation
-
-@Client.on_message(filters.command("source") & filters.private)
-async def source_command_handler(client: Client, message: Message):
-    try:
-        loading_msg = await message.reply_sticker(random.choice(CODE_STICKERS))
-        await asyncio.sleep(2); await loading_msg.delete()
-    except Exception: pass
-    await message.reply_text(
-        text=SOURCE_TEXT, 
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📞 Contact Admin", url="https://t.me/ntmadminbot", style=ButtonStyle.PRIMARY)],
-            [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back", style=ButtonStyle.DANGER)]
-        ])
-    )
+    await message.reply_text(text=ABOUT_TEXT.format(bot_name=bot_me.first_name), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Info Hub", callback_data="ui_info_menu", style=ButtonStyle.DANGER)]]), link_preview_options=LinkPreviewOptions(is_disabled=True))
     raise StopPropagation
 
 # ==========================================
@@ -224,17 +192,14 @@ async def id_command_handler(client: Client, message: Message):
 @Client.on_message(filters.command("info"))
 async def info_command_handler(client: Client, message: Message):
     target_user_id = message.from_user.id
-    
     if len(message.command) > 1:
         try: target_user_id = int(message.command[1])
         except ValueError: target_user_id = message.command[1]
     elif message.reply_to_message:
         target_user_id = message.reply_to_message.from_user.id
         
-    try:
-        user = await client.get_users(target_user_id)
-    except Exception:
-        return await message.reply_text("❌ **Error:** Could not fetch data for that user.")
+    try: user = await client.get_users(target_user_id)
+    except Exception: return await message.reply_text("❌ **Error:** Could not fetch data for that user.")
         
     name = user.first_name + (f" {user.last_name}" if user.last_name else "")
     info_text = f"👤 **USER INFORMATION**\n\n**Name:** {name}\n**ID:** `{user.id}`\n**Profile:** [Direct Link](tg://user?id={user.id})\n"
@@ -243,11 +208,9 @@ async def info_command_handler(client: Client, message: Message):
         u_sett = await db.get_user_settings(user.id)
         joined = u_sett.get("joined_date", "Unknown")
         searches = u_sett.get("total_searches", 0)
-        
         punish_doc = await db.punishments.find_one({"_id": f"{user.id}_global"})
         warns = punish_doc.get("warns", 0) if punish_doc else 0
         p_type = punish_doc.get("type", "Clean").title() if punish_doc else "Clean"
-        
         info_text += f"\n📊 **ADMIN DATABASE STATS:**\n**Joined Date:** `{joined}`\n**Total Searches:** `{searches}`\n**Global Status:** `{p_type}`\n**Warnings:** `{warns}`"
         
     if user.photo:
@@ -260,58 +223,45 @@ async def info_command_handler(client: Client, message: Message):
 
 
 # ==========================================
-# 🔘 UI BUTTON LISTENER
+# 🔘 UI BUTTON LISTENER (THE ROUTER)
 # ==========================================
 @Client.on_callback_query(filters.regex(r"^ui_"))
 async def callback_ui_router(client: Client, callback: CallbackQuery):
     target = callback.data.split("_", 1)[1]
+    user_id = callback.from_user.id
     bot_me = await client.get_me()
-    bot_name = bot_me.first_name
-    bot_username = bot_me.username
     
+    # 🏠 MAIN MENU
     if target == "back":
-        formatted_start = START_TEXT.format(bot_name=bot_name)
-        await callback.message.edit_text(text=formatted_start, reply_markup=get_start_markup(bot_username), link_preview_options=LinkPreviewOptions(is_disabled=True))
+        await callback.message.edit_text(text=START_TEXT.format(bot_name=bot_me.first_name), reply_markup=get_start_markup(bot_me.username, user_id), link_preview_options=LinkPreviewOptions(is_disabled=True))
         
+    # 📂 CATEGORY HUBS
+    elif target == "info_menu":
+        await callback.message.edit_text(text=INFO_MENU_TEXT, reply_markup=info_category_keyboard())
+    elif target == "profile_menu":
+        await callback.message.edit_text(text=PROFILE_MENU_TEXT, reply_markup=profile_category_keyboard())
+    elif target == "media_menu":
+        await callback.message.edit_text(text=MEDIA_MENU_TEXT, reply_markup=media_category_keyboard())
+    elif target == "admin_menu" and user_id in Config.ADMINS:
+        await callback.message.edit_text(text=ADMIN_MENU_TEXT, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back", style=ButtonStyle.DANGER)]]))
+
+    # 📄 SUB-MENU PAGES (Information)
     elif target == "help":
-        await callback.message.edit_text(text=HELP_TEXT, reply_markup=back_to_start_keyboard(), link_preview_options=LinkPreviewOptions(is_disabled=True))
-        
+        await callback.message.edit_text(text=HELP_TEXT, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Info Hub", callback_data="ui_info_menu", style=ButtonStyle.DANGER)]]))
     elif target == "about":
-        formatted_about = ABOUT_TEXT.format(bot_name=bot_name)
-        await callback.message.edit_text(text=formatted_about, reply_markup=about_keyboard(), link_preview_options=LinkPreviewOptions(is_disabled=True))
-        
+        await callback.message.edit_text(text=ABOUT_TEXT.format(bot_name=bot_me.first_name), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Info Hub", callback_data="ui_info_menu", style=ButtonStyle.DANGER)]]), link_preview_options=LinkPreviewOptions(is_disabled=True))
     elif target == "source":
-        await callback.message.edit_text(
-            text=SOURCE_TEXT, 
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📞 Contact Admin", url="https://t.me/ntmadminbot", style=ButtonStyle.PRIMARY)],
-                [InlineKeyboardButton("🔙 Back", callback_data="ui_about", style=ButtonStyle.DANGER)]
-            ])
-        )
-        
-    elif target == "features":
-        await callback.message.edit_text(text=FEATURES_TEXT, reply_markup=features_keyboard(), link_preview_options=LinkPreviewOptions(is_disabled=True))
-        
+        await callback.message.edit_text(text=SOURCE_TEXT, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📞 Contact Admin", url="https://t.me/ntmadminbot", style=ButtonStyle.PRIMARY)], [InlineKeyboardButton("🔙 Back to Info Hub", callback_data="ui_info_menu", style=ButtonStyle.DANGER)]]))
     elif target == "disclaimer":
-        await callback.message.edit_text(text=DISCLAIMER_TEXT, reply_markup=back_to_about_keyboard())
-        
+        await callback.message.edit_text(text=DISCLAIMER_TEXT, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Info Hub", callback_data="ui_info_menu", style=ButtonStyle.DANGER)]]))
     elif target == "dmca":
-        await callback.message.edit_text(
-            text=DMCA_TEXT, 
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📞 Contact @ntmadminbot", url="https://t.me/ntmadminbot", style=ButtonStyle.PRIMARY)],
-                [InlineKeyboardButton("🔙 Back", callback_data="ui_about", style=ButtonStyle.DANGER)]
-            ]),
-            link_preview_options=LinkPreviewOptions(is_disabled=True)
-        )
-        
+        await callback.message.edit_text(text=DMCA_TEXT, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📞 Contact @ntmadminbot", url="https://t.me/ntmadminbot", style=ButtonStyle.PRIMARY)], [InlineKeyboardButton("🔙 Back to Info Hub", callback_data="ui_info_menu", style=ButtonStyle.DANGER)]]), link_preview_options=LinkPreviewOptions(is_disabled=True))
     elif target == "privacy":
-        await callback.message.edit_text(text=PRIVACY_TEXT, reply_markup=back_to_about_keyboard())
+        await callback.message.edit_text(text=PRIVACY_TEXT, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Info Hub", callback_data="ui_info_menu", style=ButtonStyle.DANGER)]]))
         
+    # 📄 SUB-MENU PAGES (Profile & Media)
     elif target == "stats":
-        user_id = callback.from_user.id
         u_sett = await db.get_user_settings(user_id)
-        
         joined = u_sett.get("joined_date", "Unknown")
         total_searches = u_sett.get("total_searches", 0)
         mode = u_sett.get("search_mode", "default").title()
@@ -323,13 +273,11 @@ async def callback_ui_router(client: Client, callback: CallbackQuery):
             f"📅 **Joined On:** `{joined}`\n"
             f"🔍 **Total Searches:** `{total_searches}`\n"
             f"⚙️ **Search Mode:** `{mode}`\n\n"
-            f"*(Thank you for using {bot_name}!)*"
+            f"*(Thank you for using {bot_me.first_name}!)*"
         )
-        await callback.message.edit_text(text=stats_text, reply_markup=back_to_start_keyboard())
+        await callback.message.edit_text(text=stats_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Profile", callback_data="ui_profile_menu", style=ButtonStyle.DANGER)]]))
         
     elif target == "settings_menu":
-        user_id = callback.from_user.id
-        
         keyboard = [[InlineKeyboardButton(text="👤 Personal Search Settings", callback_data="tier_user_home", style=ButtonStyle.PRIMARY)]]
         if await db.get_connected_groups(user_id):
             keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list", style=ButtonStyle.PRIMARY)])
@@ -337,10 +285,15 @@ async def callback_ui_router(client: Client, callback: CallbackQuery):
             keyboard.append([InlineKeyboardButton("📊 System Stats Dashboard", callback_data="stats_home", style=ButtonStyle.PRIMARY)])
             keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="set_home", style=ButtonStyle.PRIMARY)])
             
-        keyboard.append([InlineKeyboardButton("🔙 Back to Features", callback_data="ui_features", style=ButtonStyle.DANGER)])
+        keyboard.append([InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back", style=ButtonStyle.DANGER)])
         
         settings_text = "🎛️ **Central Command Settings Hub:**\nSelect the access layer tier you wish to inspect or modify:"
         await callback.message.edit_text(text=settings_text, reply_markup=InlineKeyboardMarkup(keyboard))
         
-    await callback.answer()
+    # ⚠️ PLACEHOLDERS FOR EXTERNAL PLUGINS
+    elif target == "history":
+        await callback.answer("History feature coming soon!", show_alert=True)
+    elif target == "request":
+        await callback.answer("Please use the /request command in the chat!", show_alert=True)
         
+    await callback.answer()
