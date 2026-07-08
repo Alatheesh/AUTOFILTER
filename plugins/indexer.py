@@ -109,7 +109,7 @@ async def trigger_indexing_job(client: Client, message: Message, target_chat, pr
 
     actual_last_msg_id = None
     
-    # METHOD A: Standard History Request
+    # 🚀 METHOD A: Standard History Request (Works if bot is Admin)
     try:
         async for m in client.get_chat_history(target_chat_id, limit=1):
             actual_last_msg_id = m.id
@@ -117,38 +117,43 @@ async def trigger_indexing_job(client: Client, message: Message, target_chat, pr
     except Exception:
         pass 
         
-    # METHOD B: The "Radar Probe" (Bypasses Admin Restrictions using your logic!)
+    # 🚀 METHOD B: The "Ascending Radar Probe" (Bypasses Admin Restrictions!)
     if not actual_last_msg_id:
         try:
             if prompt_msg_id: 
-                await client.edit_message_text(message.chat.id, prompt_msg_id, "📡 **Bypassing Security... Probing Channel Size...**")
+                await client.edit_message_text(message.chat.id, prompt_msg_id, "📡 **Bypassing Security... Probing for the newest post...**")
             
-            # Ping a massive net of random IDs in one single API call
-            test_ids = [100, 500, 1000, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000]
-            msgs = await client.get_messages(target_chat_id, test_ids)
+            # Start probing from the ID you gave it, or 1 if it's completely blind.
+            probe_id = known_msg_id if known_msg_id else 1
             
-            highest_found = 0
-            for i, msg in enumerate(msgs):
-                # If Telegram returns a valid message, record the ID
-                if msg and not getattr(msg, "empty", False):  
-                    highest_found = test_ids[i]
-            
-            if highest_found > 0:
-                # Zoom in on the target area to find a more precise ceiling
-                next_idx = test_ids.index(highest_found) + 1
-                upper_bound = test_ids[next_idx] if next_idx < len(test_ids) else highest_found + 50000
-                step = max(1, (upper_bound - highest_found) // 10)
-                fine_test_ids = [highest_found + (step * i) for i in range(1, 11)]
+            # 1. Aggressive Jump (+1000)
+            while True:
+                msg = await client.get_messages(target_chat_id, probe_id + 1000)
+                if not msg or getattr(msg, "empty", False):
+                    break
+                probe_id += 1000
+                await asyncio.sleep(0.1) # Safety delay
                 
-                fine_msgs = await client.get_messages(target_chat_id, fine_test_ids)
-                for i, msg in enumerate(fine_msgs):
-                    if msg and not getattr(msg, "empty", False):
-                        highest_found = fine_test_ids[i]
-                        
-                # Set the ceiling slightly higher just in case the absolute latest message was deleted
-                actual_last_msg_id = highest_found + 100  
+            # 2. Moderate Jump (+100)
+            while True:
+                msg = await client.get_messages(target_chat_id, probe_id + 100)
+                if not msg or getattr(msg, "empty", False):
+                    break
+                probe_id += 100
+                
+            # 3. Fine Tuning (+10)
+            while True:
+                msg = await client.get_messages(target_chat_id, probe_id + 10)
+                if not msg or getattr(msg, "empty", False):
+                    break
+                probe_id += 10
+
+            # Set the ceiling to the highest verified ID, plus a safety buffer of 50
+            # (Just in case the absolute last 10 messages were deleted)
+            actual_last_msg_id = probe_id + 50 
+            
         except Exception as e:
-            logger.error(f"Radar Probe failed: {e}")
+            logger.error(f"Ascending Radar Probe failed: {e}")
             pass
 
     # FALLBACK
@@ -208,7 +213,7 @@ async def mass_indexer_command(client: Client, message: Message):
     prompt = await message.reply_text(
         "📦 **Mass Indexing Wizard**\n\n"
         "How would you like to target the channel?\n"
-        "1️⃣ **Forward** the *newest* file from the channel here.\n"
+        "1️⃣ **Forward** any file from the channel here.\n"
         "2️⃣ **Type** the Channel ID (e.g., `-10012345678`).\n"
         "3️⃣ **Type** the Link or Username (e.g., `@MyChannel` or `t.me/c/...`).\n\n"
         "*(Or click Cancel to abort)*",
