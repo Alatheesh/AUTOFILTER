@@ -57,9 +57,9 @@ DEFAULT_PLANS = {
 
 FREE_USER_LIMITS = {
     "shortlink_bypass": False,
-    "multi_search_limit": 1,
+    "multi_search_limit": 2,
     "bulk_select_limit": 10,
-    "movie_request_cooldown": 60,
+    "movie_request_cooldown": 120,
     "group_connect_limit": 1
 }
 
