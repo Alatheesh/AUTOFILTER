@@ -253,6 +253,12 @@ async def auto_filter(client: Client, message: Message):
         return await message.reply_text(lock_msg, reply_markup=btn)
 
     await asyncio.create_task(db.add_search_count(user_id))
+
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$push": {"search_history": {"$each": [{"type": "search", "query": query}], "$slice": -10}}},
+        upsert=True
+    )
     
     if user_id in SPAM_TRACKER and current_time - SPAM_TRACKER[user_id] < SPAM_COOLDOWN: return 
     SPAM_TRACKER[user_id] = current_time
