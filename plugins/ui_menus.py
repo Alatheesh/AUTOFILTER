@@ -96,7 +96,6 @@ def get_start_markup(bot_username: str, user_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("⚙️ Settings", callback_data="ui_settings_menu", style=ButtonStyle.PRIMARY), InlineKeyboardButton("ℹ️ Help & Info", callback_data="ui_info_menu", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton("🌐 VISIT OUR WEBSITE", url="https://alatheesh.github.io/NTMONLINE", style=ButtonStyle.PRIMARY)]
     ]
-    # 🔥 Admin Secret Button!
     if user_id in Config.ADMINS:
         buttons.append([InlineKeyboardButton("👨‍💻 Admin Command Center", callback_data="ui_admin_menu", style=ButtonStyle.DANGER)])
     return InlineKeyboardMarkup(buttons)
@@ -111,7 +110,8 @@ def info_category_keyboard():
 
 def profile_category_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📊 My Stats", callback_data="ui_stats", style=ButtonStyle.PRIMARY), InlineKeyboardButton("👑 VIP Status", callback_data="vip_panel_router", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton("📊 My Stats", callback_data="ui_stats", style=ButtonStyle.PRIMARY), InlineKeyboardButton("👑 VIP Status", callback_data="ui_vip", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton("🛒 Buy VIP", callback_data="ui_buyvip", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back", style=ButtonStyle.DANGER)]
     ])
 
@@ -290,19 +290,33 @@ async def callback_ui_router(client: Client, callback: CallbackQuery):
         settings_text = "🎛️ **Central Command Settings Hub:**\nSelect the access layer tier you wish to inspect or modify:"
         await callback.message.edit_text(text=settings_text, reply_markup=InlineKeyboardMarkup(keyboard))
         
-    # 🔌 SEAMLESS BRIDGES TO YOUR EXISTING CODE
+    # 🔌 SEAMLESS BRIDGES TO YOUR EXISTING CODE (NO DELETIONS!)
     elif target == "history":
-        await callback.message.delete()
         callback.message.from_user = callback.from_user
         callback.message.text = "/history"
+        callback.message.command = ["history"]
         from plugins.advanced import view_search_history
         await view_search_history(client, callback.message)
 
     elif target == "request":
-        await callback.message.delete()
         callback.message.from_user = callback.from_user
         callback.message.text = "/request"
+        callback.message.command = ["request"]
         from plugins.request import request_command
         await request_command(client, callback.message)
+        
+    elif target == "vip":
+        callback.message.from_user = callback.from_user
+        callback.message.text = "/checkvip"
+        callback.message.command = ["checkvip"]
+        from plugins.vip_system import check_vip_cmd
+        await check_vip_cmd(client, callback.message)
+        
+    elif target == "buyvip":
+        callback.message.from_user = callback.from_user
+        callback.message.text = "/buyvip"
+        callback.message.command = ["buyvip"]
+        from plugins.vip_system import buy_vip_command
+        await buy_vip_command(client, callback.message)
         
     await callback.answer()
