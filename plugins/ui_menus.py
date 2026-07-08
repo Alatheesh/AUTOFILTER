@@ -290,10 +290,19 @@ async def callback_ui_router(client: Client, callback: CallbackQuery):
         settings_text = "🎛️ **Central Command Settings Hub:**\nSelect the access layer tier you wish to inspect or modify:"
         await callback.message.edit_text(text=settings_text, reply_markup=InlineKeyboardMarkup(keyboard))
         
-    # ⚠️ PLACEHOLDERS FOR EXTERNAL PLUGINS
+    # 🔌 SEAMLESS BRIDGES TO YOUR EXISTING CODE
     elif target == "history":
-        await callback.answer("History feature coming soon!", show_alert=True)
+        await callback.message.delete()
+        callback.message.from_user = callback.from_user
+        callback.message.text = "/history"
+        from plugins.advanced import view_search_history
+        await view_search_history(client, callback.message)
+
     elif target == "request":
-        await callback.answer("Please use the /request command in the chat!", show_alert=True)
+        await callback.message.delete()
+        callback.message.from_user = callback.from_user
+        callback.message.text = "/request"
+        from plugins.request import request_command
+        await request_command(client, callback.message)
         
     await callback.answer()
