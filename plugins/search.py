@@ -280,6 +280,13 @@ async def auto_filter(client: Client, message: Message):
     unique_movies = []
     for m in lines:
         if m not in unique_movies: unique_movies.append(m)
+
+    history_entries = [{"type": "search", "query": m} for m in unique_movies]
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$push": {"search_history": {"$each": history_entries, "$slice": -10}}},
+        upsert=True
+    )
         
     if len(unique_movies) > 1:
         multi_limit = user_limits.get("multi_search_limit", 1)
