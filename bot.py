@@ -28,7 +28,7 @@ app = Client(
     api_hash=Config.API_HASH,
     bot_token=Config.BOT_TOKEN,
     plugins=dict(root="plugins"),
-    workers=100  # <--- ADDED THIS EXACT LINE
+    workers=60  # <--- ADDED THIS EXACT LINE
 )
 
 async def web_server():
