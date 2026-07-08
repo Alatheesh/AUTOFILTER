@@ -60,9 +60,23 @@ async def auto_indexer(client: Client, message: Message):
 # 🛠️ HELPER: TRIGGER INDEXING JOB
 # ==========================================
 async def trigger_indexing_job(client: Client, message: Message, target_chat, prompt_msg_id=None, known_msg_id=None):
-    """Processes the target chat, finds the latest message, and queues the job."""
+    """Processes the target chat, finds the absolute latest message, and queues the job."""
     
-    # Try converting string IDs to integers
+    # 🚀 FIX 1: Advanced URL Parser for Public AND Private Links
+    if isinstance(target_chat, str):
+        target_chat = target_chat.strip()
+        if "t.me/" in target_chat:
+            parts = target_chat.split("t.me/")[1].split("/")
+            if parts[0] == "c" and len(parts) > 1:
+                # It's a Private Link (t.me/c/1234567890/10) -> Convert to -100 format
+                target_chat = f"-100{parts[1]}"
+            else:
+                # It's a Public Link (t.me/ChannelName/10)
+                target_chat = f"@{parts[0].split('?')[0]}"
+        elif not target_chat.startswith("@") and not target_chat.replace("-", "").isdigit():
+            target_chat = f"@{target_chat}"
+
+    # Try converting purely numeric strings to integers
     try: target_chat = int(target_chat)
     except ValueError: pass
 
@@ -70,41 +84,49 @@ async def trigger_indexing_job(client: Client, message: Message, target_chat, pr
         chat_info = await client.get_chat(target_chat)
         target_chat_name = chat_info.title or str(target_chat)
         
-        # 🚀 THE FIX: If the channel is public, save the @username so it NEVER fails on restart!
         if chat_info.username:
             target_chat_id = f"@{chat_info.username}"
         else:
             target_chat_id = chat_info.id
             
+    except PeerIdInvalid:
+        err = (
+            f"❌ **Error: Cannot locate chat `{target_chat}` in memory.**\n\n"
+            f"**The Fix:**\n"
+            f"• If it's a **Public Channel**, please provide its `@username` or link instead of its numeric ID.\n"
+            f"• If it's a **Private Channel**, you MUST either add the bot as an admin OR forward a file from it first!"
+        )
+        if prompt_msg_id: await client.edit_message_text(message.chat.id, prompt_msg_id, err)
+        else: await message.reply_text(err)
+        return
     except Exception as e:
-        err = f"❌ **Error Accessing Chat:** Ensure I am an Admin in `{target_chat}`!\n`{e}`"
+        err = f"❌ **Error Accessing Chat:** `{target_chat}`\nMake sure it is a valid public channel, or that the bot is an admin!\n`{e}`"
         if prompt_msg_id: await client.edit_message_text(message.chat.id, prompt_msg_id, err)
         else: await message.reply_text(err)
         return
 
-    last_msg_id = known_msg_id
-    
-    if not last_msg_id:
-        try:
-            async for m in client.get_chat_history(target_chat_id, limit=1):
-                last_msg_id = m.id
-                break
-        except Exception as e:
-            err = f"❌ **Error reading history:** Ensure I have 'Read Messages' rights in `{target_chat_name}`!"
+    # 🚀 FIX 2: ALWAYS fetch the absolute newest message in the channel
+    actual_last_msg_id = None
+    try:
+        async for m in client.get_chat_history(target_chat_id, limit=1):
+            actual_last_msg_id = m.id
+            break
+    except Exception as e:
+        pass 
+        
+    if not actual_last_msg_id:
+        if known_msg_id:
+            actual_last_msg_id = known_msg_id
+        else:
+            err = "❌ **Error:** That channel appears to be completely empty or I lack history access."
             if prompt_msg_id: await client.edit_message_text(message.chat.id, prompt_msg_id, err)
             else: await message.reply_text(err)
             return
 
-    if not last_msg_id:
-        err = "❌ **Error:** That channel appears to be completely empty."
-        if prompt_msg_id: await client.edit_message_text(message.chat.id, prompt_msg_id, err)
-        else: await message.reply_text(err)
-        return
-
-    success = await db.add_index_job(target_chat_id, target_chat_name, last_msg_id)
+    success = await db.add_index_job(target_chat_id, target_chat_name, actual_last_msg_id)
 
     if success:
-        msg_text = f"✅ **Job Queued Successfully!**\n\nChannel: `{target_chat_name}`\nTargeting ~`{last_msg_id}` messages.\n\nThe bot will safely process this in the background."
+        msg_text = f"✅ **Job Queued Successfully!**\n\nChannel: `{target_chat_name}`\nTargeting ~`{actual_last_msg_id}` messages.\n\nThe bot will safely process this in the background."
     else:
         msg_text = f"⚠️ **Job Started / Reset!**\n\nThe bot is processing `{target_chat_name}`."
         
@@ -144,7 +166,7 @@ async def mass_indexer_command(client: Client, message: Message):
         "How would you like to target the channel?\n"
         "1️⃣ **Forward** any file from the channel here.\n"
         "2️⃣ **Type** the Channel ID (e.g., `-10012345678`).\n"
-        "3️⃣ **Type** the Public Username (e.g., `@MyChannel`).\n\n"
+        "3️⃣ **Type** the Link or Username (e.g., `@MyChannel` or `t.me/c/...`).\n\n"
         "*(Or click Cancel to abort)*",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_index_flow")]])
     )
