@@ -169,16 +169,20 @@ def get_progress_bar(current, total):
     return f"{bar} {int(percent * 100)}%"
 
 def build_bulk_summary_text(found, not_found, time_taken):
-    text = "🎬 **Bulk Search Results**\n━━━━━━━━━━━━━━━━━━\n\n**Found**\n"
+    text = "🎬 **Bulk Search Results**\n━━━━━━━━━━━━━━━━━━\n\n**✅ Found**\n"
     for movie, files in found:
         text += f"🍿 {movie}\n`{len(files)} Files`\n\n"
     if not found:
-        text += "No movies found.\n\n"
+        text += "No exact matches found.\n\n"
     
     text += "━━━━━━━━━━━━━━━━━━\n"
     if not_found:
-        text += "**Not Found**\n"
-        for movie in not_found: text += f"❌ {movie}\n"
+        text += "**❌ Not Found (Did you mean?)**\n"
+        for movie, suggestion in not_found:
+            if suggestion:
+                text += f"❌ {movie} ➡️ *Try: {suggestion}*\n"
+            else:
+                text += f"❌ {movie} *(No suggestions)*\n"
         
     text += f"\n⏱ *Completed in {time_taken:.2f} Seconds*"
     return text
@@ -319,10 +323,19 @@ async def auto_filter(client: Client, message: Message):
             
             # Execute Search and Filter
             raw_results = await db.search_files(movie, skip=0, limit=10000, exact=False)
+            if not raw_results and " " in movie:
+                raw_results = await db.search_files(movie.replace(" ", ""), skip=0, limit=10000, exact=False)
+                
             filtered = apply_search_filters(raw_results, resolved_mode, resolved_lang, resolved_size)
             
-            if filtered: found_movies.append((movie, filtered[:10000])) # Save all found for bulk delivery later
-            else: not_found_movies.append(movie)
+            if filtered: 
+                found_movies.append((movie, filtered[:10000])) # Save all found for bulk delivery later
+            else: 
+                # 🚀 NEW: Automatic Spell Check for Multi-Search failures!
+                from plugins.smart_suggestions import fetch_smart_spellcheck
+                suggestions = await fetch_smart_spellcheck(movie)
+                top_suggestion = suggestions[0] if suggestions else None
+                not_found_movies.append((movie, top_suggestion))
             
             await asyncio.sleep(0.4) 
 
@@ -342,7 +355,10 @@ async def auto_filter(client: Client, message: Message):
             "buttons": buttons
         }
         
-        try: await progress_msg.edit_caption(summary_text, reply_markup=InlineKeyboardMarkup(buttons)) if progress_msg.photo else await progress_msg.edit_text(summary_text, reply_markup=InlineKeyboardMarkup(buttons))
+        # 🚀 FIX: Prevent Pyrogram crash by strictly enforcing 'None' if the button list is empty!
+        final_markup = InlineKeyboardMarkup(buttons) if buttons else None
+        
+        try: await progress_msg.edit_caption(summary_text, reply_markup=final_markup) if progress_msg.photo else await progress_msg.edit_text(summary_text, reply_markup=final_markup)
         except Exception: pass
 
         # 👉 RESTORED: Auto-delete for Multi-Search
