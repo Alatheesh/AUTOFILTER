@@ -40,3 +40,60 @@ async def delete_specific_file(client: Client, message: Message):
         await message.reply_text("⚠️ **Not Found:** This file is not currently indexed in your database. It may have already been deleted.")
         
     raise StopPropagation
+
+# ==========================================
+# 🧹 BULK JUNK CLEANER (With Safety Preview)
+# ==========================================
+@Client.on_message(filters.command("cleanjunk") & filters.user(Config.ADMINS))
+async def clean_junk_files(client: Client, message: Message):
+    # Determine if this is a dry run (preview) or actual deletion
+    is_dry_run = "force" not in message.text.lower()
+    
+    status_msg = await message.reply_text("🔍 **Scanning for junk files...**")
+    
+    size_threshold = 25 * 1024 * 1024  # 25 MB
+    JUNK_EXTENSIONS = [".zip", ".rar", ".txt", ".pdf", ".apk", ".exe", ".iso", ".tar", ".gz"]
+    MOVIE_EXTENSIONS = [".mkv", ".mp4", ".avi", ".webm", ".m4v", ".flv"]
+    
+    junk_regex = "(" + "|".join([ext.replace(".", "\\.") + "$" for ext in JUNK_EXTENSIONS]) + ")"
+    movie_regex = "(" + "|".join([ext.replace(".", "\\.") + "$" for ext in MOVIE_EXTENSIONS]) + ")"
+    
+    query = {
+        "$or": [
+            {"title": {"$regex": junk_regex, "$options": "i"}},
+            {
+                "size": {"$lt": size_threshold, "$gt": 0},
+                "title": {"$not": {"$regex": movie_regex, "$options": "i"}}
+            }
+        ]
+    }
+
+    total_to_delete = 0
+    sample_files = []
+
+    # Calculate what would be deleted
+    for coll in db.collections:
+        cursor = coll.find(query).limit(10) # Get 10 samples
+        async for doc in cursor:
+            sample_files.append(doc.get("title", "Unknown File"))
+        total_to_delete += await coll.count_documents(query)
+
+    if total_to_delete == 0:
+        return await status_msg.edit_text("✨ **Database is clean!** No junk files found.")
+
+    if is_dry_run:
+        sample_text = "\n".join([f"• `{f}`" for f in sample_files])
+        return await status_msg.edit_text(
+            f"⚠️ **Preview Mode (Safe)**\n\n"
+            f"Found `{total_to_delete}` files that match junk criteria.\n\n"
+            f"**Sample files to be deleted:**\n{sample_text}\n\n"
+            f"To permanently delete these, type: `/cleanjunk force`"
+        )
+
+    # If 'force' was used, proceed to delete
+    deleted_count = 0
+    for coll in db.collections:
+        result = await coll.delete_many(query)
+        deleted_count += result.deleted_count
+        
+    await status_msg.edit_text(f"✅ **Cleanup Complete!**\n\n🗑️ Permanently destroyed `{deleted_count}` junk files.")
