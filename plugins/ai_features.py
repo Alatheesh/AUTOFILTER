@@ -12,6 +12,24 @@ logger = logging.getLogger(__name__)
 HF_TOKEN = getattr(Config, "HF_TOKEN", os.environ.get("HF_TOKEN", ""))
 HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
 
+async def fetch_with_retry(url, data=None, json=None, retries=3):
+    """Helper function to retry requests if the host network glitches (DNS failures)."""
+    for attempt in range(retries):
+        try:
+            async with aiohttp.ClientSession() as session:
+                kwargs = {"headers": HEADERS, "timeout": 30}
+                if data: kwargs["data"] = data
+                if json: kwargs["json"] = json
+                
+                async with session.post(url, **kwargs) as resp:
+                    result = await resp.json()
+                    return resp.status, result
+        except aiohttp.ClientError as e:
+            if attempt == retries - 1:
+                raise e # If it fails 3 times, finally raise the error
+            await asyncio.sleep(2) # Wait 2 seconds and try again
+
+
 # ==========================================
 # 🎤 1. AI VOICE SEARCH (Whisper)
 # ==========================================
@@ -23,32 +41,28 @@ async def ai_voice_search(client: Client, message: Message):
     msg = await message.reply_text("🎧 **Listening to your voice...**")
     
     try:
-        # 1. Download voice note directly into RAM (no local storage clutter)
+        # Download voice note directly into RAM
         audio_file = await message.download(in_memory=True)
         audio_bytes = audio_file.getvalue()
         
-        # 2. Direct, fast aiohttp request to Hugging Face
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://api-inference.huggingface.co/models/openai/whisper-tiny",
-                headers=HEADERS,
-                data=audio_bytes,
-                timeout=30
-            ) as resp:
-                result = await resp.json()
+        # Direct, fast aiohttp request with Auto-Retry
+        status, result = await fetch_with_retry(
+            "https://api-inference.huggingface.co/models/openai/whisper-tiny",
+            data=audio_bytes
+        )
                 
-                # Handle Sleeping Models Gracefully
-                if resp.status == 503:
-                    return await msg.edit_text("⏳ **AI is warming up!**\nHugging Face models go to sleep when inactive. Please try again in 20 seconds.")
-                elif resp.status != 200:
-                    return await msg.edit_text(f"❌ **API Error:** `{result.get('error', 'Unknown Error')}`")
+        # Handle Sleeping Models Gracefully
+        if status == 503:
+            return await msg.edit_text("⏳ **AI is warming up!**\nModels go to sleep when inactive. Please try again in 20 seconds.")
+        elif status != 200:
+            return await msg.edit_text(f"❌ **API Error:** `{result.get('error', 'Unknown Error')}`")
                     
-        # 3. Extract Text and redirect to your Search Engine
+        # Extract Text and redirect to your Search Engine
         text = result.get("text", "").strip()
         if not text:
             return await msg.edit_text("❌ Could not understand the audio. Please speak clearly.")
             
-        await msg.edit_text(f"🗣 **You searched for:** `{text}`\n\n*🔍 Fetching results from database...*")
+        await msg.edit_text(f"🗣 **You searched for:** `{text}`\n\n*🔍 Fetching results...*")
         
         # Trick the bot into thinking the user typed this text manually
         message.text = text
@@ -57,7 +71,7 @@ async def ai_voice_search(client: Client, message: Message):
         
     except Exception as e:
         logger.error(f"Voice Search Error: {e}")
-        await msg.edit_text("❌ **AI temporarily unavailable.** Please try again later.")
+        await msg.edit_text("❌ **Network Error:** Could not connect to AI server. Please try again.")
 
 
 # ==========================================
@@ -81,19 +95,15 @@ async def ai_language_translator(client: Client, message: Message):
     try:
         payload = {"inputs": query}
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://api-inference.huggingface.co/models/facebook/nllb-200-distilled-600M",
-                headers=HEADERS,
-                json=payload,
-                timeout=20
-            ) as resp:
-                result = await resp.json()
+        status, result = await fetch_with_retry(
+            "https://api-inference.huggingface.co/models/facebook/nllb-200-distilled-600M",
+            json=payload
+        )
                 
-                if resp.status == 503:
-                    return await msg.edit_text("⏳ **Translator AI is warming up!**\nPlease try again in 20 seconds.")
-                elif resp.status != 200:
-                    return await msg.edit_text(f"❌ **API Error:** `{result.get('error', 'Unknown')}`")
+        if status == 503:
+            return await msg.edit_text("⏳ **Translator AI is warming up!**\nPlease try again in 20 seconds.")
+        elif status != 200:
+            return await msg.edit_text(f"❌ **API Error:** `{result.get('error', 'Unknown')}`")
                     
         # Parse the JSON response
         translated_text = ""
@@ -109,7 +119,7 @@ async def ai_language_translator(client: Client, message: Message):
         
     except Exception as e:
         logger.error(f"Translation Error: {e}")
-        await msg.edit_text("❌ **Translation Failed.**")
+        await msg.edit_text("❌ **Network Error:** Could not connect to translation server.")
 
 
 # ==========================================
@@ -127,19 +137,15 @@ async def ai_poster_scanner(client: Client, message: Message):
         photo_file = await message.download(in_memory=True)
         image_bytes = photo_file.getvalue()
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://api-inference.huggingface.co/models/naver-clova-ix/donut-base",
-                headers=HEADERS,
-                data=image_bytes,
-                timeout=30
-            ) as resp:
-                result = await resp.json()
+        status, result = await fetch_with_retry(
+            "https://api-inference.huggingface.co/models/naver-clova-ix/donut-base",
+            data=image_bytes
+        )
                 
-                if resp.status == 503:
-                    return await msg.edit_text("⏳ **Scanner AI is warming up!**\nPlease try again in 20 seconds.")
-                elif resp.status != 200:
-                    return await msg.edit_text(f"❌ **API Error:** `{result.get('error', 'Unknown')}`")
+        if status == 503:
+            return await msg.edit_text("⏳ **Scanner AI is warming up!**\nPlease try again in 20 seconds.")
+        elif status != 200:
+            return await msg.edit_text(f"❌ **API Error:** `{result.get('error', 'Unknown')}`")
                     
         # Parse Document QA / OCR response
         text = ""
@@ -155,4 +161,4 @@ async def ai_poster_scanner(client: Client, message: Message):
         
     except Exception as e:
         logger.error(f"Image Scan Error: {e}")
-        await msg.edit_text("❌ **Scanner Failed.**")
+        await msg.edit_text("❌ **Network Error:** Could not connect to scanner server.")
