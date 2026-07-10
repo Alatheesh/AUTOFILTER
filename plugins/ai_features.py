@@ -17,13 +17,12 @@ def get_ai_client(model_id):
     if not getattr(Config, "HF_TOKENS", None):
         return None
     token = random.choice(Config.HF_TOKENS)
-    # By specifying the base_url, we force it to use the standard Serverless API
+    # We removed the 'base_url' argument. 
+    # InferenceClient knows where to connect automatically.
     return InferenceClient(
         model=model_id, 
-        token=token,
-        base_url="https://api-inference.huggingface.co/models/"
+        token=token
     )
-
 # ==========================================
 # 🎙️ 1. AI VOICE SEARCH
 # ==========================================
