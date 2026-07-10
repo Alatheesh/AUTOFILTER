@@ -41,3 +41,5 @@ class Config(object):
         "DEFAULT_CAPTION", 
         "<b>{file_name}</b>\n\n📁 Size: {size}\n👤 Requested by: {mention}"
     )
+    raw_tokens = os.environ.get("HF_TOKENS", "")
+    HF_TOKENS = [t.strip() for t in raw_tokens.split(",") if t.strip()]
