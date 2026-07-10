@@ -1,110 +1,158 @@
 import os
-import random
 import logging
-from pyrogram import Client, filters, StopPropagation
+import aiohttp
+import asyncio
+from pyrogram import Client, filters
 from pyrogram.types import Message
 from config import Config
-from plugins.search import auto_filter
-from huggingface_hub import InferenceClient
 
 logger = logging.getLogger(__name__)
 
-# 🛠️ GLOBAL AI MAINTENANCE TOGGLE
-AI_FEATURES_ENABLED = True 
+# Fetch the Token from your Config file or Environment
+HF_TOKEN = getattr(Config, "HF_TOKEN", os.environ.get("HF_TOKEN", ""))
+HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
 
-# Helper to get an AI client
-def get_ai_client(model_id):
-    if not getattr(Config, "HF_TOKENS", None):
-        return None
-    token = random.choice(Config.HF_TOKENS)
-    # We removed the 'base_url' argument. 
-    # InferenceClient knows where to connect automatically.
-    return InferenceClient(
-        model=model_id, 
-        token=token
-    )
 # ==========================================
-# 🎙️ 1. AI VOICE SEARCH
+# 🎤 1. AI VOICE SEARCH (Whisper)
 # ==========================================
-@Client.on_message((filters.voice | filters.audio) & filters.private)
+@Client.on_message(filters.voice & filters.private)
 async def ai_voice_search(client: Client, message: Message):
-    if not AI_FEATURES_ENABLED: return
-    status_msg = await message.reply_text("🎙️ **Listening to your voice...**")
-
-    try:
-        file_path = await message.download()
-        client_ai = get_ai_client("openai/whisper-tiny")
-        if not client_ai: return await status_msg.edit_text("❌ **AI tokens missing.**")
-
-        # Use official library
-        result = client_ai.automatic_speech_recognition(file_path)
-        os.remove(file_path)
-
-        # Handle text extraction
-        spoken_text = str(result).strip()
-        clean_text = "".join([c for c in spoken_text if c.isalnum() or c.isspace()])
+    if not HF_TOKEN:
+        return await message.reply_text("❌ AI Token not configured.")
         
-        await status_msg.edit_text(f"🗣️ **You said:** `{clean_text}`\n🔍 *Searching...*")
-        message.text = clean_text
+    msg = await message.reply_text("🎧 **Listening to your voice...**")
+    
+    try:
+        # 1. Download voice note directly into RAM (no local storage clutter)
+        audio_file = await message.download(in_memory=True)
+        audio_bytes = audio_file.getvalue()
+        
+        # 2. Direct, fast aiohttp request to Hugging Face
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api-inference.huggingface.co/models/openai/whisper-tiny",
+                headers=HEADERS,
+                data=audio_bytes,
+                timeout=30
+            ) as resp:
+                result = await resp.json()
+                
+                # Handle Sleeping Models Gracefully
+                if resp.status == 503:
+                    return await msg.edit_text("⏳ **AI is warming up!**\nHugging Face models go to sleep when inactive. Please try again in 20 seconds.")
+                elif resp.status != 200:
+                    return await msg.edit_text(f"❌ **API Error:** `{result.get('error', 'Unknown Error')}`")
+                    
+        # 3. Extract Text and redirect to your Search Engine
+        text = result.get("text", "").strip()
+        if not text:
+            return await msg.edit_text("❌ Could not understand the audio. Please speak clearly.")
+            
+        await msg.edit_text(f"🗣 **You searched for:** `{text}`\n\n*🔍 Fetching results from database...*")
+        
+        # Trick the bot into thinking the user typed this text manually
+        message.text = text
+        from plugins.search import auto_filter
         await auto_filter(client, message)
-        await status_msg.delete()
+        
     except Exception as e:
         logger.error(f"Voice Search Error: {e}")
-        await status_msg.edit_text("❌ **AI temporarily unavailable.**")
-    raise StopPropagation
+        await msg.edit_text("❌ **AI temporarily unavailable.** Please try again later.")
+
 
 # ==========================================
-# 🌍 2. AI LANGUAGE TRANSLATOR
+# 🌍 2. AI TRANSLATOR (NLLB-200)
 # ==========================================
-@Client.on_message(filters.command("translate") & filters.private)
+@Client.on_message(filters.command("translate"))
 async def ai_language_translator(client: Client, message: Message):
-    if not AI_FEATURES_ENABLED: return
-    if len(message.command) < 2: return await message.reply_text("⚠️ **Format:** `/translate <name>`")
-
-    foreign_text = message.text.split(" ", 1)[1]
-    status_msg = await message.reply_text("🌍 **Translating...**")
-
+    if not HF_TOKEN:
+        return await message.reply_text("❌ AI Token not configured.")
+        
+    # Grab text from command or replied message
+    query = " ".join(message.command[1:])
+    if not query and message.reply_to_message:
+        query = message.reply_to_message.text or message.reply_to_message.caption
+        
+    if not query:
+        return await message.reply_text("⚠️ **Usage:** `/translate [text]` or reply to a message.")
+        
+    msg = await message.reply_text("🌍 **Translating...**")
+    
     try:
-        client_ai = get_ai_client("facebook/nllb-200-distilled-600M")
-        if not client_ai: return await status_msg.edit_text("❌ **AI tokens missing.**")
-
-        result = client_ai.translation(text=foreign_text)
-        # InferenceClient translation returns a dict with 'translation_text'
-        english_text = result.get('translation_text', foreign_text).strip()
-
-        await status_msg.edit_text(f"🌍 **Translated:** `{english_text}`\n🔍 *Searching...*")
-        message.text = english_text
-        await auto_filter(client, message)
-        await status_msg.delete()
+        payload = {"inputs": query}
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api-inference.huggingface.co/models/facebook/nllb-200-distilled-600M",
+                headers=HEADERS,
+                json=payload,
+                timeout=20
+            ) as resp:
+                result = await resp.json()
+                
+                if resp.status == 503:
+                    return await msg.edit_text("⏳ **Translator AI is warming up!**\nPlease try again in 20 seconds.")
+                elif resp.status != 200:
+                    return await msg.edit_text(f"❌ **API Error:** `{result.get('error', 'Unknown')}`")
+                    
+        # Parse the JSON response
+        translated_text = ""
+        if isinstance(result, list) and len(result) > 0:
+            translated_text = result[0].get("translation_text", result[0].get("generated_text", ""))
+        else:
+            translated_text = str(result)
+            
+        if not translated_text:
+            return await msg.edit_text("❌ Translation returned empty.")
+            
+        await msg.edit_text(f"🌍 **Translation:**\n\n`{translated_text}`")
+        
     except Exception as e:
         logger.error(f"Translation Error: {e}")
-        await status_msg.edit_text("❌ **Translation Failed.**")
-    raise StopPropagation
+        await msg.edit_text("❌ **Translation Failed.**")
+
 
 # ==========================================
-# 📸 3. AI POSTER SCANNER
+# 👁️ 3. AI POSTER SCANNER (Donut Base OCR)
 # ==========================================
 @Client.on_message(filters.photo & filters.private)
 async def ai_poster_scanner(client: Client, message: Message):
-    if not AI_FEATURES_ENABLED: return
-    status_msg = await message.reply_text("📸 **Scanning image...**")
-
+    if not HF_TOKEN:
+        return
+        
+    msg = await message.reply_text("👁️ **Scanning image for text...**")
+    
     try:
-        file_path = await message.download()
-        client_ai = get_ai_client("naver-clova-ix/donut-base")
-        if not client_ai: return await status_msg.edit_text("❌ **AI tokens missing.**")
-
-        extracted_text = client_ai.image_to_text(file_path).strip()
-        os.remove(file_path)
-
-        if not extracted_text or len(extracted_text) < 2:
-            return await status_msg.edit_text("❌ **No text found.**")
-
-        await status_msg.edit_text(f"📸 **I read:** `{extracted_text}`\n🔍 *Searching...*")
-        message.text = extracted_text
-        await auto_filter(client, message)
-        await status_msg.delete()
+        # Load image into memory
+        photo_file = await message.download(in_memory=True)
+        image_bytes = photo_file.getvalue()
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api-inference.huggingface.co/models/naver-clova-ix/donut-base",
+                headers=HEADERS,
+                data=image_bytes,
+                timeout=30
+            ) as resp:
+                result = await resp.json()
+                
+                if resp.status == 503:
+                    return await msg.edit_text("⏳ **Scanner AI is warming up!**\nPlease try again in 20 seconds.")
+                elif resp.status != 200:
+                    return await msg.edit_text(f"❌ **API Error:** `{result.get('error', 'Unknown')}`")
+                    
+        # Parse Document QA / OCR response
+        text = ""
+        if isinstance(result, list) and len(result) > 0:
+            text = result[0].get("generated_text", "")
+        elif isinstance(result, dict):
+            text = result.get("generated_text", "")
+            
+        if not text:
+            return await msg.edit_text("❌ **No readable text found in image.**")
+            
+        await msg.edit_text(f"👁️ **Scanned Text:**\n\n`{text}`")
+        
     except Exception as e:
         logger.error(f"Image Scan Error: {e}")
-        await status_msg.edit_text("❌ **Scanner Failed.**")
-    raise StopPropagation
+        await msg.edit_text("❌ **Scanner Failed.**")
