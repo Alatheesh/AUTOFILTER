@@ -1,59 +1,64 @@
 import os
 import random
-import aiohttp
 import logging
 from pyrogram import Client, filters, StopPropagation
 from pyrogram.types import Message
-
-# Import your config and existing search engine
 from config import Config
 from plugins.search import auto_filter
+# Import the robust library
+from huggingface_hub import InferenceClient
 
 logger = logging.getLogger(__name__)
 
-# ==========================================
-# 🎙️ 1. AI VOICE SEARCH (Whisper)
-# ==========================================
-@Client.on_message((filters.voice | filters.audio) & filters.private)
-async def ai_voice_search(client: Client, message: Message):
-    if not getattr(Config, "HF_TOKENS", None):
-        return await message.reply_text("❌ **AI Offline:** Hugging Face tokens are missing.")
+# Global Maintenance Toggle
+AI_FEATURES_ENABLED = True 
 
-    status_msg = await message.reply_text("🎙️ **Listening to your voice...**")
+# Helper to get an AI client
+def get_ai_client(model_id):
+    if not getattr(Config, "HF_TOKENS", None):
+        return None
+    token = random.choice(Config.HF_TOKENS)
+    return InferenceClient(model=model_id, token=token)
+
+# ==========================================
+# 📸 AI POSTER SCANNER (Updated to use InferenceClient)
+# ==========================================
+@Client.on_message(filters.photo & filters.private)
+async def ai_poster_scanner(client: Client, message: Message):
+    if not AI_FEATURES_ENABLED: return
+
+    status_msg = await message.reply_text("📸 **Scanning image (Optimized)...**")
 
     try:
+        # 1. Download photo
         file_path = await message.download()
-
-        # 🔄 Pick a random token to prevent rate limits
-        current_token = random.choice(Config.HF_TOKENS)
         
-        API_URL = "https://api-inference.huggingface.co/models/openai/whisper-tiny"
-        headers = {"Authorization": f"Bearer {current_token}"}
+        # 2. Use official library (handles DNS/connections better)
+        ai_client = get_ai_client("microsoft/trocr-base-printed")
+        if not ai_client:
+            return await status_msg.edit_text("❌ **AI tokens missing.**")
 
-        async with aiohttp.ClientSession() as session:
-            with open(file_path, "rb") as f:
-                data = f.read()
-            async with session.post(API_URL, headers=headers, data=data, timeout=15) as response:
-                result = await response.json()
+        # 3. Perform OCR
+        # InferenceClient handles the image upload and parsing
+        result = ai_client.image_to_text(file_path)
+        
+        os.remove(file_path) # Clean up
 
-        os.remove(file_path) # Clean up the file
+        # 4. Result is usually just the text string for this model
+        extracted_text = str(result).strip()
+        
+        if not extracted_text or len(extracted_text) < 2:
+            return await status_msg.edit_text("❌ **No text found in image.**")
 
-        if "text" in result:
-            spoken_text = result["text"].strip()
-            clean_text = "".join([c for c in spoken_text if c.isalnum() or c.isspace()])
-            
-            await status_msg.edit_text(f"🗣️ **You said:** `{clean_text}`\n🔍 *Searching database...*")
-            
-            # Pass the text to your standard search engine
-            message.text = clean_text
-            await auto_filter(client, message)
-            await status_msg.delete()
-        else:
-            await status_msg.edit_text("❌ **Sorry, I couldn't understand the audio.**")
+        await status_msg.edit_text(f"📸 **I read:** `{extracted_text}`\n🔍 *Searching database...*")
+        
+        message.text = extracted_text
+        await auto_filter(client, message)
+        await status_msg.delete()
 
     except Exception as e:
-        logger.error(f"Voice Search Error: {e}")
-        await status_msg.edit_text("❌ **AI Processing Failed.** The server might be busy.")
+        logger.error(f"Image Scan Error: {e}")
+        await status_msg.edit_text(f"❌ **Scanner Failed.** (Check logs for details)")
     
     raise StopPropagation
 
