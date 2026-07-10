@@ -149,3 +149,17 @@ async def ai_poster_scanner(client: Client, message: Message):
         await status_msg.edit_text("❌ **AI Scanner Failed.** The server might be busy.")
     
     raise StopPropagation
+
+# ==========================================
+# 🌐 NETWORK DIAGNOSTIC TOOL
+# ==========================================
+@Client.on_message(filters.command("check_net"))
+async def check_network(client: Client, message: Message):
+    status_msg = await message.reply_text("🔍 Testing network connection...")
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Try to connect to Google to see if we have internet
+            async with session.get("https://www.google.com", timeout=5) as response:
+                await status_msg.edit_text(f"✅ **Network is UP!**\nResponse Code: {response.status}")
+    except Exception as e:
+        await status_msg.edit_text(f"❌ **Network is DOWN!**\nError: `{e}`")
