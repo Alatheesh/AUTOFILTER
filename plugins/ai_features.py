@@ -65,7 +65,7 @@ async def ai_language_translator(client: Client, message: Message):
     status_msg = await message.reply_text("🌍 **Translating...**")
 
     try:
-        client_ai = get_ai_client("Helsinki-NLP/opus-mt-mul-en")
+        client_ai = get_ai_client("facebook/nllb-200-distilled-600M")
         if not client_ai: return await status_msg.edit_text("❌ **AI tokens missing.**")
 
         result = client_ai.translation(text=foreign_text)
@@ -91,7 +91,7 @@ async def ai_poster_scanner(client: Client, message: Message):
 
     try:
         file_path = await message.download()
-        client_ai = get_ai_client("microsoft/trocr-base-printed")
+        client_ai = get_ai_client("naver-clova-ix/donut-base")
         if not client_ai: return await status_msg.edit_text("❌ **AI tokens missing.**")
 
         extracted_text = client_ai.image_to_text(file_path).strip()
