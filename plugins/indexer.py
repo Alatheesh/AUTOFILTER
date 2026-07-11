@@ -183,6 +183,23 @@ async def trigger_indexing_job(client: Client, message: Message, target_chat, pr
     else: await message.reply_text(msg_text)
 
 
+@Client.on_message(filters.command("cancel_index") & filters.user(Config.ADMINS))
+async def stop_active_index(client: Client, message: Message):
+    # Fetch the currently running job from the database
+    job = await db.get_active_job()
+    
+    if not job:
+        return await message.reply_text("⚠️ **No active indexing jobs to cancel.**")
+        
+    job_id = job["_id"]
+    chat_name = job["chat_name"]
+    
+    # Trick the background worker into thinking the job is finished
+    await db.update_job(job_id, {"status": "completed"})
+    
+    await message.reply_text(f"🛑 **Indexing Cancelled!**\n\nThe background worker has been ordered to stop processing `{chat_name}`.")
+
+
 # ==========================================
 # 📢 DIRECT COMMAND & WIZARD LAUNCHER
 # ==========================================
