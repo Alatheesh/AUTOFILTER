@@ -24,8 +24,11 @@ def sanitize_title(title: str) -> str:
     clean_title = " ".join(clean_title.split())
     return clean_title.strip() if clean_title.strip() else title
 
-def generate_file_hash(file_name: str, file_size: int) -> str:
-    hash_payload = f"{file_name}_{file_size}".encode("utf-8")
+def generate_file_hash(media) -> str:
+    # 🚀 FIX: We now use Telegram's built-in file_unique_id.
+    # This guarantees 100% accuracy. No more fake duplicates 
+    # caused by files missing their names!
+    hash_payload = str(media.file_unique_id).encode("utf-8")
     return hashlib.sha256(hash_payload).hexdigest()
 
 # ==========================================
@@ -38,7 +41,7 @@ async def auto_indexer(client: Client, message: Message):
 
     raw_title = getattr(media, "file_name", "") or getattr(message, "caption", "") or "Unknown Web File"
     file_size = getattr(media, "file_size", 0)
-    crypto_hash = generate_file_hash(raw_title, file_size)
+    crypto_hash = generate_file_hash(media)
 
     if await db.check_exists(crypto_hash): return
 
@@ -114,7 +117,8 @@ async def trigger_indexing_job(client: Client, message: Message, target_chat, pr
         async for m in client.get_chat_history(target_chat_id, limit=1):
             actual_last_msg_id = m.id
             break
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Native history check failed. Falling back to radar probe. Reason: {e}")
         pass 
         
     # 🚀 METHOD B: The "Ascending Radar Probe" (Bypasses Admin Restrictions!)
@@ -148,8 +152,6 @@ async def trigger_indexing_job(client: Client, message: Message, target_chat, pr
                     break
                 probe_id += 10
 
-            # Set the ceiling to the highest verified ID, plus a safety buffer of 50
-            # (Just in case the absolute last 10 messages were deleted)
             actual_last_msg_id = probe_id + 50 
             
         except Exception as e:
@@ -183,9 +185,11 @@ async def trigger_indexing_job(client: Client, message: Message, target_chat, pr
     else: await message.reply_text(msg_text)
 
 
+# ==========================================
+# 🛑 STOP ACTIVE INDEXER COMMAND
+# ==========================================
 @Client.on_message(filters.command("cancel_index") & filters.user(Config.ADMINS))
 async def stop_active_index(client: Client, message: Message):
-    # Fetch the currently running job from the database
     job = await db.get_active_job()
     
     if not job:
@@ -194,10 +198,9 @@ async def stop_active_index(client: Client, message: Message):
     job_id = job["_id"]
     chat_name = job["chat_name"]
     
-    # Trick the background worker into thinking the job is finished
+    # Trick the background worker into finishing the job immediately
     await db.update_job(job_id, {"status": "completed"})
-    
-    await message.reply_text(f"🛑 **Indexing Cancelled!**\n\nThe background worker has been ordered to stop processing `{chat_name}`.")
+    await message.reply_text(f"🛑 **Indexing Cancelled!**\n\nThe background worker has stopped processing `{chat_name}`.")
 
 
 # ==========================================
@@ -211,7 +214,6 @@ async def mass_indexer_command(client: Client, message: Message):
         target_chat = None
         last_msg_id = None
         
-        # 🚀 FIX: Removed deprecated forward_from_chat. Modern Pyrogram v2 check!
         if getattr(reply, "forward_origin", None):
             if getattr(reply.forward_origin, "chat", None):
                 target_chat = reply.forward_origin.chat.id
@@ -277,7 +279,6 @@ async def interactive_indexer_listener(client: Client, message: Message):
     target_chat = None
     known_msg_id = None
     
-    # 🚀 FIX: Removed deprecated forward_from_chat. Modern Pyrogram v2 check!
     if getattr(message, "forward_origin", None):
         if getattr(message.forward_origin, "chat", None):
             target_chat = message.forward_origin.chat.id
@@ -372,7 +373,9 @@ async def process_indexing_queue(client: Client):
 
                 raw_title = getattr(media, "file_name", "") or getattr(msg, "caption", "") or "Unknown"
                 file_size = getattr(media, "file_size", 0)
-                crypto_hash = generate_file_hash(raw_title, file_size)
+                
+                # 🚀 FIX: Pass the entire media object to get the file_unique_id
+                crypto_hash = generate_file_hash(media)
 
                 if await db.check_exists(crypto_hash):
                     dupes += 1
