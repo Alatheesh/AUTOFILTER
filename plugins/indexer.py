@@ -25,7 +25,7 @@ def sanitize_title(title: str) -> str:
     return clean_title.strip() if clean_title.strip() else title
 
 def generate_file_hash(media) -> str:
-    # 🚀 FIX: Only change made. Uses Telegram's absolute unique file ID.
+    # 🚀 FIX: Uses Telegram's absolute unique file ID.
     # Completely eliminates the fake duplicate bug.
     hash_payload = str(media.file_unique_id).encode("utf-8")
     return hashlib.sha256(hash_payload).hexdigest()
@@ -119,40 +119,64 @@ async def trigger_indexing_job(client: Client, message: Message, target_chat, pr
     except Exception:
         pass 
         
-    # 🚀 METHOD B: The "Ascending Radar Probe" (Bypasses Admin Restrictions!)
+    # 🚀 METHOD B: The "Ascending Radar Probe" (WITH GAP JUMPER)
     if not actual_last_msg_id:
         try:
             if prompt_msg_id: 
                 await client.edit_message_text(message.chat.id, prompt_msg_id, "📡 **Bypassing Security... Probing for the newest post...**")
             
-            # Start probing from the ID you gave it, or 1 if it's completely blind.
             probe_id = known_msg_id if known_msg_id else 1
+            last_good_id = probe_id
             
-            # 1. Aggressive Jump (+1000)
+            # 1. Aggressive Jump (+1000) - Tolerates up to 50,000 deleted messages!
+            empty_streak = 0
             while True:
                 msg = await client.get_messages(target_chat_id, probe_id + 1000)
                 if not msg or getattr(msg, "empty", False):
-                    break
+                    empty_streak += 1
+                    if empty_streak >= 50: # If we hit 50 empty gaps in a row, it's definitely the end.
+                        break
+                else:
+                    empty_streak = 0
+                    last_good_id = probe_id + 1000
                 probe_id += 1000
                 await asyncio.sleep(0.1) # Safety delay
+            
+            # Revert to highest confirmed ID to start moderate jumps
+            probe_id = last_good_id
                 
-            # 2. Moderate Jump (+100)
+            # 2. Moderate Jump (+100) - Tolerates up to 2,000 deleted messages
+            empty_streak = 0
             while True:
                 msg = await client.get_messages(target_chat_id, probe_id + 100)
                 if not msg or getattr(msg, "empty", False):
-                    break
+                    empty_streak += 1
+                    if empty_streak >= 20:
+                        break
+                else:
+                    empty_streak = 0
+                    last_good_id = probe_id + 100
                 probe_id += 100
+                await asyncio.sleep(0.1)
                 
+            probe_id = last_good_id
+
             # 3. Fine Tuning (+10)
+            empty_streak = 0
             while True:
                 msg = await client.get_messages(target_chat_id, probe_id + 10)
                 if not msg or getattr(msg, "empty", False):
-                    break
+                    empty_streak += 1
+                    if empty_streak >= 10:
+                        break
+                else:
+                    empty_streak = 0
+                    last_good_id = probe_id + 10
                 probe_id += 10
+                await asyncio.sleep(0.1)
 
-            # Set the ceiling to the highest verified ID, plus a safety buffer of 50
-            # (Just in case the absolute last 10 messages were deleted)
-            actual_last_msg_id = probe_id + 50 
+            # Set ceiling to highest verified ID + safety buffer
+            actual_last_msg_id = last_good_id + 50 
             
         except Exception as e:
             logger.error(f"Ascending Radar Probe failed: {e}")
@@ -375,6 +399,7 @@ async def process_indexing_queue(client: Client):
                 raw_title = getattr(media, "file_name", "") or getattr(msg, "caption", "") or "Unknown"
                 file_size = getattr(media, "file_size", 0)
                 
+                # 🚀 Apply the new perfect hashing system
                 crypto_hash = generate_file_hash(media)
 
                 if await db.check_exists(crypto_hash):
