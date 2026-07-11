@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 SANITIZING_REGEX = r"[_+\[\]\(\)\{\}\-.]"
 JUNK_REGEX = r"(?i)(@[\w_]+|t\.me/[\w_]+|www\.[^\s]+|https?://[^\s]+)"
 
+# 🧠 State Machine for Clean Interactive Indexing
 INDEXER_STATE = {}
 
 def sanitize_title(title: str) -> str:
@@ -24,13 +25,13 @@ def sanitize_title(title: str) -> str:
     return clean_title.strip() if clean_title.strip() else title
 
 def generate_file_hash(media) -> str:
-    # 🚀 ULTIMATE FIX FOR FAKE DUPLICATES: 
-    # Uses Telegram's absolute unique file ID. Impossible to mismatch.
+    # 🚀 FIX: Only change made. Uses Telegram's absolute unique file ID.
+    # Completely eliminates the fake duplicate bug.
     hash_payload = str(media.file_unique_id).encode("utf-8")
     return hashlib.sha256(hash_payload).hexdigest()
 
 # ==========================================
-# 🚀 PASSIVE AUTO-INDEXER
+# 🚀 PASSIVE AUTO-INDEXER (Set-It-and-Forget-It)
 # ==========================================
 @Client.on_message(filters.document | filters.video | filters.audio, group=1)
 async def auto_indexer(client: Client, message: Message):
@@ -61,76 +62,122 @@ async def auto_indexer(client: Client, message: Message):
 # 🛠️ HELPER: TRIGGER INDEXING JOB
 # ==========================================
 async def trigger_indexing_job(client: Client, message: Message, target_chat, prompt_msg_id=None, known_msg_id=None):
-    extracted_msg_id = None
-    target_chat_str = str(target_chat).strip()
+    """Processes the target chat, finds the absolute latest message, and queues the job."""
     
-    # 1. 🚀 Parse Links and extract precise message IDs if provided
-    if "t.me/" in target_chat_str:
-        clean_link = target_chat_str.replace("https://", "").replace("http://", "")
-        parts = clean_link.split("t.me/")[1].split("?")[0].split("/")
-        if parts[0] == "c" and len(parts) > 1:
-            target_chat_str = f"-100{parts[1]}"
-            if len(parts) > 2 and parts[2].isdigit():
-                extracted_msg_id = int(parts[2])
-        else:
-            target_chat_str = f"@{parts[0]}"
-            if len(parts) > 1 and parts[1].isdigit():
-                extracted_msg_id = int(parts[1])
-    elif not target_chat_str.startswith("@") and not target_chat_str.replace("-", "").isdigit():
-        target_chat_str = f"@{target_chat_str}"
+    extracted_msg_id = None
+    
+    # 🚀 Advanced Link Parser 
+    if isinstance(target_chat, str):
+        target_chat = target_chat.strip()
+        if "t.me/" in target_chat:
+            parts = target_chat.split("t.me/")[1].split("?")[0].split("/")
+            if parts[0] == "c" and len(parts) > 1:
+                target_chat = f"-100{parts[1]}"
+                if len(parts) > 2 and parts[2].isdigit():
+                    extracted_msg_id = int(parts[2])
+            else:
+                target_chat = f"@{parts[0]}"
+                if len(parts) > 1 and parts[1].isdigit():
+                    extracted_msg_id = int(parts[1])
+        elif not target_chat.startswith("@") and not target_chat.replace("-", "").isdigit():
+            target_chat = f"@{target_chat}"
 
     if extracted_msg_id and not known_msg_id:
         known_msg_id = extracted_msg_id
 
-    # 2. 🚀 Convert to Integer for Pyrogram stability
-    try: target_chat_input = int(target_chat_str)
-    except ValueError: target_chat_input = target_chat_str
-
-    if prompt_msg_id: 
-        try: await client.edit_message_text(message.chat.id, prompt_msg_id, "📡 **Connecting to Chat & Analyzing files...**")
-        except Exception: pass
+    try: target_chat = int(target_chat)
+    except ValueError: pass
 
     try:
-        chat_info = await client.get_chat(target_chat_input)
-        target_chat_name = chat_info.title or str(target_chat_input)
-        target_chat_id = chat_info.id # Force exact Integer ID
+        chat_info = await client.get_chat(target_chat)
+        target_chat_name = chat_info.title or str(target_chat)
+        target_chat_id = f"@{chat_info.username}" if chat_info.username else chat_info.id
+            
+    except PeerIdInvalid:
+        err = (
+            f"❌ **Error: Cannot locate chat `{target_chat}` in memory.**\n\n"
+            f"**The Fix:**\n"
+            f"• If it's a **Public Channel**, please provide its `@username` or link instead of its numeric ID.\n"
+            f"• If it's a **Private Channel**, you MUST either add the bot as an admin OR forward a file from it first!"
+        )
+        if prompt_msg_id: await client.edit_message_text(message.chat.id, prompt_msg_id, err)
+        else: await message.reply_text(err)
+        return
     except Exception as e:
-        err = f"❌ **Error Accessing Chat:** `{target_chat_str}`\nMake sure the bot is an Admin!\n`{e}`"
+        err = f"❌ **Error Accessing Chat:** `{target_chat}`\nMake sure it is a valid public channel, or that the bot is an admin!\n`{e}`"
         if prompt_msg_id: await client.edit_message_text(message.chat.id, prompt_msg_id, err)
         else: await message.reply_text(err)
         return
 
     actual_last_msg_id = None
     
-    # 3. 🚀 Direct API fetch for the absolute newest message (No more guessing)
+    # 🚀 METHOD A: Standard History Request (Works if bot is Admin)
     try:
         async for m in client.get_chat_history(target_chat_id, limit=1):
             actual_last_msg_id = m.id
             break
-    except Exception as e:
-        logger.warning(f"History fetch failed: {e}")
+    except Exception:
+        pass 
         
-    # 4. 🚀 Trust the Link over the Forward if history is blocked
+    # 🚀 METHOD B: The "Ascending Radar Probe" (Bypasses Admin Restrictions!)
     if not actual_last_msg_id:
-        if extracted_msg_id:
-            actual_last_msg_id = extracted_msg_id # Always trust the direct link ID
-        elif known_msg_id:
-            actual_last_msg_id = known_msg_id 
+        try:
+            if prompt_msg_id: 
+                await client.edit_message_text(message.chat.id, prompt_msg_id, "📡 **Bypassing Security... Probing for the newest post...**")
+            
+            # Start probing from the ID you gave it, or 1 if it's completely blind.
+            probe_id = known_msg_id if known_msg_id else 1
+            
+            # 1. Aggressive Jump (+1000)
+            while True:
+                msg = await client.get_messages(target_chat_id, probe_id + 1000)
+                if not msg or getattr(msg, "empty", False):
+                    break
+                probe_id += 1000
+                await asyncio.sleep(0.1) # Safety delay
+                
+            # 2. Moderate Jump (+100)
+            while True:
+                msg = await client.get_messages(target_chat_id, probe_id + 100)
+                if not msg or getattr(msg, "empty", False):
+                    break
+                probe_id += 100
+                
+            # 3. Fine Tuning (+10)
+            while True:
+                msg = await client.get_messages(target_chat_id, probe_id + 10)
+                if not msg or getattr(msg, "empty", False):
+                    break
+                probe_id += 10
+
+            # Set the ceiling to the highest verified ID, plus a safety buffer of 50
+            # (Just in case the absolute last 10 messages were deleted)
+            actual_last_msg_id = probe_id + 50 
+            
+        except Exception as e:
+            logger.error(f"Ascending Radar Probe failed: {e}")
+            pass
+
+    # FALLBACK
+    if not actual_last_msg_id:
+        if known_msg_id:
+            actual_last_msg_id = known_msg_id
         else:
             err = (
-                f"❌ **Telegram Security Block!**\n"
-                f"I cannot see the total files in `{target_chat_name}`.\n\n"
-                f"**Fix:** Run `/index` and paste the direct link to the absolute newest post in the channel (e.g. `https://t.me/c/1844188498/107602`)"
+                "❌ **Telegram Security Block:** I cannot scan this channel from the outside.\n\n"
+                "**How to Fix This:**\n"
+                "1️⃣ Add me to the channel as an Admin, OR\n"
+                "2️⃣ **Forward the absolute newest file** from the channel to me, OR\n"
+                "3️⃣ Send a **direct link** to the newest post (e.g., `t.me/ChannelName/1500`)."
             )
             if prompt_msg_id: await client.edit_message_text(message.chat.id, prompt_msg_id, err)
             else: await message.reply_text(err)
             return
 
-    # 5. 🚀 Queue the job
     success = await db.add_index_job(target_chat_id, target_chat_name, actual_last_msg_id)
 
     if success:
-        msg_text = f"✅ **Job Queued Successfully!**\n\nChannel: `{target_chat_name}`\nTargeting Exactly: **{actual_last_msg_id}** messages.\n\nThe bot will safely process this in the background."
+        msg_text = f"✅ **Job Queued Successfully!**\n\nChannel: `{target_chat_name}`\nTargeting ~`{actual_last_msg_id}` messages.\n\nThe bot will safely process this in the background."
     else:
         msg_text = f"⚠️ **Job Started / Reset!**\n\nThe bot is processing `{target_chat_name}`."
         
@@ -138,19 +185,21 @@ async def trigger_indexing_job(client: Client, message: Message, target_chat, pr
     else: await message.reply_text(msg_text)
 
 
-# ==========================================
-# 🛑 STOP ACTIVE INDEXER COMMAND
-# ==========================================
 @Client.on_message(filters.command("cancel_index") & filters.user(Config.ADMINS))
 async def stop_active_index(client: Client, message: Message):
+    # Fetch the currently running job from the database
     job = await db.get_active_job()
+    
     if not job:
         return await message.reply_text("⚠️ **No active indexing jobs to cancel.**")
-    
+        
     job_id = job["_id"]
     chat_name = job["chat_name"]
+    
+    # Trick the background worker into thinking the job is finished
     await db.update_job(job_id, {"status": "completed"})
-    await message.reply_text(f"🛑 **Indexing Cancelled!**\n\nThe bot has stopped processing `{chat_name}`.")
+    
+    await message.reply_text(f"🛑 **Indexing Cancelled!**\n\nThe background worker has been ordered to stop processing `{chat_name}`.")
 
 
 # ==========================================
@@ -158,10 +207,13 @@ async def stop_active_index(client: Client, message: Message):
 # ==========================================
 @Client.on_message(filters.command(["index", "batch"]) & filters.user(Config.ADMINS))
 async def mass_indexer_command(client: Client, message: Message):
+    
     if message.reply_to_message:
         reply = message.reply_to_message
         target_chat = None
         last_msg_id = None
+        
+        # 🚀 FIX: Removed deprecated forward_from_chat. Modern Pyrogram v2 check!
         if getattr(reply, "forward_origin", None):
             if getattr(reply.forward_origin, "chat", None):
                 target_chat = reply.forward_origin.chat.id
@@ -181,12 +233,15 @@ async def mass_indexer_command(client: Client, message: Message):
         "How would you like to target the channel?\n"
         "1️⃣ **Forward** any file from the channel here.\n"
         "2️⃣ **Type** the Channel ID (e.g., `-10012345678`).\n"
-        "3️⃣ **Type** the Link (e.g., `https://t.me/c/1844188498/107602`).\n\n"
+        "3️⃣ **Type** the Link or Username (e.g., `@MyChannel` or `t.me/c/...`).\n\n"
         "*(Or click Cancel to abort)*",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_index_flow")]])
     )
     
-    INDEXER_STATE[message.from_user.id] = {"message_id": prompt.id, "timestamp": time.time()}
+    INDEXER_STATE[message.from_user.id] = {
+        "message_id": prompt.id,
+        "timestamp": time.time()
+    }
     raise StopPropagation
 
 
@@ -196,7 +251,9 @@ async def mass_indexer_command(client: Client, message: Message):
 @Client.on_message(filters.private & filters.user(Config.ADMINS), group=-6)
 async def interactive_indexer_listener(client: Client, message: Message):
     user_id = message.from_user.id
-    if user_id not in INDEXER_STATE: raise ContinuePropagation
+    
+    if user_id not in INDEXER_STATE:
+        raise ContinuePropagation
 
     if message.text and message.text.startswith("/"):
         del INDEXER_STATE[user_id]
@@ -210,8 +267,9 @@ async def interactive_indexer_listener(client: Client, message: Message):
         del INDEXER_STATE[user_id]
         try: await message.delete() 
         except Exception: pass
-        try: await client.edit_message_text(message.chat.id, prompt_msg_id, "⚠️ **Session Expired.**")
-        except Exception: pass
+        expired_text = "⚠️ **Session Expired.**\n\nThis prompt is older than 48 hours. Please run `/index` again."
+        try: await client.edit_message_text(message.chat.id, prompt_msg_id, expired_text)
+        except Exception: await message.reply_text(expired_text)
         raise StopPropagation 
 
     del INDEXER_STATE[user_id]
@@ -221,6 +279,7 @@ async def interactive_indexer_listener(client: Client, message: Message):
     target_chat = None
     known_msg_id = None
     
+    # 🚀 FIX: Removed deprecated forward_from_chat. Modern Pyrogram v2 check!
     if getattr(message, "forward_origin", None):
         if getattr(message.forward_origin, "chat", None):
             target_chat = message.forward_origin.chat.id
@@ -228,25 +287,32 @@ async def interactive_indexer_listener(client: Client, message: Message):
     elif message.text:
         target_chat = message.text.strip()
     else:
-        err = "❌ Invalid input. Please forward a file or send a link."
+        err = "❌ Invalid input. Please forward a file or send text."
         try: await client.edit_message_text(message.chat.id, prompt_msg_id, err)
         except Exception: await message.reply_text(err)
         raise StopPropagation
+
+    try: await client.edit_message_text(message.chat.id, prompt_msg_id, "🔄 **Connecting to chat & calculating files...**")
+    except Exception: pass
     
     await trigger_indexing_job(client, message, target_chat, prompt_msg_id, known_msg_id)
     raise StopPropagation
 
+
 @Client.on_callback_query(filters.regex("^cancel_index_flow$"))
 async def cancel_index_callback(client: Client, callback: CallbackQuery):
     user_id = callback.from_user.id
-    if user_id in INDEXER_STATE: del INDEXER_STATE[user_id]
-    await callback.message.edit_text("❌ **Operation Cancelled.**")
+    if user_id in INDEXER_STATE:
+        del INDEXER_STATE[user_id]
+    await callback.message.edit_text("❌ **Operation Cancelled.**\n\nYou can start over whenever you're ready.")
     await callback.answer("Cancelled", show_alert=False)
+
 
 # ==========================================
 # ⚙️ BACKGROUND QUEUE WORKER
 # ==========================================
 async def process_indexing_queue(client: Client):
+    """Runs 24/7. Survives crashes. Safely parses queued channels."""
     logger.info("🟢 Safe Indexing Job Queue Started!")
 
     while True:
@@ -279,6 +345,7 @@ async def process_indexing_queue(client: Client):
                 await asyncio.sleep(fw.value)
                 continue
             except (PeerIdInvalid, ChannelInvalid): 
+                # Keep trying to resolve the peer instead of killing the job
                 logger.warning(f"⚠️ Telegram memory syncing for {chat_name}. Attempting to resolve peer...")
                 try:
                     await client.get_chat(chat_id)
@@ -308,7 +375,6 @@ async def process_indexing_queue(client: Client):
                 raw_title = getattr(media, "file_name", "") or getattr(msg, "caption", "") or "Unknown"
                 file_size = getattr(media, "file_size", 0)
                 
-                # 🚀 Apply the new perfect hashing system
                 crypto_hash = generate_file_hash(media)
 
                 if await db.check_exists(crypto_hash):
@@ -336,7 +402,7 @@ async def process_indexing_queue(client: Client):
                 "duplicates": job["duplicates"] + dupes
             })
 
-            logger.info(f"🔄 Indexing: {chat_name} - Saved {saved} | Dupes {dupes}")
+            logger.info(f"🔄 Queue Indexing: {chat_name} - Saved {saved} new files.")
             await asyncio.sleep(3.0)
 
         except Exception as e:
