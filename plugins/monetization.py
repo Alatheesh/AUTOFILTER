@@ -9,6 +9,7 @@ from pyrogram.errors import UserIsBlocked, PeerIdInvalid
 import math
 from database.multi_db import db
 from config import Config
+from plugins.media_engine import get_initial_media_markup
 
 # 🚀 Import our new isolated engine!
 from plugins.shortener import VERIFICATION_TOKENS, get_shortlink
@@ -48,10 +49,15 @@ async def execute_file_delivery(client: Client, chat_id: int, file_data: dict, u
         
         final_caption = raw_caption.replace("{file_name}", f_name).replace("{size}", f_size).replace("{mention}", mention)
         
+        # 🚀 INJECT MEDIA ENGINE BUTTONS HERE
+        file_unique_id = file_data.get("file_unique_id")
+        media_buttons = InlineKeyboardMarkup(get_initial_media_markup(file_unique_id))
+        
         sent_file = await client.send_cached_media(
             chat_id=chat_id, 
             file_id=file_data.get("file_id"), 
-            caption=final_caption
+            caption=final_caption,
+            reply_markup=media_buttons # 👈 Buttons Attached!
         )
         settings = await db.get_settings()
         if settings.get("file_delete_enabled", False):
