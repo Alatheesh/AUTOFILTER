@@ -9,7 +9,7 @@ import base64
 import urllib.parse
 from aiohttp import web
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, InputMediaPhoto
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, InputMediaPhoto, WebAppInfo
 from pyrogram.file_id import FileId
 from pyrogram.raw.functions.upload import GetFile
 from pyrogram.raw.types import InputDocumentFileLocation
@@ -17,12 +17,15 @@ from database.multi_db import db
 
 logger = logging.getLogger(__name__)
 
+# ==========================================
+# 🚦 ENGINE STATE & CONCURRENCY CONTROLS
+# ==========================================
 MAX_CONCURRENT_JOBS = 2
 media_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 current_queue_size = 0  
 MEDIA_STATE = {}
 
-# 🌐 YOUR CUSTOM GITHUB PAGES GALLERY HOST
+# 🌐 YOUR CUSTOM GITHUB PAGES APP URL
 GITHUB_GALLERY_URL = "https://alatheesh.github.io/FILTERWEB/gallery.html"
 
 async def get_file_by_unique_id(unique_id: str):
@@ -32,6 +35,9 @@ async def get_file_by_unique_id(unique_id: str):
         if doc: return doc
     return None
 
+# ==========================================
+# 🚀 INTERNAL STREAMING SERVER
+# ==========================================
 class LocalStreamer:
     def __init__(self, client):
         self.client = client
@@ -119,7 +125,6 @@ async def ensure_streamer_running(client):
 # ==========================================
 # 🌐 THE KEYLESS FALLBACK UPLOADER
 # ==========================================
-
 async def upload_file_waterfall(file_path: str, is_video: bool = False) -> str:
     """Attempts to upload to multiple keyless public APIs. Returns URL on success."""
     file_name = os.path.basename(file_path)
@@ -129,10 +134,10 @@ async def upload_file_waterfall(file_path: str, is_video: bool = False) -> str:
     with open(file_path, 'rb') as f:
         file_data = f.read()
 
-    # 🚀 SSL BYPASS
+    # SSL BYPASS
     async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
         
-        # 🌐 ATTEMPT 1: Uguu.se
+        # ATTEMPT 1: Uguu.se
         try:
             form = aiohttp.FormData()
             form.add_field('files[]', file_data, filename=file_name)
@@ -144,7 +149,7 @@ async def upload_file_waterfall(file_path: str, is_video: bool = False) -> str:
         except Exception as e:
             logger.warning(f"Uguu Upload Error: {e}")
 
-        # 🌐 ATTEMPT 2: 0x0.st
+        # ATTEMPT 2: 0x0.st
         try:
             form = aiohttp.FormData()
             form.add_field('file', file_data, filename=file_name)
@@ -156,7 +161,7 @@ async def upload_file_waterfall(file_path: str, is_video: bool = False) -> str:
         except Exception as e:
             logger.warning(f"0x0.st Upload Error: {e}")
 
-        # 🌐 ATTEMPT 3: Catbox / Litterbox
+        # ATTEMPT 3: Catbox / Litterbox
         try:
             form = aiohttp.FormData()
             if is_video:
@@ -179,10 +184,10 @@ async def upload_file_waterfall(file_path: str, is_video: bool = False) -> str:
 
     return None
 
-# ==========================================
-# ⚙️ PHASE 3: FFMPEG MEDIA ENGINES
-# ==========================================
 
+# ==========================================
+# ⚙️ FFMPEG MEDIA ENGINES
+# ==========================================
 async def generate_watermarked_screenshots(client: Client, status_msg, file_id: str, num_images: int, file_name: str, file_size: int, target_chat_id: int, target_msg_id: int) -> str:
     await ensure_streamer_running(client)
     
@@ -211,10 +216,13 @@ async def generate_watermarked_screenshots(client: Client, status_msg, file_id: 
             timestamp = int(interval * i)
             img_path = os.path.join(temp_dir, f"frame_{unique_run_id}_{i}.jpg")
             
+            # PERFECT TIMESTAMP LOGIC (Calculated accurately in Python)
+            clean_time = time.strftime('%H:%M:%S', time.gmtime(timestamp)).replace(':', '\\:')
+            
             ff_cmd = (
                 f'ffmpeg -y -ss {timestamp} -i "{video_url}" -vframes 1 -q:v 2 '
                 f'-vf "drawtext=fontfile={font_path}:text=\'@llathu63035\':x=10:y=h-th-10:fontsize=24:fontcolor=white@0.9:shadowcolor=black@0.8:shadowx=2:shadowy=2, '
-                f'drawtext=fontfile={font_path}:text=\'%{{pts\\:hms}}\':x=w-tw-10:y=h-th-10:fontsize=24:fontcolor=white@0.9:shadowcolor=black@0.8:shadowx=2:shadowy=2" '
+                f'drawtext=fontfile={font_path}:text=\'{clean_time}\':x=w-tw-10:y=h-th-10:fontsize=24:fontcolor=white@0.9:shadowcolor=black@0.8:shadowx=2:shadowy=2" '
                 f'"{img_path}"'
             )
             process = await asyncio.create_subprocess_shell(ff_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
@@ -223,7 +231,7 @@ async def generate_watermarked_screenshots(client: Client, status_msg, file_id: 
             if os.path.exists(img_path) and os.path.getsize(img_path) > 0:
                 image_paths.append(img_path)
                 
-        # 🌐 ATTEMPT 1: Build GitHub Web App Gallery
+        # ATTEMPT 1: Build Web App Gallery
         await status_msg.edit_text("⚙️ **Processing Media...**\n`[3/3]` Assembling dynamic Web App gallery...")
         uploaded_urls = []
         for img in image_paths:
@@ -232,16 +240,13 @@ async def generate_watermarked_screenshots(client: Client, status_msg, file_id: 
                 uploaded_urls.append(url)
                 
         if len(uploaded_urls) > 0:
-            # Safely pack all the URL links together
             urls_str = ",".join(uploaded_urls)
             encoded_data = base64.urlsafe_b64encode(urls_str.encode()).decode()
             encoded_title = urllib.parse.quote(file_name[:100])
-            
-            # Construct the final GitHub Pages URL
             gallery_link = f"{GITHUB_GALLERY_URL}?title={encoded_title}&data={encoded_data}"
             return gallery_link
             
-        # 🌐 ATTEMPT 2: Native Fallback (If APIs fail completely)
+        # ATTEMPT 2: Native Fallback 
         await status_msg.edit_text("⚠️ **External Servers Failed.**\n`[3/3]` Falling back to Native Secure Album...")
         if image_paths:
             media_group = []
@@ -295,14 +300,15 @@ async def generate_sample_video(client: Client, status_msg, file_id: str, sample
         
         if os.path.exists(out_video_path) and os.path.getsize(out_video_path) > 10000:
             
-            # 🌐 ATTEMPT 1: External Server Uploads (Returns a direct link!)
-            await status_msg.edit_text("⚙️ **Processing Media...**\n`[3/3]` Uploading video to external servers...")
-            video_url = await upload_file_waterfall(out_video_path, is_video=True)
+            await status_msg.edit_text("⚙️ **Processing Media...**\n`[3/3]` Connecting to Web App Player...")
+            raw_video_url = await upload_file_waterfall(out_video_path, is_video=True)
             
-            if video_url:
-                return video_url 
+            if raw_video_url:
+                encoded_title = urllib.parse.quote(file_name[:100])
+                player_link = f"{GITHUB_GALLERY_URL}?title={encoded_title}&video={urllib.parse.quote(raw_video_url)}"
+                return player_link 
                 
-            # 🌐 ATTEMPT 2: Native Fallback
+            # ATTEMPT 2: Native Fallback
             await status_msg.edit_text("⚠️ **External Servers Failed.**\n`[3/3]` Falling back to Native Video Upload...")
             caption = f"🎬 **Sample Video ({sample_duration}s)**\n📁 {file_name[:80]}"
             await client.send_video(chat_id=target_chat_id, video=out_video_path, caption=caption, reply_to_message_id=target_msg_id, supports_streaming=True)
@@ -318,7 +324,6 @@ async def generate_sample_video(client: Client, status_msg, file_id: str, sample
 # ==========================================
 # 🛠️ UI COMPONENT GENERATORS
 # ==========================================
-
 def get_initial_media_markup(file_unique_id: str) -> list:
     return [
         [
@@ -331,25 +336,23 @@ def get_dynamic_media_markup(chat_id: int, message_id: int, file_unique_id: str)
     state_key = f"{chat_id}_{message_id}"
     state = MEDIA_STATE.get(state_key, {"ss_url": None, "spl_url": None, "ss_proc": False, "spl_proc": False})
     
-    # Evaluate Screenshot Button
+    # 🖼️ Screenshot Button
     if state["ss_url"]:
         if state["ss_url"] == "SENT_NATIVELY":
             btn_ss = InlineKeyboardButton("✅ Screenshots Sent", callback_data="ignore_spam")
         else:
-            # 🚀 Injects the custom GitHub Pages URL into the button!
-            btn_ss = InlineKeyboardButton("🔗 Watch Screenshots", url=state["ss_url"])
+            btn_ss = InlineKeyboardButton("🖼️ View Gallery", web_app=WebAppInfo(url=state["ss_url"]))
     elif state["ss_proc"]:
         btn_ss = InlineKeyboardButton("⏳ Processing SS...", callback_data="ignore_spam")
     else:
         btn_ss = InlineKeyboardButton("🖼️ Screenshots", callback_data=f"med_ss_flow:{file_unique_id}")
         
-    # Evaluate Sample Video Button
+    # 🎬 Sample Video Button
     if state["spl_url"]:
         if state["spl_url"] == "SENT_NATIVELY":
             btn_spl = InlineKeyboardButton("✅ Sample Sent", callback_data="ignore_spam")
         else:
-            # 🚀 Injects the video stream URL into the button!
-            btn_spl = InlineKeyboardButton("🔗 Watch Sample", url=state["spl_url"])
+            btn_spl = InlineKeyboardButton("🎬 Play Sample", web_app=WebAppInfo(url=state["spl_url"]))
     elif state["spl_proc"]:
         btn_spl = InlineKeyboardButton("⏳ Processing Sample...", callback_data="ignore_spam")
     else:
@@ -381,7 +384,6 @@ def get_sample_selection_markup(file_unique_id: str) -> InlineKeyboardMarkup:
 # ==========================================
 # 🧠 INTERACTIVE FLOW HANDLERS
 # ==========================================
-
 @Client.on_callback_query(filters.regex(r"^med_ss_flow:(.+)"))
 async def handle_screenshot_flow(client: Client, callback: CallbackQuery):
     file_unique_id = callback.matches[0].group(1)
@@ -408,9 +410,8 @@ async def handle_ignore(client, callback):
 
 
 # ==========================================
-# 🚀 PHASE 2/3: MEDIATOR QUEUE ENGINE
+# 🚀 MEDIATOR QUEUE ENGINE
 # ==========================================
-
 @Client.on_callback_query(filters.regex(r"^med_ss_req:(\d+):(.+)"))
 async def handle_screenshot_request(client: Client, callback: CallbackQuery):
     global current_queue_size
