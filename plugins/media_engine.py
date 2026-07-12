@@ -203,14 +203,12 @@ async def generate_watermarked_screenshots(client: Client, status_msg, file_id: 
             img_path = os.path.join(temp_dir, f"frame_{unique_run_id}_{i}.jpg")
             
             ff_cmd = (
-                f'ffmpeg -y -ss {timestamp} -i "{video_url}" -vframes 1 -q:v 2 '
-                f'-vf "drawtext=text=\'@llathu63035\':x=20:y=h-th-20:fontsize=36:fontcolor=white:box=1:boxcolor=black@0.6" '
-                f'"{img_path}"'
+                f'ffmpeg -y -ss {timestamp} -i "{video_url}" -vframes 1 -q:v 2 "{img_path}"'
             )
             process = await asyncio.create_subprocess_shell(ff_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
             await process.communicate()
             
-            if os.path.exists(img_path):
+            if os.path.exists(img_path) and os.path.getsize(img_path) > 0:
                 image_paths.append(img_path)
                 
         await status_msg.edit_text("⚙️ **Processing Media...**\n`[3/3]` Uploading gallery to cloud servers...")
