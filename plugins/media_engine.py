@@ -129,34 +129,42 @@ async def upload_to_telegraph(image_paths: list, title: str) -> str:
     async with aiohttp.ClientSession() as session:
         uploaded_urls = []
         
-        # 1. Upload each image to Telegraph servers
         for img_path in image_paths:
-            if not os.path.exists(img_path):
-                logger.error(f"❌ File missing before upload: {img_path}")
+            # 🚀 SAFEGUARD 1: Make sure the file exists and is actually a real image (> 5KB)
+            if not os.path.exists(img_path) or os.path.getsize(img_path) < 5000:
+                logger.error(f"❌ Skipping broken or empty frame: {img_path}")
                 continue
                 
+            # 🚀 SAFEGUARD 2: Read the raw bytes into memory so aiohttp doesn't drop them
             with open(img_path, 'rb') as f:
-                form = aiohttp.FormData()
-                form.add_field('file', f, filename=os.path.basename(img_path), content_type='image/jpeg')
-                async with session.post('https://telegra.ph/upload', data=form) as resp:
-                    if resp.status == 200:
-                        res_json = await resp.json()
-                        if isinstance(res_json, list) and 'src' in res_json[0]:
-                            uploaded_urls.append(f"https://telegra.ph{res_json[0]['src']}")
-                        else:
-                            logger.error(f"❌ Telegraph Upload Format Error: {res_json}")
+                file_data = f.read()
+                
+            form = aiohttp.FormData()
+            form.add_field('file', file_data, filename='frame.jpg', content_type='image/jpeg')
+            
+            async with session.post('https://telegra.ph/upload', data=form) as resp:
+                if resp.status == 200:
+                    res_json = await resp.json()
+                    if isinstance(res_json, list) and 'src' in res_json[0]:
+                        uploaded_urls.append(f"https://telegra.ph{res_json[0]['src']}")
                     else:
-                        logger.error(f"❌ Telegraph Upload Failed with status {resp.status}")
+                        logger.error(f"❌ Telegraph Format Error: {res_json}")
+                else:
+                    # 🚀 SAFEGUARD 3: Catch Telegraph's exact error message!
+                    err_text = await resp.text()
+                    logger.error(f"❌ Telegraph Upload Failed (Status {resp.status}): {err_text}")
         
         if not uploaded_urls:
             return None
             
+        # Construct the Telegraph Page HTML
         html_content = ""
         for url in uploaded_urls:
             html_content += f'<img src="{url}"/><br>'
             
         html_content += f'<br><br><b>Credits:</b> @llathu63035<br><b>Developer:</b> @TG_LATHEESH'
 
+        # Create a temporary Telegraph account and publish the page
         async with session.get('https://api.telegra.ph/createAccount?short_name=AutoFilter&author_name=Lathu') as resp:
             account_data = (await resp.json())['result']
             access_token = account_data['access_token']
@@ -170,8 +178,10 @@ async def upload_to_telegraph(image_paths: list, title: str) -> str:
         
         async with session.post('https://api.telegra.ph/createPage', data=payload) as resp:
             page_data = (await resp.json())['result']
-            # Bypassing the ISP Block!
-            return page_data['url'].replace("telegra.ph", "graph.org")
+            
+            # 🚀 THE MAGIC SWAP: Bypassing the ISP Block!
+            clean_url = page_data['url'].replace("telegra.ph", "graph.org")
+            return clean_url
 
 async def generate_watermarked_screenshots(client: Client, status_msg, file_id: str, num_images: int, file_name: str, file_size: int) -> str:
     await ensure_streamer_running(client)
