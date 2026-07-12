@@ -12,6 +12,7 @@ from pyrogram.errors import FloodWait, UserIsBlocked # 🚀 NEW: Critical safety
 from database.multi_db import db
 from config import Config
 from plugins.search import BULK_CACHE
+from plugins.media_engine import get_initial_media_markup
 
 # 🚀 Importing the new isolated engine!
 from plugins.shortener import VERIFICATION_TOKENS, get_shortlink
@@ -231,7 +232,7 @@ async def handle_bulk_delivery(client: Client, message: Message):
             # 📝 FETCH CUSTOM CAPTION ONCE FOR THE BATCH
             raw_caption = await db.get_custom_caption(None) # PM delivery falls back to global/default
             
-            # 🚀 THE NEW DYNAMIC SAFETY LOOP
+            # 🚀 THE NEW DYNAMIC SAFETY LOOP WITH MEDIA BUTTONS
             for f_data in selected_files:
                 if f_data:
                     # 📝 Format placeholders for this specific file
@@ -241,11 +242,16 @@ async def handle_bulk_delivery(client: Client, message: Message):
                     
                     final_caption = raw_caption.replace("{file_name}", f_name).replace("{size}", f_size).replace("{mention}", mention)
                     
+                    # 🚀 INJECT MEDIA ENGINE BUTTONS HERE
+                    file_unique_id = f_data.get("file_unique_id")
+                    media_buttons = InlineKeyboardMarkup(get_initial_media_markup(file_unique_id))
+                    
                     try:
                         sent_file = await client.send_cached_media(
                             chat_id=user_id, 
                             file_id=f_data.get("file_id"), 
-                            caption=final_caption
+                            caption=final_caption,
+                            reply_markup=media_buttons # 👈 Buttons Attached!
                         )
                         sent_message_ids.append(sent_file.id)
                         successful += 1
@@ -260,7 +266,8 @@ async def handle_bulk_delivery(client: Client, message: Message):
                             sent_file = await client.send_cached_media(
                                 chat_id=user_id, 
                                 file_id=f_data.get("file_id"), 
-                                caption=final_caption
+                                caption=final_caption,
+                                reply_markup=media_buttons # 👈 Buttons Attached here too!
                             )
                             sent_message_ids.append(sent_file.id)
                             successful += 1
