@@ -124,8 +124,34 @@ async def upload_file_waterfall(file_path: str, is_video: bool = False) -> str:
     with open(file_path, 'rb') as f:
         file_data = f.read()
 
-    async with aiohttp.ClientSession() as session:
-        # 🚀 ATTEMPT 1: Catbox.moe (Images) / Litterbox (Video)
+    # 🚀 SSL BYPASS: Hugging Face sometimes blocks strict SSL handshakes. 
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
+        
+        # 🌐 ATTEMPT 1: Uguu.se (Extremely fast, 128MB limit)
+        try:
+            form = aiohttp.FormData()
+            form.add_field('files[]', file_data, filename=file_name)
+            async with session.post('https://uguu.se/upload.php', data=form, timeout=120) as resp:
+                if resp.status == 200:
+                    res_json = await resp.json()
+                    if res_json.get('success'):
+                        return res_json['files'][0]['url']
+        except Exception as e:
+            logger.warning(f"Uguu Upload Error: {e}")
+
+        # 🌐 ATTEMPT 2: 0x0.st (Developer favorite)
+        try:
+            form = aiohttp.FormData()
+            form.add_field('file', file_data, filename=file_name)
+            async with session.post('https://0x0.st', data=form, timeout=120) as resp:
+                if resp.status == 200:
+                    text = await resp.text()
+                    if text.startswith("http"):
+                        return text.strip()
+        except Exception as e:
+            logger.warning(f"0x0.st Upload Error: {e}")
+
+        # 🌐 ATTEMPT 3: Catbox / Litterbox (The original fallback)
         try:
             form = aiohttp.FormData()
             if is_video:
@@ -146,24 +172,6 @@ async def upload_file_waterfall(file_path: str, is_video: bool = False) -> str:
         except Exception as e:
             logger.warning(f"Catbox Upload Error: {e}")
 
-        # 🚀 ATTEMPT 2: envs.sh (Files up to 512MB)
-        try:
-            form = aiohttp.FormData()
-            form.add_field('file', file_data, filename=file_name)
-            async with session.post('https://envs.sh', data=form, timeout=120) as resp:
-                if resp.status == 200:
-                    text = await resp.text()
-                    if text.startswith("http"):
-                        return text.strip()
-        except Exception as e:
-            logger.warning(f"envs.sh Upload Error: {e}")
-
-    return None
-
-async def get_file_by_unique_id(unique_id: str):
-    for coll in db.collections:
-        doc = await coll.find_one({"file_unique_id": unique_id})
-        if doc: return doc
     return None
 
 # ==========================================
@@ -202,8 +210,8 @@ async def generate_watermarked_screenshots(client: Client, status_msg, file_id: 
             
             ff_cmd = (
                 f'ffmpeg -y -ss {timestamp} -i "{video_url}" -vframes 1 -q:v 2 '
-                f'-vf "drawtext=fontfile={font_path}:text=\'@llathu63035\':x=20:y=h-th-20:fontsize=36:fontcolor=white@0.9:box=1:boxcolor=black@0.6, '
-                f'drawtext=fontfile={font_path}:text=\'%{{pts\\:hms}}\':x=w-tw-20:y=h-th-20:fontsize=36:fontcolor=white@0.9:box=1:boxcolor=black@0.6" '
+                f'-vf "drawtext=fontfile={font_path}:text=\'@llathu63035\':x=10:y=h-th-10:fontsize=24:fontcolor=white@0.9:shadowcolor=black@0.8:shadowx=2:shadowy=2, '
+                f'drawtext=fontfile={font_path}:text=\'%{{pts\\:hms}}\':x=w-tw-10:y=h-th-10:fontsize=24:fontcolor=white@0.9:shadowcolor=black@0.8:shadowx=2:shadowy=2" '
                 f'"{img_path}"'
             )
             process = await asyncio.create_subprocess_shell(ff_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
@@ -275,7 +283,7 @@ async def generate_sample_video(client: Client, status_msg, file_id: str, sample
         
         ff_cmd = (
             f'ffmpeg -y -ss {start_time} -i "{video_url}" -t {sample_duration} '
-            f'-vf "drawtext=fontfile={font_path}:text=\'@llathu63035\':x=15:y=h-th-15:fontsize=24:fontcolor=white@0.9:box=1:boxcolor=black@0.6" '
+            f'-vf "drawtext=fontfile={font_path}:text=\'@llathu63035\':x=10:y=h-th-10:fontsize=16:fontcolor=white@0.9:shadowcolor=black@0.8:shadowx=2:shadowy=2" '
             f'-c:v libx264 -preset veryfast -crf 28 -c:a aac -b:a 128k "{out_video_path}"'
         )
         process = await asyncio.create_subprocess_shell(ff_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
