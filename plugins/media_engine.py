@@ -125,9 +125,16 @@ async def get_file_by_unique_id(unique_id: str):
     return None
 
 async def upload_to_telegraph(image_paths: list, title: str) -> str:
+    """Uploads local images to Telegraph and returns a graph.org gallery link."""
     async with aiohttp.ClientSession() as session:
         uploaded_urls = []
+        
+        # 1. Upload each image to Telegraph servers
         for img_path in image_paths:
+            if not os.path.exists(img_path):
+                logger.error(f"❌ File missing before upload: {img_path}")
+                continue
+                
             with open(img_path, 'rb') as f:
                 form = aiohttp.FormData()
                 form.add_field('file', f, filename=os.path.basename(img_path), content_type='image/jpeg')
@@ -136,6 +143,10 @@ async def upload_to_telegraph(image_paths: list, title: str) -> str:
                         res_json = await resp.json()
                         if isinstance(res_json, list) and 'src' in res_json[0]:
                             uploaded_urls.append(f"https://telegra.ph{res_json[0]['src']}")
+                        else:
+                            logger.error(f"❌ Telegraph Upload Format Error: {res_json}")
+                    else:
+                        logger.error(f"❌ Telegraph Upload Failed with status {resp.status}")
         
         if not uploaded_urls:
             return None
@@ -193,8 +204,7 @@ async def generate_watermarked_screenshots(client: Client, status_msg, file_id: 
             
             ff_cmd = (
                 f'ffmpeg -y -ss {timestamp} -i "{video_url}" -vframes 1 -q:v 2 '
-                f'-vf "drawtext=text=\'@llathu63035\':x=20:y=h-th-20:fontsize=36:fontcolor=white@0.9:box=1:boxcolor=black@0.6, '
-                f'drawtext=text=\'%{{pts\\:hms}}\':x=w-tw-20:y=h-th-20:fontsize=36:fontcolor=white@0.9:box=1:boxcolor=black@0.6" '
+                f'-vf "drawtext=text=\'@llathu63035\':x=20:y=h-th-20:fontsize=36:fontcolor=white:box=1:boxcolor=black@0.6" '
                 f'"{img_path}"'
             )
             process = await asyncio.create_subprocess_shell(ff_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
