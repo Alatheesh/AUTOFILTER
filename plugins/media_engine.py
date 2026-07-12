@@ -4,9 +4,14 @@ import uuid
 import json
 import asyncio
 import aiohttp
+import re
 import logging
+from aiohttp import web
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from pyrogram.file_id import FileId
+from pyrogram.raw.functions.upload import GetFile
+from pyrogram.raw.types import InputDocumentFileLocation
 from database.multi_db import db
 
 logger = logging.getLogger(__name__)
@@ -14,16 +19,99 @@ logger = logging.getLogger(__name__)
 # ==========================================
 # 🚦 ENGINE STATE & CONCURRENCY CONTROLS
 # ==========================================
-# Strictly limit Hugging Face to 2 concurrent media tasks to prevent RAM/CPU Crashes
 MAX_CONCURRENT_JOBS = 2
 media_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
-
-# Tracks how many people are currently waiting in line
 current_queue_size = 0  
-
-# RAM State Tracker to remember button layouts without using the Database
-# Format: { "chat_id_msg_id": {"ss_url": str, "spl_url": str, "ss_proc": bool, "spl_proc": bool} }
 MEDIA_STATE = {}
+
+# ==========================================
+# 🚀 PHASE 4: INTERNAL STREAMING SERVER
+# ==========================================
+
+class LocalStreamer:
+    def __init__(self, client):
+        self.client = client
+        self.app = web.Application()
+        self.app.router.add_get('/stream/{file_id}', self.stream_handler)
+        self.runner = None
+        self.port = 8080
+
+    async def start(self):
+        self.runner = web.AppRunner(self.app)
+        await self.runner.setup()
+        site = web.TCPSite(self.runner, '127.0.0.1', self.port)
+        await site.start()
+        logger.info("🚀 Internal MTProto Streaming Server Started on 127.0.0.1:8080")
+
+    async def stream_handler(self, request):
+        file_id = request.match_info['file_id']
+        file_size = int(request.query.get('size', 0))
+        
+        range_header = request.headers.get('Range', '')
+        start = 0
+        end = file_size - 1
+        
+        if range_header:
+            match = re.search(r'bytes=(\d+)-(\d*)', range_header)
+            if match:
+                start = int(match.group(1))
+                if match.group(2):
+                    end = int(match.group(2))
+                    
+        headers = {
+            'Content-Range': f'bytes {start}-{end}/{file_size}',
+            'Accept-Ranges': 'bytes',
+            'Content-Length': str(end - start + 1),
+            'Content-Type': 'video/mp4'
+        }
+        
+        resp = web.StreamResponse(status=206 if range_header else 200, headers=headers)
+        await resp.prepare(request)
+        
+        chunk_size = 1024 * 1024 # Telegram chunk size is 1MB
+        start_chunk = start // chunk_size
+        end_chunk = end // chunk_size
+        
+        try:
+            # Decode file_id to Pyrogram Raw Location
+            file_id_obj = FileId.decode(file_id)
+            location = InputDocumentFileLocation(
+                id=file_id_obj.media_id,
+                access_hash=file_id_obj.access_hash,
+                file_reference=file_id_obj.file_reference,
+                thumb_size=""
+            )
+            
+            # Fetch only the EXACT bytes FFmpeg asks for
+            for chunk_idx in range(start_chunk, end_chunk + 1):
+                offset = chunk_idx * chunk_size
+                result = await self.client.invoke(GetFile(
+                    location=location,
+                    offset=offset,
+                    limit=chunk_size
+                ))
+                
+                chunk_data = result.bytes
+                if chunk_idx == start_chunk and chunk_idx == end_chunk:
+                    chunk_data = chunk_data[start % chunk_size : (end % chunk_size) + 1]
+                elif chunk_idx == start_chunk:
+                    chunk_data = chunk_data[start % chunk_size :]
+                elif chunk_idx == end_chunk:
+                    chunk_data = chunk_data[: (end % chunk_size) + 1]
+                    
+                await resp.write(chunk_data)
+        except Exception as e:
+            pass # Suppress broken pipe errors when FFmpeg finishes reading
+            
+        return resp
+
+STREAMER_INSTANCE = None
+
+async def ensure_streamer_running(client):
+    global STREAMER_INSTANCE
+    if not STREAMER_INSTANCE:
+        STREAMER_INSTANCE = LocalStreamer(client)
+        await STREAMER_INSTANCE.start()
 
 
 # ==========================================
@@ -31,18 +119,14 @@ MEDIA_STATE = {}
 # ==========================================
 
 async def get_file_by_unique_id(unique_id: str):
-    """Searches all database collections for the full file data using the short ID."""
     for coll in db.collections:
         doc = await coll.find_one({"file_unique_id": unique_id})
         if doc: return doc
     return None
 
 async def upload_to_telegraph(image_paths: list, title: str) -> str:
-    """Uploads local images to Telegraph and returns a graph.org gallery link."""
     async with aiohttp.ClientSession() as session:
         uploaded_urls = []
-        
-        # 1. Upload each image to Telegraph servers
         for img_path in image_paths:
             with open(img_path, 'rb') as f:
                 form = aiohttp.FormData()
@@ -56,14 +140,12 @@ async def upload_to_telegraph(image_paths: list, title: str) -> str:
         if not uploaded_urls:
             return None
             
-        # 2. Construct the Telegraph Page HTML
         html_content = ""
         for url in uploaded_urls:
             html_content += f'<img src="{url}"/><br>'
             
         html_content += f'<br><br><b>Credits:</b> @llathu63035<br><b>Developer:</b> @TG_LATHEESH'
 
-        # 3. Create a temporary Telegraph account and publish the page
         async with session.get('https://api.telegra.ph/createAccount?short_name=AutoFilter&author_name=Lathu') as resp:
             account_data = (await resp.json())['result']
             access_token = account_data['access_token']
@@ -77,63 +159,31 @@ async def upload_to_telegraph(image_paths: list, title: str) -> str:
         
         async with session.post('https://api.telegra.ph/createPage', data=payload) as resp:
             page_data = (await resp.json())['result']
-            
-            # 🚀 THE MAGIC SWAP: Bypassing the Indian ISP Block!
-            clean_url = page_data['url'].replace("telegra.ph", "graph.org")
-            return clean_url
+            # Bypassing the ISP Block!
+            return page_data['url'].replace("telegra.ph", "graph.org")
 
-async def generate_watermarked_screenshots(client: Client, status_msg, file_id: str, num_images: int, file_name: str) -> str:
-    """Downloads the file, extracts frames via FFmpeg, uploads them, and cleans up."""
+async def generate_watermarked_screenshots(client: Client, status_msg, file_id: str, num_images: int, file_name: str, file_size: int) -> str:
+    await ensure_streamer_running(client)
+    
     temp_dir = "/tmp/autofilter_media"
     os.makedirs(temp_dir, exist_ok=True)
-    
     unique_run_id = str(uuid.uuid4())[:8]
-    video_path = os.path.join(temp_dir, f"vid_{unique_run_id}.mkv")
     
-    # ⏱️ State tracker for the progress bar to prevent FloodWaits
-    last_update_time = [time.time()]
+    # We hand FFmpeg a direct local HTTP stream instead of a downloaded file!
+    video_url = f"http://127.0.0.1:8080/stream/{file_id}?size={file_size}"
     
-    async def download_progress(current, total):
-        now = time.time()
-        if now - last_update_time[0] > 3: # Edit message every 3 seconds
-            last_update_time[0] = now
-            percentage = current * 100 / total if total else 0
-            filled = int(percentage / 10)
-            bar = "█" * filled + "░" * (10 - filled)
-            curr_mb = current / (1024 * 1024)
-            tot_mb = total / (1024 * 1024)
-            
-            try:
-                await status_msg.edit_text(
-                    f"⚙️ **Processing Media...**\n"
-                    f"`[1/4]` Downloading stream to secure server buffer...\n\n"
-                    f"{bar} `{percentage:.1f}%`\n"
-                    f"`{curr_mb:.2f} MB / {tot_mb:.2f} MB`"
-                )
-            except Exception:
-                pass
-
     try:
-        # 1. Download the target file safely (NOW WITH PROGRESS BAR)
-        await status_msg.edit_text("⚙️ **Processing Media...**\n`[1/4]` Initializing secure download stream...")
-        await client.download_media(
-            message=file_id, 
-            file_name=video_path, 
-            progress=download_progress
-        )
+        await status_msg.edit_text("⚙️ **Processing Media...**\n`[1/3]` Connecting to live MTProto stream...")
         
-        # 2. Get video duration using ffprobe
-        await status_msg.edit_text("⚙️ **Processing Media...**\n`[2/4]` Analyzing video matrix...")
-        probe_cmd = f'ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "{video_path}"'
+        probe_cmd = f'ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "{video_url}"'
         proc = await asyncio.create_subprocess_shell(probe_cmd, stdout=asyncio.subprocess.PIPE)
         stdout, _ = await proc.communicate()
         try:
             duration = float(stdout.decode().strip())
         except Exception:
-            duration = 120.0 # Fallback if metadata is missing
+            duration = 120.0
             
-        # 3. Extract and watermark the frames
-        await status_msg.edit_text(f"⚙️ **Processing Media...**\n`[3/4]` Rendering {num_images} watermarked frames...")
+        await status_msg.edit_text(f"⚙️ **Processing Media...**\n`[2/3]` Rendering {num_images} watermarked frames instantly...")
         image_paths = []
         interval = duration / (num_images + 1)
         
@@ -142,7 +192,7 @@ async def generate_watermarked_screenshots(client: Client, status_msg, file_id: 
             img_path = os.path.join(temp_dir, f"frame_{unique_run_id}_{i}.jpg")
             
             ff_cmd = (
-                f'ffmpeg -y -ss {timestamp} -i "{video_path}" -vframes 1 -q:v 2 '
+                f'ffmpeg -y -ss {timestamp} -i "{video_url}" -vframes 1 -q:v 2 '
                 f'-vf "drawtext=text=\'@llathu63035\':x=20:y=h-th-20:fontsize=36:fontcolor=white@0.9:box=1:boxcolor=black@0.6, '
                 f'drawtext=text=\'%{{pts\\:hms}}\':x=w-tw-20:y=h-th-20:fontsize=36:fontcolor=white@0.9:box=1:boxcolor=black@0.6" '
                 f'"{img_path}"'
@@ -153,15 +203,11 @@ async def generate_watermarked_screenshots(client: Client, status_msg, file_id: 
             if os.path.exists(img_path):
                 image_paths.append(img_path)
                 
-        # 4. Upload to Telegraph
-        await status_msg.edit_text("⚙️ **Processing Media...**\n`[4/4]` Uploading gallery to cloud servers...")
+        await status_msg.edit_text("⚙️ **Processing Media...**\n`[3/3]` Uploading gallery to cloud servers...")
         gallery_link = await upload_to_telegraph(image_paths, f"Screenshots: {file_name[:50]}")
         return gallery_link
         
     finally:
-        # 🧹 5. CRITICAL PURGE: Delete all files instantly
-        if os.path.exists(video_path):
-            os.remove(video_path)
         for img in [os.path.join(temp_dir, f) for f in os.listdir(temp_dir) if unique_run_id in f]:
             if os.path.exists(img):
                 os.remove(img)
@@ -172,7 +218,6 @@ async def generate_watermarked_screenshots(client: Client, status_msg, file_id: 
 # ==========================================
 
 def get_initial_media_markup(file_unique_id: str) -> list:
-    """Returns the base buttons to append to your delivered file message."""
     return [
         [
             InlineKeyboardButton("🖼️ Screenshots", callback_data=f"med_ss_flow:{file_unique_id}"),
@@ -181,11 +226,9 @@ def get_initial_media_markup(file_unique_id: str) -> list:
     ]
 
 def get_dynamic_media_markup(chat_id: int, message_id: int, file_unique_id: str) -> InlineKeyboardMarkup:
-    """Intelligently rebuilds the buttons based on what is currently processing or completed."""
     state_key = f"{chat_id}_{message_id}"
     state = MEDIA_STATE.get(state_key, {"ss_url": None, "spl_url": None, "ss_proc": False, "spl_proc": False})
     
-    # 1. Evaluate Screenshot Button State
     if state["ss_url"]:
         btn_ss = InlineKeyboardButton("🔗 Watch Screenshots", url=state["ss_url"])
     elif state["ss_proc"]:
@@ -193,7 +236,6 @@ def get_dynamic_media_markup(chat_id: int, message_id: int, file_unique_id: str)
     else:
         btn_ss = InlineKeyboardButton("🖼️ Screenshots", callback_data=f"med_ss_flow:{file_unique_id}")
         
-    # 2. Evaluate Sample Video Button State
     if state["spl_url"]:
         btn_spl = InlineKeyboardButton("🔗 Watch Sample", url=state["spl_url"])
     elif state["spl_proc"]:
@@ -204,7 +246,6 @@ def get_dynamic_media_markup(chat_id: int, message_id: int, file_unique_id: str)
     return InlineKeyboardMarkup([[btn_ss, btn_spl]])
 
 def get_screenshot_selection_markup(file_unique_id: str) -> InlineKeyboardMarkup:
-    """Generates selection buttons 1 to 10 for screenshots."""
     buttons = [
         [InlineKeyboardButton(str(i), callback_data=f"med_ss_req:{i}:{file_unique_id}") for i in range(1, 6)],
         [InlineKeyboardButton(str(i), callback_data=f"med_ss_req:{i}:{file_unique_id}") for i in range(6, 11)],
@@ -213,7 +254,6 @@ def get_screenshot_selection_markup(file_unique_id: str) -> InlineKeyboardMarkup
     return InlineKeyboardMarkup(buttons)
 
 def get_sample_selection_markup(file_unique_id: str) -> InlineKeyboardMarkup:
-    """Generates options for sample video duration."""
     buttons = [
         [
             InlineKeyboardButton("15s", callback_data=f"med_spl_req:15:{file_unique_id}"),
@@ -247,8 +287,6 @@ async def handle_ui_revert(client: Client, callback: CallbackQuery):
     file_unique_id = callback.matches[0].group(1)
     chat_id = callback.message.chat.id
     msg_id = callback.message.id
-    
-    # Intelligently reverts back to whatever state the buttons were in before clicking
     await callback.message.edit_reply_markup(reply_markup=get_dynamic_media_markup(chat_id, msg_id, file_unique_id))
     await callback.answer("Cancelled Operation")
 
@@ -270,15 +308,12 @@ async def handle_screenshot_request(client: Client, callback: CallbackQuery):
     msg_id = callback.message.id
     state_key = f"{chat_id}_{msg_id}"
     
-    # 1. Initialize state and mark as processing
     if state_key not in MEDIA_STATE:
         MEDIA_STATE[state_key] = {"ss_url": None, "spl_url": None, "ss_proc": False, "spl_proc": False}
     MEDIA_STATE[state_key]["ss_proc"] = True
     
-    # 2. Update the original message buttons instantly
     await callback.message.edit_reply_markup(reply_markup=get_dynamic_media_markup(chat_id, msg_id, file_unique_id))
     
-    # 3. Add to queue and send private status update
     current_queue_size += 1
     queue_position = current_queue_size
     status_msg = await callback.message.reply_text(
@@ -286,13 +321,9 @@ async def handle_screenshot_request(client: Client, callback: CallbackQuery):
     )
     await callback.answer("Added to queue!", show_alert=False)
     
-    # 4. 🛑 THE BOTTLENECK (Wait in line here)
     async with media_semaphore:
         current_queue_size -= 1
         
-        # ----------------------------------------------------
-        # THE PHASE 3 INTEGRATION
-        # ----------------------------------------------------
         file_data = await get_file_by_unique_id(file_unique_id)
         if not file_data:
             await status_msg.edit_text("❌ **Error:** Could not locate the raw file in the database.")
@@ -302,10 +333,10 @@ async def handle_screenshot_request(client: Client, callback: CallbackQuery):
             
         actual_file_id = file_data.get("file_id")
         movie_title = file_data.get("title", "Unknown Movie")
+        file_size_bytes = file_data.get("size", 0)
         
         try:
-            # Boot up the heavy FFmpeg engine!
-            gallery_url = await generate_watermarked_screenshots(client, status_msg, actual_file_id, num_images, movie_title)
+            gallery_url = await generate_watermarked_screenshots(client, status_msg, actual_file_id, num_images, movie_title, file_size_bytes)
             
             if gallery_url:
                 MEDIA_STATE[state_key]["ss_url"] = gallery_url
@@ -317,13 +348,10 @@ async def handle_screenshot_request(client: Client, callback: CallbackQuery):
             logger.error(f"FFmpeg Generation Error: {e}")
             await status_msg.edit_text("❌ **Engine Error:** The media processor encountered a fatal error.")
             MEDIA_STATE[state_key]["ss_proc"] = False
-        # ----------------------------------------------------
         
-        # 5. Execution Finished: Update State & Buttons
         MEDIA_STATE[state_key]["ss_proc"] = False
         await callback.message.edit_reply_markup(reply_markup=get_dynamic_media_markup(chat_id, msg_id, file_unique_id))
         
-        # Clean up the status message
         await asyncio.sleep(2)
         try:
             await status_msg.delete()
@@ -357,12 +385,8 @@ async def handle_sample_request(client: Client, callback: CallbackQuery):
         current_queue_size -= 1
         await status_msg.edit_text(f"⚙️ **Processing Media...**\nExtracting a {duration}s sample clip now.")
         
-        # ----------------------------------------------------
-        # TODO: PHASE 3 - Sample Video FFmpeg Extraction
-        # ----------------------------------------------------
         await asyncio.sleep(3) # Temporary mock delay for Sample Video
         mock_url = "https://graph.org/AutoFilter-Sample-Mock-07-12"
-        # ----------------------------------------------------
         
         MEDIA_STATE[state_key]["spl_proc"] = False
         MEDIA_STATE[state_key]["spl_url"] = mock_url
