@@ -15,17 +15,17 @@ from database.multi_db import db
 
 logger = logging.getLogger(__name__)
 
-# ==========================================
-# 🚦 ENGINE STATE & CONCURRENCY CONTROLS
-# ==========================================
 MAX_CONCURRENT_JOBS = 2
 media_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
 current_queue_size = 0  
 MEDIA_STATE = {}
 
-# ==========================================
-# 🚀 PHASE 4: INTERNAL STREAMING SERVER
-# ==========================================
+async def get_file_by_unique_id(unique_id: str):
+    """Searches all database collections for the full file data using the short ID."""
+    for coll in db.collections:
+        doc = await coll.find_one({"file_unique_id": unique_id})
+        if doc: return doc
+    return None
 
 class LocalStreamer:
     def __init__(self, client):
