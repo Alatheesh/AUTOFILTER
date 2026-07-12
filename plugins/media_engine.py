@@ -90,10 +90,37 @@ async def generate_watermarked_screenshots(client: Client, status_msg, file_id: 
     unique_run_id = str(uuid.uuid4())[:8]
     video_path = os.path.join(temp_dir, f"vid_{unique_run_id}.mkv")
     
+    # ⏱️ State tracker for the progress bar to prevent FloodWaits
+    last_update_time = [time.time()]
+    
+    async def download_progress(current, total):
+        now = time.time()
+        if now - last_update_time[0] > 3: # Edit message every 3 seconds
+            last_update_time[0] = now
+            percentage = current * 100 / total if total else 0
+            filled = int(percentage / 10)
+            bar = "█" * filled + "░" * (10 - filled)
+            curr_mb = current / (1024 * 1024)
+            tot_mb = total / (1024 * 1024)
+            
+            try:
+                await status_msg.edit_text(
+                    f"⚙️ **Processing Media...**\n"
+                    f"`[1/4]` Downloading stream to secure server buffer...\n\n"
+                    f"{bar} `{percentage:.1f}%`\n"
+                    f"`{curr_mb:.2f} MB / {tot_mb:.2f} MB`"
+                )
+            except Exception:
+                pass
+
     try:
-        # 1. Download the target file safely
-        await status_msg.edit_text("⚙️ **Processing Media...**\n`[1/4]` Downloading stream to secure server buffer...")
-        await client.download_media(message=file_id, file_name=video_path)
+        # 1. Download the target file safely (NOW WITH PROGRESS BAR)
+        await status_msg.edit_text("⚙️ **Processing Media...**\n`[1/4]` Initializing secure download stream...")
+        await client.download_media(
+            message=file_id, 
+            file_name=video_path, 
+            progress=download_progress
+        )
         
         # 2. Get video duration using ffprobe
         await status_msg.edit_text("⚙️ **Processing Media...**\n`[2/4]` Analyzing video matrix...")
@@ -114,7 +141,6 @@ async def generate_watermarked_screenshots(client: Client, status_msg, file_id: 
             timestamp = int(interval * i)
             img_path = os.path.join(temp_dir, f"frame_{unique_run_id}_{i}.jpg")
             
-            # The elite FFmpeg rendering command with timestamps and your specific watermark
             ff_cmd = (
                 f'ffmpeg -y -ss {timestamp} -i "{video_path}" -vframes 1 -q:v 2 '
                 f'-vf "drawtext=text=\'@llathu63035\':x=20:y=h-th-20:fontsize=36:fontcolor=white@0.9:box=1:boxcolor=black@0.6, '
@@ -133,7 +159,7 @@ async def generate_watermarked_screenshots(client: Client, status_msg, file_id: 
         return gallery_link
         
     finally:
-        # 🧹 5. CRITICAL PURGE: Delete all files instantly to protect Hugging Face storage
+        # 🧹 5. CRITICAL PURGE: Delete all files instantly
         if os.path.exists(video_path):
             os.remove(video_path)
         for img in [os.path.join(temp_dir, f) for f in os.listdir(temp_dir) if unique_run_id in f]:
