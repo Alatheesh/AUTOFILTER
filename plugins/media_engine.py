@@ -1,19 +1,17 @@
 import os
 import time
 import uuid
-import json
 import asyncio
 import aiohttp
 import re
 import logging
 from aiohttp import web
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, InputMediaPhoto
 from pyrogram.file_id import FileId
 from pyrogram.raw.functions.upload import GetFile
 from pyrogram.raw.types import InputDocumentFileLocation
 from database.multi_db import db
-from pyrogram.types import InputMediaPhoto
 
 logger = logging.getLogger(__name__)
 
@@ -69,12 +67,11 @@ class LocalStreamer:
         resp = web.StreamResponse(status=206 if range_header else 200, headers=headers)
         await resp.prepare(request)
         
-        chunk_size = 1024 * 1024 # Telegram chunk size is 1MB
+        chunk_size = 1024 * 1024 
         start_chunk = start // chunk_size
         end_chunk = end // chunk_size
         
         try:
-            # Decode file_id to Pyrogram Raw Location
             file_id_obj = FileId.decode(file_id)
             location = InputDocumentFileLocation(
                 id=file_id_obj.media_id,
@@ -83,7 +80,6 @@ class LocalStreamer:
                 thumb_size=""
             )
             
-            # Fetch only the EXACT bytes FFmpeg asks for
             for chunk_idx in range(start_chunk, end_chunk + 1):
                 offset = chunk_idx * chunk_size
                 result = await self.client.invoke(GetFile(
@@ -101,8 +97,8 @@ class LocalStreamer:
                     chunk_data = chunk_data[: (end % chunk_size) + 1]
                     
                 await resp.write(chunk_data)
-        except Exception as e:
-            pass # Suppress broken pipe errors when FFmpeg finishes reading
+        except Exception:
+            pass 
             
         return resp
 
@@ -116,8 +112,53 @@ async def ensure_streamer_running(client):
 
 
 # ==========================================
-# ⚙️ PHASE 3: FFMPEG & CLOUD UPLOAD ENGINE
+# 🌐 THE KEYLESS FALLBACK UPLOADER
 # ==========================================
+
+async def upload_file_waterfall(file_path: str, is_video: bool = False) -> str:
+    """Attempts to upload to multiple keyless public APIs. Returns URL on success."""
+    file_name = os.path.basename(file_path)
+    if not os.path.exists(file_path) or os.path.getsize(file_path) < 1000:
+        return None
+        
+    with open(file_path, 'rb') as f:
+        file_data = f.read()
+
+    async with aiohttp.ClientSession() as session:
+        # 🚀 ATTEMPT 1: Catbox.moe (Images) / Litterbox (Video)
+        try:
+            form = aiohttp.FormData()
+            if is_video:
+                form.add_field('reqtype', 'fileupload')
+                form.add_field('time', '72h')
+                form.add_field('fileToUpload', file_data, filename=file_name)
+                url = 'https://litterbox.catbox.moe/resources/internals/api.php'
+            else:
+                form.add_field('reqtype', 'fileupload')
+                form.add_field('fileToUpload', file_data, filename=file_name)
+                url = 'https://catbox.moe/user/api.php'
+                
+            async with session.post(url, data=form, timeout=120) as resp:
+                if resp.status == 200:
+                    text = await resp.text()
+                    if text.startswith("http"):
+                        return text.strip()
+        except Exception as e:
+            logger.warning(f"Catbox Upload Error: {e}")
+
+        # 🚀 ATTEMPT 2: envs.sh (Files up to 512MB)
+        try:
+            form = aiohttp.FormData()
+            form.add_field('file', file_data, filename=file_name)
+            async with session.post('https://envs.sh', data=form, timeout=120) as resp:
+                if resp.status == 200:
+                    text = await resp.text()
+                    if text.startswith("http"):
+                        return text.strip()
+        except Exception as e:
+            logger.warning(f"envs.sh Upload Error: {e}")
+
+    return None
 
 async def get_file_by_unique_id(unique_id: str):
     for coll in db.collections:
@@ -125,64 +166,9 @@ async def get_file_by_unique_id(unique_id: str):
         if doc: return doc
     return None
 
-async def upload_to_telegraph(image_paths: list, title: str) -> str:
-    """Uploads local images to Telegraph and returns a graph.org gallery link."""
-    async with aiohttp.ClientSession() as session:
-        uploaded_urls = []
-        
-        for img_path in image_paths:
-            # 🚀 SAFEGUARD 1: Make sure the file exists and is actually a real image (> 5KB)
-            if not os.path.exists(img_path) or os.path.getsize(img_path) < 5000:
-                logger.error(f"❌ Skipping broken or empty frame: {img_path}")
-                continue
-                
-            # 🚀 SAFEGUARD 2: Read the raw bytes into memory so aiohttp doesn't drop them
-            with open(img_path, 'rb') as f:
-                file_data = f.read()
-                
-            form = aiohttp.FormData()
-            form.add_field('file', file_data, filename='frame.jpg', content_type='image/jpeg')
-            
-            async with session.post('https://telegra.ph/upload', data=form) as resp:
-                if resp.status == 200:
-                    res_json = await resp.json()
-                    if isinstance(res_json, list) and 'src' in res_json[0]:
-                        uploaded_urls.append(f"https://telegra.ph{res_json[0]['src']}")
-                    else:
-                        logger.error(f"❌ Telegraph Format Error: {res_json}")
-                else:
-                    # 🚀 SAFEGUARD 3: Catch Telegraph's exact error message!
-                    err_text = await resp.text()
-                    logger.error(f"❌ Telegraph Upload Failed (Status {resp.status}): {err_text}")
-        
-        if not uploaded_urls:
-            return None
-            
-        # Construct the Telegraph Page HTML
-        html_content = ""
-        for url in uploaded_urls:
-            html_content += f'<img src="{url}"/><br>'
-            
-        html_content += f'<br><br><b>Credits:</b> @llathu63035<br><b>Developer:</b> @TG_LATHEESH'
-
-        # Create a temporary Telegraph account and publish the page
-        async with session.get('https://api.telegra.ph/createAccount?short_name=AutoFilter&author_name=Lathu') as resp:
-            account_data = (await resp.json())['result']
-            access_token = account_data['access_token']
-            
-        payload = {
-            'access_token': access_token,
-            'title': title[:250],
-            'content': f'[{{"tag":"p","children":[{{"tag":"span","children":["{html_content}"]}}]}}]',
-            'return_content': 'false'
-        }
-        
-        async with session.post('https://api.telegra.ph/createPage', data=payload) as resp:
-            page_data = (await resp.json())['result']
-            
-            # 🚀 THE MAGIC SWAP: Bypassing the ISP Block!
-            clean_url = page_data['url'].replace("telegra.ph", "graph.org")
-            return clean_url
+# ==========================================
+# ⚙️ PHASE 3: FFMPEG MEDIA ENGINES
+# ==========================================
 
 async def generate_watermarked_screenshots(client: Client, status_msg, file_id: str, num_images: int, file_name: str, file_size: int, target_chat_id: int, target_msg_id: int) -> str:
     await ensure_streamer_running(client)
@@ -190,7 +176,6 @@ async def generate_watermarked_screenshots(client: Client, status_msg, file_id: 
     temp_dir = "/tmp/autofilter_media"
     os.makedirs(temp_dir, exist_ok=True)
     unique_run_id = str(uuid.uuid4())[:8]
-    
     video_url = f"http://127.0.0.1:8080/stream/{file_id}?size={file_size}"
     
     try:
@@ -208,13 +193,18 @@ async def generate_watermarked_screenshots(client: Client, status_msg, file_id: 
         image_paths = []
         interval = duration / (num_images + 1)
         
+        # Pointing explicitly to the font we installed in the Dockerfile
+        font_path = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+        
         for i in range(1, num_images + 1):
             timestamp = int(interval * i)
             img_path = os.path.join(temp_dir, f"frame_{unique_run_id}_{i}.jpg")
             
-            # Using the fast command without the font dependency to ensure it never crashes
             ff_cmd = (
-                f'ffmpeg -y -ss {timestamp} -i "{video_url}" -vframes 1 -q:v 2 "{img_path}"'
+                f'ffmpeg -y -ss {timestamp} -i "{video_url}" -vframes 1 -q:v 2 '
+                f'-vf "drawtext=fontfile={font_path}:text=\'@llathu63035\':x=20:y=h-th-20:fontsize=36:fontcolor=white@0.9:box=1:boxcolor=black@0.6, '
+                f'drawtext=fontfile={font_path}:text=\'%{{pts\\:hms}}\':x=w-tw-20:y=h-th-20:fontsize=36:fontcolor=white@0.9:box=1:boxcolor=black@0.6" '
+                f'"{img_path}"'
             )
             process = await asyncio.create_subprocess_shell(ff_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
             await process.communicate()
@@ -222,26 +212,98 @@ async def generate_watermarked_screenshots(client: Client, status_msg, file_id: 
             if os.path.exists(img_path) and os.path.getsize(img_path) > 0:
                 image_paths.append(img_path)
                 
-        # 🚀 THE NEW NATIVE TELEGRAM UPLOADER
-        await status_msg.edit_text("⚙️ **Processing Media...**\n`[3/3]` Uploading high-res album directly to your chat...")
-        
+        # 🌐 ATTEMPT 1 & 2: External Server Uploads
+        await status_msg.edit_text("⚙️ **Processing Media...**\n`[3/3]` Uploading frames to external servers...")
+        uploaded_urls = []
+        for img in image_paths:
+            url = await upload_file_waterfall(img, is_video=False)
+            if url:
+                uploaded_urls.append(url)
+                
+        if len(uploaded_urls) == len(image_paths) and len(image_paths) > 0:
+            msg_text = f"🖼 **{file_name[:80]}**\n\n"
+            for idx, url in enumerate(uploaded_urls):
+                msg_text += f"📸 [Screenshot {idx+1}]({url})\n"
+            msg_text += "\n_Screenshots Generated by @suchitha1bot_"
+            
+            await client.send_message(chat_id=target_chat_id, text=msg_text, reply_to_message_id=target_msg_id, disable_web_page_preview=False)
+            return "SENT"
+            
+        # 🌐 ATTEMPT 3: Native Fallback (If External APIs fail)
+        await status_msg.edit_text("⚠️ **External Servers Failed.**\n`[3/3]` Falling back to Native Secure Album...")
         if image_paths:
             media_group = []
             for idx, img in enumerate(image_paths):
-                # Add a caption to the very first image in the album
-                caption = f"🖼 **{file_name[:80]}**\n_Screenshots Generated by Bot_" if idx == 0 else ""
+                caption = f"🖼 **{file_name[:80]}**\n_Screenshots Generated by @suchitha1bot_" if idx == 0 else ""
                 media_group.append(InputMediaPhoto(media=img, caption=caption))
             
-            # Send the album directly as a reply to the requested file!
             await client.send_media_group(chat_id=target_chat_id, media=media_group, reply_to_message_id=target_msg_id)
-            return "SENT_NATIVELY"
-        else:
-            return None
+            return "SENT"
+            
+        return None
             
     finally:
         for img in [os.path.join(temp_dir, f) for f in os.listdir(temp_dir) if unique_run_id in f]:
             if os.path.exists(img):
                 os.remove(img)
+
+
+async def generate_sample_video(client: Client, status_msg, file_id: str, sample_duration: int, file_name: str, file_size: int, target_chat_id: int, target_msg_id: int) -> str:
+    await ensure_streamer_running(client)
+    
+    temp_dir = "/tmp/autofilter_media"
+    os.makedirs(temp_dir, exist_ok=True)
+    unique_run_id = str(uuid.uuid4())[:8]
+    video_url = f"http://127.0.0.1:8080/stream/{file_id}?size={file_size}"
+    out_video_path = os.path.join(temp_dir, f"sample_{unique_run_id}.mp4")
+    
+    try:
+        await status_msg.edit_text("⚙️ **Processing Media...**\n`[1/3]` Analyzing stream timeline...")
+        
+        probe_cmd = f'ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "{video_url}"'
+        proc = await asyncio.create_subprocess_shell(probe_cmd, stdout=asyncio.subprocess.PIPE)
+        stdout, _ = await proc.communicate()
+        try:
+            total_duration = float(stdout.decode().strip())
+        except Exception:
+            total_duration = 120.0
+            
+        start_time = max(0, int((total_duration / 2) - (sample_duration / 2)))
+        font_path = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+        
+        await status_msg.edit_text(f"⚙️ **Processing Media...**\n`[2/3]` Rendering {sample_duration}s watermarked video clip...\n_(This takes a moment)_")
+        
+        ff_cmd = (
+            f'ffmpeg -y -ss {start_time} -i "{video_url}" -t {sample_duration} '
+            f'-vf "drawtext=fontfile={font_path}:text=\'@llathu63035\':x=15:y=h-th-15:fontsize=24:fontcolor=white@0.9:box=1:boxcolor=black@0.6" '
+            f'-c:v libx264 -preset veryfast -crf 28 -c:a aac -b:a 128k "{out_video_path}"'
+        )
+        process = await asyncio.create_subprocess_shell(ff_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        await process.communicate()
+        
+        if os.path.exists(out_video_path) and os.path.getsize(out_video_path) > 10000:
+            
+            # 🌐 ATTEMPT 1 & 2: External Server Uploads
+            await status_msg.edit_text("⚙️ **Processing Media...**\n`[3/3]` Uploading video to external servers...")
+            video_url = await upload_file_waterfall(out_video_path, is_video=True)
+            
+            if video_url:
+                msg_text = f"🎬 **Sample Video ({sample_duration}s)**\n📁 {file_name[:80]}\n\n🔗 [Watch/Download Video]({video_url})\n_Generated by @suchitha1bot_"
+                await client.send_message(chat_id=target_chat_id, text=msg_text, reply_to_message_id=target_msg_id)
+                return "SENT"
+                
+            # 🌐 ATTEMPT 3: Native Fallback (If External APIs fail)
+            await status_msg.edit_text("⚠️ **External Servers Failed.**\n`[3/3]` Falling back to Native Video Upload...")
+            caption = f"🎬 **Sample Video ({sample_duration}s)**\n📁 {file_name[:80]}"
+            await client.send_video(chat_id=target_chat_id, video=out_video_path, caption=caption, reply_to_message_id=target_msg_id, supports_streaming=True)
+            return "SENT"
+            
+        return None
+            
+    finally:
+        if os.path.exists(out_video_path):
+            os.remove(out_video_path)
+
 
 # ==========================================
 # 🛠️ UI COMPONENT GENERATORS
@@ -259,17 +321,15 @@ def get_dynamic_media_markup(chat_id: int, message_id: int, file_unique_id: str)
     state_key = f"{chat_id}_{message_id}"
     state = MEDIA_STATE.get(state_key, {"ss_url": None, "spl_url": None, "ss_proc": False, "spl_proc": False})
     
-    if state["ss_url"] == "SENT_NATIVELY":
+    if state["ss_url"] == "SENT":
         btn_ss = InlineKeyboardButton("✅ Screenshots Sent", callback_data="ignore_spam")
-    elif state["ss_url"]:
-        btn_ss = InlineKeyboardButton("🔗 Watch Screenshots", url=state["ss_url"])
     elif state["ss_proc"]:
         btn_ss = InlineKeyboardButton("⏳ Processing SS...", callback_data="ignore_spam")
     else:
         btn_ss = InlineKeyboardButton("🖼️ Screenshots", callback_data=f"med_ss_flow:{file_unique_id}")
         
-    if state["spl_url"]:
-        btn_spl = InlineKeyboardButton("🔗 Watch Sample", url=state["spl_url"])
+    if state["spl_url"] == "SENT":
+        btn_spl = InlineKeyboardButton("✅ Sample Sent", callback_data="ignore_spam")
     elif state["spl_proc"]:
         btn_spl = InlineKeyboardButton("⏳ Processing Sample...", callback_data="ignore_spam")
     else:
@@ -358,7 +418,7 @@ async def handle_screenshot_request(client: Client, callback: CallbackQuery):
         
         file_data = await get_file_by_unique_id(file_unique_id)
         if not file_data:
-            await status_msg.edit_text("❌ **Error:** Could not locate the raw file in the database.")
+            await status_msg.edit_text("❌ **Error:** Could not locate the raw file.")
             MEDIA_STATE[state_key]["ss_proc"] = False
             await callback.message.edit_reply_markup(reply_markup=get_dynamic_media_markup(chat_id, msg_id, file_unique_id))
             return
@@ -368,16 +428,12 @@ async def handle_screenshot_request(client: Client, callback: CallbackQuery):
         file_size_bytes = file_data.get("size", 0)
         
         try:
-            # 🚀 CHANGE 1: We added chat_id and msg_id to the very end of this call!
-            gallery_result = await generate_watermarked_screenshots(
-                client, status_msg, actual_file_id, num_images, movie_title, file_size_bytes, chat_id, msg_id
-            )
+            gallery_result = await generate_watermarked_screenshots(client, status_msg, actual_file_id, num_images, movie_title, file_size_bytes, chat_id, msg_id)
             
-            # 🚀 CHANGE 2: Check for the native success message instead of a URL
-            if gallery_result == "SENT_NATIVELY":
-                MEDIA_STATE[state_key]["ss_url"] = "SENT_NATIVELY"
+            if gallery_result == "SENT":
+                MEDIA_STATE[state_key]["ss_url"] = "SENT"
             else:
-                await status_msg.edit_text("⚠️ **Upload Failed:** Could not generate or send the frames.")
+                await status_msg.edit_text("⚠️ **Upload Failed:** Could not generate or send frames.")
                 MEDIA_STATE[state_key]["ss_proc"] = False
                 
         except Exception as e:
@@ -419,13 +475,33 @@ async def handle_sample_request(client: Client, callback: CallbackQuery):
     
     async with media_semaphore:
         current_queue_size -= 1
-        await status_msg.edit_text(f"⚙️ **Processing Media...**\nExtracting a {duration}s sample clip now.")
         
-        await asyncio.sleep(3) # Temporary mock delay for Sample Video
-        mock_url = "https://graph.org/AutoFilter-Sample-Mock-07-12"
+        file_data = await get_file_by_unique_id(file_unique_id)
+        if not file_data:
+            await status_msg.edit_text("❌ **Error:** Could not locate the raw file.")
+            MEDIA_STATE[state_key]["spl_proc"] = False
+            await callback.message.edit_reply_markup(reply_markup=get_dynamic_media_markup(chat_id, msg_id, file_unique_id))
+            return
+            
+        actual_file_id = file_data.get("file_id")
+        movie_title = file_data.get("title", "Unknown Movie")
+        file_size_bytes = file_data.get("size", 0)
+        
+        try:
+            sample_result = await generate_sample_video(client, status_msg, actual_file_id, duration, movie_title, file_size_bytes, chat_id, msg_id)
+            
+            if sample_result == "SENT":
+                MEDIA_STATE[state_key]["spl_url"] = "SENT" 
+            else:
+                await status_msg.edit_text("⚠️ **Upload Failed:** Could not extract sample clip.")
+                MEDIA_STATE[state_key]["spl_proc"] = False
+                
+        except Exception as e:
+            logger.error(f"Sample Video Error: {e}")
+            await status_msg.edit_text("❌ **Engine Error:** Failed to process the sample.")
+            MEDIA_STATE[state_key]["spl_proc"] = False
         
         MEDIA_STATE[state_key]["spl_proc"] = False
-        MEDIA_STATE[state_key]["spl_url"] = mock_url
         await callback.message.edit_reply_markup(reply_markup=get_dynamic_media_markup(chat_id, msg_id, file_unique_id))
         
         await asyncio.sleep(2)
