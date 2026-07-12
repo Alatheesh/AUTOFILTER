@@ -56,7 +56,7 @@ class MultiDB:
         # ==========================================
         # ⚙️ MULTI-SHARD CAPACITY CONSTANTS
         # ==========================================
-        self.MAX_FILES_PER_SHARD = 800000 
+        self.MAX_FILES_PER_SHARD = 700000 
         self.MAX_SHARD_CAPACITY_BYTES = 512 * 1024 * 1024
         # 160MB Constant for Atlas Free Tier system metrics (admin/local DB overhead)
         self.SYSTEM_OVERHEAD = 160 * 1024 * 1024 
@@ -293,20 +293,25 @@ class MultiDB:
             await self.groups.update_one({"chat_id": chat_id}, {"$set": {"custom_caption": None}}, upsert=True)
 
     # ==========================================
-    # ⚙️ WORKER 1: AUTO-ROUTING LOAD BALANCER
+    # ⚙️ WORKER 1: SEQUENTIAL WATERFALL ROUTER
     # ==========================================
     async def insert_file(self, file_data: Dict[str, Any], shard_index: Optional[int] = None) -> bool:
         if not self.collections: return False
         
-        # Smart load balancer routing to stay under 800,000 files per shard
-        counts = [await coll.estimated_document_count() for coll in self.collections]
-        available_shards = [(idx, count) for idx, count in enumerate(counts) if count < self.MAX_FILES_PER_SHARD]
+        target_shard = -1
         
-        if not available_shards:
-            logger.warning("🚨 All MongoDB Shards have hit 800k limit! Defaulting to emptiest shard.")
-            target_shard = counts.index(min(counts))
-        else:
-            target_shard = min(available_shards, key=lambda x: x[1])[0]
+        # Waterfall Logic: Iterate through shards in order.
+        # Find the first shard that is strictly below the 7 Lakh limit and fill it.
+        for idx, coll in enumerate(self.collections):
+            count = await coll.estimated_document_count()
+            if count < self.MAX_FILES_PER_SHARD:
+                target_shard = idx
+                break
+        
+        # Fallback: If all shards are completely full (>= 700,000), force it into the last shard.
+        if target_shard == -1:
+            logger.warning("🚨 All MongoDB Shards have hit the 7 Lakh limit! Defaulting to the last shard.")
+            target_shard = len(self.collections) - 1
             
         try:
             await self.collections[target_shard].insert_one(file_data)
