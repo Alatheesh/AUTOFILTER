@@ -238,7 +238,11 @@ async def generate_watermarked_screenshots(client: Client, status_msg, file_id: 
             urls_str = ",".join(uploaded_urls)
             encoded_data = base64.urlsafe_b64encode(urls_str.encode()).decode()
             encoded_title = urllib.parse.quote(file_name[:100])
-            gallery_link = f"{GITHUB_GALLERY_URL}?title={encoded_title}&data={encoded_data}"
+            
+            # 🚀 NEW: Generate a unique timestamp to bust Telegram's cache
+            cache_buster = int(time.time())
+            gallery_link = f"{GITHUB_GALLERY_URL}?title={encoded_title}&data={encoded_data}&cb={cache_buster}"
+            
             return gallery_link
             
         # ATTEMPT 2: Native Fallback 
@@ -300,7 +304,11 @@ async def generate_sample_video(client: Client, status_msg, file_id: str, sample
             
             if raw_video_url:
                 encoded_title = urllib.parse.quote(file_name[:100])
-                player_link = f"{GITHUB_GALLERY_URL}?title={encoded_title}&video={urllib.parse.quote(raw_video_url)}"
+                
+                # 🚀 NEW: Generate a unique timestamp to bust Telegram's cache
+                cache_buster = int(time.time())
+                player_link = f"{GITHUB_GALLERY_URL}?title={encoded_title}&video={urllib.parse.quote(raw_video_url)}&cb={cache_buster}"
+                
                 return player_link 
                 
             # ATTEMPT 2: Native Fallback
