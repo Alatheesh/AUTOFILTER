@@ -1,4 +1,9 @@
-import math
+import sys
+import os
+
+# 🚀 Add the parent directory (the root /app/ folder) to the Python path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
 from fonts import apply_font
