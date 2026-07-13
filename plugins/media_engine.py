@@ -78,36 +78,12 @@ class LocalStreamer:
         resp = web.StreamResponse(status=206 if range_header else 200, headers=headers)
         await resp.prepare(request)
         
-        chunk_size = 1024 * 1024 
-        start_chunk = start // chunk_size
-        end_chunk = end // chunk_size
-        
+        # 🚀 THE FIX: We now use Pyrogram's native stream_media. 
+        # This automatically handles DC1/DC2/DC3/DC4 migrations instantly!
         try:
-            file_id_obj = FileId.decode(file_id)
-            location = InputDocumentFileLocation(
-                id=file_id_obj.media_id,
-                access_hash=file_id_obj.access_hash,
-                file_reference=file_id_obj.file_reference,
-                thumb_size=""
-            )
-            
-            for chunk_idx in range(start_chunk, end_chunk + 1):
-                offset = chunk_idx * chunk_size
-                result = await self.client.invoke(GetFile(
-                    location=location,
-                    offset=offset,
-                    limit=chunk_size
-                ))
-                
-                chunk_data = result.bytes
-                if chunk_idx == start_chunk and chunk_idx == end_chunk:
-                    chunk_data = chunk_data[start % chunk_size : (end % chunk_size) + 1]
-                elif chunk_idx == start_chunk:
-                    chunk_data = chunk_data[start % chunk_size :]
-                elif chunk_idx == end_chunk:
-                    chunk_data = chunk_data[: (end % chunk_size) + 1]
-                    
-                await resp.write(chunk_data)
+            limit = end - start + 1
+            async for chunk in self.client.stream_media(message=file_id, offset=start, limit=limit):
+                await resp.write(chunk)
         except Exception as e:
             logger.error(f"⚠️ Streamer Disconnected: {e}") 
             
