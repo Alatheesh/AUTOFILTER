@@ -108,8 +108,8 @@ class LocalStreamer:
                     chunk_data = chunk_data[: (end % chunk_size) + 1]
                     
                 await resp.write(chunk_data)
-        except Exception:
-            pass 
+        except Exception as e:
+            logger.error(f"⚠️ Streamer Disconnected: {e}") 
             
         return resp
 
@@ -199,7 +199,7 @@ async def generate_watermarked_screenshots(client: Client, status_msg, file_id: 
     try:
         await status_msg.edit_text("⚙️ **Processing Media...**\n`[1/3]` Connecting to live MTProto stream...")
         
-        probe_cmd = f'ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "{video_url}"'
+        probe_cmd = f'ffprobe -v error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "{video_url}"'
         proc = await asyncio.create_subprocess_shell(probe_cmd, stdout=asyncio.subprocess.PIPE)
         stdout, _ = await proc.communicate()
         try:
@@ -216,11 +216,11 @@ async def generate_watermarked_screenshots(client: Client, status_msg, file_id: 
             timestamp = int(interval * i)
             img_path = os.path.join(temp_dir, f"frame_{unique_run_id}_{i}.jpg")
             
-            # PERFECT TIMESTAMP LOGIC (Calculated accurately in Python)
+            # PERFECT TIMESTAMP LOGIC
             clean_time = time.strftime('%H:%M:%S', time.gmtime(timestamp)).replace(':', '\\:')
             
             ff_cmd = (
-                f'ffmpeg -y -ss {timestamp} -i "{video_url}" -vframes 1 -q:v 2 '
+                f'ffmpeg -y -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -ss {timestamp} -i "{video_url}" -vframes 1 -q:v 2 '
                 f'-vf "drawtext=fontfile={font_path}:text=\'@llathu63035\':x=10:y=h-th-10:fontsize=24:fontcolor=white@0.9:shadowcolor=black@0.8:shadowx=2:shadowy=2, '
                 f'drawtext=fontfile={font_path}:text=\'{clean_time}\':x=w-tw-10:y=h-th-10:fontsize=24:fontcolor=white@0.9:shadowcolor=black@0.8:shadowx=2:shadowy=2" '
                 f'"{img_path}"'
@@ -277,7 +277,7 @@ async def generate_sample_video(client: Client, status_msg, file_id: str, sample
     try:
         await status_msg.edit_text("⚙️ **Processing Media...**\n`[1/3]` Analyzing stream timeline...")
         
-        probe_cmd = f'ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "{video_url}"'
+        probe_cmd = f'ffprobe -v error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "{video_url}"'
         proc = await asyncio.create_subprocess_shell(probe_cmd, stdout=asyncio.subprocess.PIPE)
         stdout, _ = await proc.communicate()
         try:
@@ -291,7 +291,7 @@ async def generate_sample_video(client: Client, status_msg, file_id: str, sample
         await status_msg.edit_text(f"⚙️ **Processing Media...**\n`[2/3]` Rendering {sample_duration}s watermarked video clip...\n_(This takes a moment)_")
         
         ff_cmd = (
-            f'ffmpeg -y -ss {start_time} -i "{video_url}" -t {sample_duration} '
+            f'ffmpeg -y -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -ss {start_time} -i "{video_url}" -t {sample_duration} '
             f'-vf "drawtext=fontfile={font_path}:text=\'@llathu63035\':x=10:y=h-th-10:fontsize=16:fontcolor=white@0.9:shadowcolor=black@0.8:shadowx=2:shadowy=2" '
             f'-c:v libx264 -preset veryfast -crf 28 -c:a aac -b:a 128k "{out_video_path}"'
         )
