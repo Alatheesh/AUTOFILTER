@@ -193,30 +193,83 @@ async def generate_watermarked_screenshots(client: Client, status_msg, file_id: 
     video_url = f"http://127.0.0.1:8080/stream/{file_id}?size={file_size}"
     
     try:
-        await status_msg.edit_text("⚙️ **Processing Media...**\n`[1/3]` Connecting and extracting metadata...")
+        await status_msg.edit_text("⚙️ **Processing Media...**\n`[1/3]` Connecting and extracting deep metadata...")
         
-        # 🚀 NEW: Extracting Deep Metadata (Resolution, Duration) via FFprobe
+        # 🚀 ADVANCED METADATA EXTRACTOR
         probe_cmd = f'ffprobe -v quiet -print_format json -show_format -show_streams "{video_url}"'
         proc = await asyncio.create_subprocess_shell(probe_cmd, stdout=asyncio.subprocess.PIPE)
         stdout, _ = await proc.communicate()
         
-        duration = 120.0
+        total_duration = 120.0
         resolution = "Unknown"
+        vid_codec = "Unknown"
+        fps = "Unknown"
+        bitrate = "Unknown"
+        container = "Unknown"
+        audio_meta_list = []
+        
         try:
             data = json.loads(stdout.decode())
-            duration = float(data.get('format', {}).get('duration', 120.0))
+            format_info = data.get('format', {})
+            total_duration = float(format_info.get('duration', 120.0))
+            container = format_info.get('format_long_name', 'Unknown')
+            
+            if format_info.get('bit_rate'):
+                bitrate = f"{int(format_info.get('bit_rate')) // 1000} kbps"
+                
             for stream in data.get('streams', []):
-                if stream.get('codec_type') == 'video':
+                # Grab Video (Ignore the embedded Cover Art poster)
+                if stream.get('codec_type') == 'video' and stream.get('disposition', {}).get('attached_pic', 0) == 0:
                     resolution = f"{stream.get('width')}x{stream.get('height')}"
+                    vid_codec = stream.get('codec_name', '').upper()
+                    fps_fraction = stream.get('r_frame_rate', '0/0')
+                    if '/' in fps_fraction:
+                        num, den = fps_fraction.split('/')
+                        if den != '0':
+                            fps = f"{round(int(num)/int(den), 2)} fps"
+                            
+                # Grab Audio & Scrub Spam
+                elif stream.get('codec_type') == 'audio':
+                    a_codec = stream.get('codec_name', '').upper()
+                    tags = stream.get('tags', {})
+                    a_lang = tags.get('language', 'und').upper()
+                    a_title = tags.get('title', '')
+                    
+                    track_name = ""
+                    if a_lang != 'UND':
+                        track_name = a_lang
+                    elif a_title:
+                        # Regex scrubs out spam URLs
+                        clean_title = re.sub(r'http\S+|www\.\S+|\.com|\.in|\.bar|\.org', '', a_title, flags=re.IGNORECASE).replace('-', '').strip()
+                        track_name = clean_title if clean_title else f"Track {len(audio_meta_list)+1}"
+                    else:
+                        track_name = f"Track {len(audio_meta_list)+1}"
+                    
+                    audio_meta_list.append(f"• {track_name} ({a_codec})")
         except Exception:
             pass
             
-        # 🚀 Build the Metadata String
-        meta_str = f"File Name: {file_name}\nFile Size: {file_size / (1024*1024):.2f} MB\nResolution: {resolution}\nDuration: {int(duration // 60)} min {int(duration % 60)} sec"
+        if not audio_meta_list:
+            audio_meta_list = ["• Default System Audio"]
+            
+        # 🚀 BUILD THE FULL REPORT
+        meta_str = (
+            f"🎬 FILE INFORMATION\n"
+            f"Name: {file_name}\n"
+            f"Size: {file_size / (1024*1024):.2f} MB\n"
+            f"Format: {container}\n"
+            f"Bitrate: {bitrate}\n"
+            f"Duration: {int(total_duration // 60)}m {int(total_duration % 60)}s\n\n"
+            f"📺 VIDEO STREAM\n"
+            f"Resolution: {resolution}\n"
+            f"Codec: {vid_codec}\n"
+            f"Framerate: {fps}\n\n"
+            f"🔊 AUDIO STREAMS\n" + "\n".join(audio_meta_list)
+        )
             
         await status_msg.edit_text(f"⚙️ **Processing Media...**\n`[2/3]` Rendering {num_images} watermarked frames instantly...")
         image_paths = []
-        interval = duration / (num_images + 1)
+        interval = total_duration / (num_images + 1)
         font_path = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
         
         for i in range(1, num_images + 1):
@@ -248,7 +301,7 @@ async def generate_watermarked_screenshots(client: Client, status_msg, file_id: 
             encoded_data = base64.urlsafe_b64encode(urls_str.encode()).decode()
             encoded_title = urllib.parse.quote(file_name[:100])
             
-            # 🚀 Append Metadata Payload to URL
+            # Pack metadata into URL
             encoded_meta = base64.urlsafe_b64encode(meta_str.encode()).decode()
             cache_buster = int(time.time())
             
@@ -284,40 +337,81 @@ async def generate_sample_video(client: Client, status_msg, file_id: str, sample
     try:
         await status_msg.edit_text("⚙️ **Processing Media...**\n`[1/3]` Analyzing stream timeline & extracting audio tracks...")
         
-        # 🚀 NEW: Extracting Audio Tracks and Metadata via FFprobe
+        # 🚀 ADVANCED METADATA EXTRACTOR
         probe_cmd = f'ffprobe -v quiet -print_format json -show_format -show_streams "{video_url}"'
         proc = await asyncio.create_subprocess_shell(probe_cmd, stdout=asyncio.subprocess.PIPE)
         stdout, _ = await proc.communicate()
         
         total_duration = 120.0
         resolution = "Unknown"
+        vid_codec = "Unknown"
+        fps = "Unknown"
+        bitrate = "Unknown"
+        container = "Unknown"
         audio_tracks = []
+        audio_meta_list = []
+        
         try:
             data = json.loads(stdout.decode())
-            total_duration = float(data.get('format', {}).get('duration', 120.0))
+            format_info = data.get('format', {})
+            total_duration = float(format_info.get('duration', 120.0))
+            container = format_info.get('format_long_name', 'Unknown')
+            
+            if format_info.get('bit_rate'):
+                bitrate = f"{int(format_info.get('bit_rate')) // 1000} kbps"
+                
             for stream in data.get('streams', []):
-                if stream.get('codec_type') == 'video':
+                # Grab Video (Ignore the embedded Cover Art poster)
+                if stream.get('codec_type') == 'video' and stream.get('disposition', {}).get('attached_pic', 0) == 0:
                     resolution = f"{stream.get('width')}x{stream.get('height')}"
+                    vid_codec = stream.get('codec_name', '').upper()
+                    fps_fraction = stream.get('r_frame_rate', '0/0')
+                    if '/' in fps_fraction:
+                        num, den = fps_fraction.split('/')
+                        if den != '0':
+                            fps = f"{round(int(num)/int(den), 2)} fps"
+                            
+                # Grab Audio & Scrub Spam
                 elif stream.get('codec_type') == 'audio':
+                    a_codec = stream.get('codec_name', '').upper()
                     tags = stream.get('tags', {})
-                    title = tags.get('title', '')
-                    lang = tags.get('language', '')
+                    a_lang = tags.get('language', 'und').upper()
+                    a_title = tags.get('title', '')
                     
-                    if title:
-                        audio_tracks.append(title)
-                    elif lang and lang != 'und':
-                        audio_tracks.append(f"Track: {lang.upper()}")
+                    track_name = ""
+                    if a_lang != 'UND':
+                        track_name = a_lang
+                    elif a_title:
+                        # Regex scrubs out spam URLs
+                        clean_title = re.sub(r'http\S+|www\.\S+|\.com|\.in|\.bar|\.org', '', a_title, flags=re.IGNORECASE).replace('-', '').strip()
+                        track_name = clean_title if clean_title else f"Track {len(audio_tracks)+1}"
                     else:
-                        audio_tracks.append(f"Audio Track {len(audio_tracks) + 1}")
+                        track_name = f"Track {len(audio_tracks)+1}"
+                    
+                    audio_tracks.append(track_name)
+                    audio_meta_list.append(f"• {track_name} ({a_codec})")
         except Exception:
             pass
             
         if not audio_tracks:
             audio_tracks = ["Default System Audio"]
+            audio_meta_list = ["• Default System Audio"]
             
-        # 🚀 Build Strings
+        # 🚀 BUILD THE FULL REPORT
         audio_str = "\n".join(audio_tracks)
-        meta_str = f"File Name: {file_name}\nFile Size: {file_size / (1024*1024):.2f} MB\nResolution: {resolution}\nDuration: {int(total_duration // 60)} min {int(total_duration % 60)} sec"
+        meta_str = (
+            f"🎬 FILE INFORMATION\n"
+            f"Name: {file_name}\n"
+            f"Size: {file_size / (1024*1024):.2f} MB\n"
+            f"Format: {container}\n"
+            f"Bitrate: {bitrate}\n"
+            f"Duration: {int(total_duration // 60)}m {int(total_duration % 60)}s\n\n"
+            f"📺 VIDEO STREAM\n"
+            f"Resolution: {resolution}\n"
+            f"Codec: {vid_codec}\n"
+            f"Framerate: {fps}\n\n"
+            f"🔊 AUDIO STREAMS\n" + "\n".join(audio_meta_list)
+        )
             
         start_time = max(0, int((total_duration / 2) - (sample_duration / 2)))
         font_path = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
@@ -340,7 +434,7 @@ async def generate_sample_video(client: Client, status_msg, file_id: str, sample
             if raw_video_url:
                 encoded_title = urllib.parse.quote(file_name[:100])
                 
-                # 🚀 Encode Audio and Metadata to securely pass in URL
+                # Pack metadata into URL
                 encoded_meta = base64.urlsafe_b64encode(meta_str.encode()).decode()
                 encoded_audio = base64.urlsafe_b64encode(audio_str.encode()).decode()
                 cache_buster = int(time.time())
