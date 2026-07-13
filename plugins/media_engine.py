@@ -78,14 +78,33 @@ class LocalStreamer:
         resp = web.StreamResponse(status=206 if range_header else 200, headers=headers)
         await resp.prepare(request)
         
-        # 🚀 THE FIX: We now use Pyrogram's native stream_media. 
-        # This automatically handles DC1/DC2/DC3/DC4 migrations instantly!
+        # 🚀 THE FIX: Converting Bytes to 1MB Telegram Chunks
+        chunk_size = 1024 * 1024 
+        start_chunk = start // chunk_size
+        end_chunk = end // chunk_size
+        num_chunks = end_chunk - start_chunk + 1
+        
         try:
-            limit = end - start + 1
-            async for chunk in self.client.stream_media(message=file_id, offset=start, limit=limit):
-                await resp.write(chunk)
+            chunk_idx = start_chunk
+            # Feed the exact chunk offset and limit to Pyrogram
+            async for chunk in self.client.stream_media(message=file_id, offset=start_chunk, limit=num_chunks):
+                chunk_data = chunk
+                
+                # Slice the bytes perfectly so FFmpeg gets exactly what it asked for
+                if chunk_idx == start_chunk and chunk_idx == end_chunk:
+                    chunk_data = chunk_data[start % chunk_size : (end % chunk_size) + 1]
+                elif chunk_idx == start_chunk:
+                    chunk_data = chunk_data[start % chunk_size :]
+                elif chunk_idx == end_chunk:
+                    chunk_data = chunk_data[: (end % chunk_size) + 1]
+                    
+                await resp.write(chunk_data)
+                chunk_idx += 1
+                
         except Exception as e:
-            logger.error(f"⚠️ Streamer Disconnected: {e}") 
+            # 🚀 THE FIX: Mute harmless FFmpeg connection-drop warnings in the logs
+            if "closing transport" not in str(e) and "Connection reset" not in str(e):
+                logger.error(f"⚠️ Streamer Error: {e}") 
             
         return resp
 
