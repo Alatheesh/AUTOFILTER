@@ -11,27 +11,27 @@ from config import Config
 # ==========================================
 # 📝 DYNAMIC TEXT TEMPLATES
 # ==========================================
-START_TEXT = """👋 **Welcome to {bot_name}!**
+START_TEXT = """👋 **𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 {bot_name}!**
 
 I am a highly-optimized Telegram repository search system. I help you instantly find movies, files, and data by indexing available public channels.
 
 ✨ Use the category hubs below to explore my features:"""
 
-MEDIA_MENU_TEXT = """🎬 **Media Hub**
+MEDIA_MENU_TEXT = """🎬 **𝗠𝗘𝗗𝗜𝗔 𝗛𝗨𝗕**
 
 Everything you need to find and track your favorite movies.
 • View your past search history
 • Request movies that aren't in the database"""
 
-PROFILE_MENU_TEXT = """💎 **My Profile**
+PROFILE_MENU_TEXT = """💎 **𝗠𝗬 𝗣𝗥𝗢𝗙𝗜𝗟𝗘**
 
 Manage your personal account, check your search stats, or upgrade to a VIP plan for premium features."""
 
-INFO_MENU_TEXT = """ℹ️ **Information Hub**
+INFO_MENU_TEXT = """ℹ️ **𝗜𝗡𝗙𝗢𝗥𝗠𝗔𝗧𝗜𝗢𝗡 𝗛𝗨𝗕**
 
 Select a topic below to read more about my policies, how to use my commands, and my source code."""
 
-ADMIN_MENU_TEXT = """👨‍💻 **Admin Command Center**
+ADMIN_MENU_TEXT = """👨‍💻 **𝗔𝗗𝗠𝗜𝗡 𝗖𝗢𝗠𝗠𝗔𝗡𝗗 𝗖𝗘𝗡𝗧𝗘𝗥**
 
 Welcome back, Boss! Here are your quick-reference system commands:
 
@@ -92,12 +92,12 @@ START_BANNER_IMAGES = [
 def get_start_markup(bot_username: str, user_id: int) -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton("➕ ADD ME TO YOUR GROUP", url=f"http://t.me/{bot_username}?startgroup=true", style=ButtonStyle.SUCCESS)],
-        [InlineKeyboardButton("🎬 Media Hub", callback_data="ui_media_menu", style=ButtonStyle.PRIMARY), InlineKeyboardButton("💎 My Profile", callback_data="ui_profile_menu", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("🎬 𝗠𝗘𝗗𝗜𝗔 𝗛𝗨𝗕", callback_data="ui_media_menu", style=ButtonStyle.PRIMARY), InlineKeyboardButton("💎 𝗠𝗬 𝗣𝗥𝗢𝗙𝗜𝗟𝗘", callback_data="ui_profile_menu", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton("⚙️ Settings", callback_data="ui_settings_menu", style=ButtonStyle.PRIMARY), InlineKeyboardButton("ℹ️ Help & Info", callback_data="ui_info_menu", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton("🌐 VISIT OUR WEBSITE", url="https://alatheesh.github.io/NTMONLINE", style=ButtonStyle.PRIMARY)]
     ]
     if user_id in Config.ADMINS:
-        buttons.append([InlineKeyboardButton("👨‍💻 Admin Command Center", callback_data="ui_admin_menu", style=ButtonStyle.DANGER)])
+        buttons.append([InlineKeyboardButton("👨‍💻 𝗔𝗗𝗠𝗜𝗡 𝗖𝗢𝗠𝗠𝗔𝗡𝗗 𝗖𝗘𝗡𝗧𝗘𝗥", callback_data="ui_admin_menu", style=ButtonStyle.DANGER)])
     return InlineKeyboardMarkup(buttons)
 
 def info_category_keyboard():
@@ -117,7 +117,7 @@ def profile_category_keyboard():
 
 def media_category_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🕰 Search History", callback_data="ui_history", style=ButtonStyle.PRIMARY), InlineKeyboardButton("🔔 Request Movie", callback_data="ui_request", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("🕰 𝗦𝗘𝗔𝗥𝗖𝗛 𝗛𝗜𝗦𝗧𝗢𝗥𝗬", callback_data="ui_history", style=ButtonStyle.PRIMARY), InlineKeyboardButton("🔔 Request Movie", callback_data="ui_request", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back", style=ButtonStyle.DANGER)]
     ])
 
@@ -267,7 +267,7 @@ async def callback_ui_router(client: Client, callback: CallbackQuery):
         mode = u_sett.get("search_mode", "default").title()
         
         stats_text = (
-            f"📊 **Your Personal Statistics:**\n\n"
+            f"📊 **𝗬𝗢𝗨𝗥 𝗣𝗘𝗥𝗦𝗢𝗡𝗔𝗟 𝗦𝗧𝗔𝗧𝗜𝗦𝗧𝗜𝗖𝗦:**\n\n"
             f"👤 **Name:** {callback.from_user.first_name}\n"
             f"🆔 **ID:** `{user_id}`\n"
             f"📅 **Joined On:** `{joined}`\n"
