@@ -57,7 +57,7 @@ async def handle_bulk_delivery(client: Client, message: Message):
         if cmd.startswith("bapp_"):
             short_id = cmd.split("_")[1]
             if short_id not in BULK_CACHE:
-                return await message.reply_text("⏳ **Session Expired!**\nPlease search for the movie again in the group.")
+                return await message.reply_text("⏳ **𝐒𝐞𝐬𝐬𝐢𝐨𝐧 𝐄𝐱𝐩𝐢𝐫𝐞𝐝!**\n𝐏𝐥𝐞𝐚𝐬𝐞 𝐬𝐞𝐚𝐫𝐜𝐡 𝐟𝐨𝐫 𝐭𝐡𝐞 𝐦𝐨𝐯𝐢𝐞 𝐚𝐠𝐚𝐢𝐧 𝐢𝐧 𝐭𝐡𝐞 𝐠𝐫𝐨𝐮𝐩.")
             
             web_app_url = BULK_CACHE[short_id][2]
             
@@ -65,13 +65,13 @@ async def handle_bulk_delivery(client: Client, message: Message):
             del_enabled = settings.get("filter_delete_enabled", False)
             del_time = settings.get("filter_delete_time", 5)
 
-            msg_text = "📱 **Your Multi-Select App is Ready!**\nClick the button below to open it and choose your files."
+            msg_text = "📱 **𝗬𝗼𝘂𝗿 𝗠𝘂𝗹𝘁𝗶-𝗦𝗲𝗹𝗲𝗰𝘁 𝗔𝗽𝗽 𝗶𝘀 𝗥𝗲𝗮𝗱𝘆!**\n𝖢𝗅𝗂𝖼𝗄 𝗍𝗁𝖾 𝖻𝗎𝗍𝗍𝗈𝗇 𝖻𝖾𝗅𝗈𝗐 𝗍𝗈 𝗈𝗉𝖾𝗇 𝗂𝗍 𝖺𝗇𝖽 𝖼𝗁𝗈𝗈𝗌𝖾 𝗒𝗈𝗎𝗋 𝖿𝗂𝗅𝖾𝗌."
             if del_enabled:
-                msg_text += f"\n\n⏳ *Note: This message will automatically delete in {del_time} minutes.*"
+                msg_text += f"\n\n⏳ *𝖭𝗈𝗍𝖾: 𝖳𝗁𝗂𝗌 𝗆𝖾𝗌𝗌𝖺𝗀𝖾 𝗐𝗂𝗅𝗅 𝖺𝗎𝗍𝗈𝗆𝖺𝗍𝗂𝖼𝖺𝗅𝗅𝗒 𝖽𝖾𝗅𝖾𝗍𝖾 𝗂𝗇 {del_time} 𝗆𝗂𝗇𝗎𝗍𝖾𝗌.*"
 
             app_msg = await message.reply_text(
                 msg_text,
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Launch Web App", web_app=WebAppInfo(url=web_app_url))]])
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚀 𝗟𝗮𝘂𝗻𝗰𝗵 𝗪𝗲𝗯 𝗔𝗽𝗽", web_app=WebAppInfo(url=web_app_url))]])
             )
 
             if del_enabled:
@@ -92,8 +92,8 @@ async def handle_bulk_delivery(client: Client, message: Message):
                         chat = await client.get_chat(channel)
                         invite_link = chat.invite_link if chat.invite_link else await client.export_chat_invite_link(channel)
                     except Exception: invite_link = "https://t.me/telegram"
-                    buttons.append([InlineKeyboardButton(text=f"Join Channel #{idx}", url=invite_link)])
-                return await message.reply_text("🛑 **Lock Warning:**\nYou must join our official channels before downloading bulk files.", reply_markup=InlineKeyboardMarkup(buttons))
+                    buttons.append([InlineKeyboardButton(text=f"𝗝𝗼𝗶𝗻 𝗖𝗵𝗮𝗻𝗻𝗲𝗹 #{idx}", url=invite_link)])
+                return await message.reply_text("🛑 **𝐋𝐨𝐜𝐤 𝐖𝐚𝐫𝐧𝐢𝐧𝐠:**\n𝐘𝐨𝐮 𝐦𝐮𝐬𝐭 𝐣𝐨𝐢𝐧 𝐨𝐮𝐫 𝐨𝐟𝐟𝐢𝐜𝐢𝐚𝐥 𝐜𝐡𝐚𝐧𝐧𝐞𝐥𝐬 𝐛𝐞𝐟𝐨𝐫𝐞 𝐝𝐨𝐰𝐧𝐥𝐨𝐚𝐝𝐢𝐧𝐠 𝐛𝐮𝐥𝐤 𝐟𝐢𝐥𝐞𝐬.", reply_markup=InlineKeyboardMarkup(buttons))
 
             settings = await db.get_settings()
             if settings.get("shortener_enabled", False) or settings.get("is_shortener", False):
@@ -116,19 +116,19 @@ async def handle_bulk_delivery(client: Client, message: Message):
                     del_time = settings.get("filter_delete_time", 5)
 
                     v_req_text = (
-                        "🔒 **Verification Required for Bulk Downloads**\n\n"
-                        "To keep this bot alive, please verify your access. This will grant you **24 Hours of Unlimited Downloads!**\n\n"
-                        f"👉 [Click Here to Verify]({short_link})\n\n"
-                        "*(Once verified, just open your minimized Web App and click Send again!)*\n\n"
+                        "🔒 **𝗩𝗲𝗿𝗶𝗳𝗶𝗰𝗮𝘁𝗶𝗼𝗻 𝗥𝗲𝗾𝘂𝗶𝗿𝗲𝗱 𝗳𝗼𝗿 𝗕𝘂𝗹𝗸 𝗗𝗼𝘄𝗻𝗹𝗼𝗮𝗱𝘀**\n\n"
+                        "𝖳𝗈 𝗄𝖾𝖾𝗉 𝗍𝗁𝗂𝗌 𝖻𝗈𝗍 𝖺𝗅𝗂𝗏𝖾, 𝗉𝗅𝖾𝖺𝗌𝖾 𝗏𝖾𝗋𝗂𝖿𝗒 𝗒𝗈𝗎𝗋 𝖺𝖼𝖼𝖾𝗌𝗌. 𝖳𝗁𝗂𝗌 𝗐𝗂𝗅𝗅 𝗀𝗋𝖺𝗇𝗍 𝗒𝗈𝗎 **𝟮𝟰 𝗛𝗼𝘂𝗿𝘀 𝗼𝗳 𝗨𝗻𝗹𝗶𝗺𝗶𝘁𝗲𝗱 𝗗𝗼𝘄𝗻𝗹𝗼𝗮𝗱𝘀!**\n\n"
+                        f"👉 [𝖢𝗅𝗂𝖼𝗄 𝖧𝖾𝗋𝖾 𝗍𝗈 𝖵𝖾𝗋𝗂𝖿𝗒]({short_link})\n\n"
+                        "*(𝖮𝗇𝖼𝖾 𝗏𝖾𝗋𝗂𝖿𝗂𝖾𝖽, 𝗃𝗎𝗌𝗍 𝗈𝗉𝖾𝗇 𝗒𝗈𝗎𝗋 𝗆𝗂𝗇𝗂𝗆𝗂𝗓𝖾𝖽 𝖶𝖾𝖻 𝖠𝗉𝗉 𝖺𝗇𝖽 𝖼𝗅𝗂𝖼𝗄 𝖲𝖾𝗇𝖽 𝖺𝗀𝖺𝗂𝗇!)*\n\n"
                         "➖➖➖➖➖➖➖➖➖➖\n"
-                        "🛠 **Admin Note (If links are broken):**\n"
-                        "Use `/setshort <API_KEY> <URL_TEMPLATE>` to test and fix your configuration!"
+                        "🛠 **𝗔𝗱𝗺𝗶𝗻 𝗡𝗼𝘁𝗲 (𝗜𝗳 𝗹𝗶𝗻𝗸𝘀 𝗮𝗿𝗲 𝗯𝗿𝗼𝗸𝗲𝗻):**\n"
+                        "𝖴𝗌𝖾 `/setshort <API_KEY> <URL_TEMPLATE>` 𝗍𝗈 𝗍𝖾𝗌𝗍 𝖺𝗇𝖽 𝖿𝗂𝗑 𝗒𝗈𝗎𝗋 𝖼𝗈𝗇𝖿𝗂𝗀𝗎𝗋𝖺𝗍𝗂𝗈𝗇!"
                     )
                     
-                    if del_enabled: v_req_text += f"\n\n⏳ *Note: This message will automatically delete in {del_time} minutes.*"
+                    if del_enabled: v_req_text += f"\n\n⏳ *𝖭𝗈𝗍𝖾: 𝖳𝗁𝗂𝗌 𝗆𝖾𝗌𝗌𝖺𝗀𝖾 𝗐𝗂𝗅𝗅 𝖺𝗎𝗍𝗈𝗆𝖺𝗍𝗂𝖼𝖺𝗅𝗅𝗒 𝖽𝖾𝗅𝖾𝗍𝖾 𝗂𝗇 {del_time} 𝗆𝗂𝗇𝗎𝗍𝖾𝗌.*"
 
                     req_msg = await message.reply_text(
-                        v_req_text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Verify Access", url=short_link)]])
+                        v_req_text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 𝗩𝗲𝗿𝗶𝗳𝘆 𝗔𝗰𝗰𝗲𝘀𝘀", url=short_link)]])
                     )
 
                     if del_enabled:
@@ -139,24 +139,24 @@ async def handle_bulk_delivery(client: Client, message: Message):
                     return
 
             parts = cmd.split("_")
-            if len(parts) < 3: return await message.reply_text("❌ **Error:** Invalid bulk request format.")
+            if len(parts) < 3: return await message.reply_text("❌ **𝐄𝐫𝐫𝐨𝐫:** 𝐈𝐧𝐯𝐚𝐥𝐢𝐝 𝐛𝐮𝐥𝐤 𝐫𝐞𝐪𝐮𝐞𝐬𝐭 𝐟𝐨𝐫𝐦𝐚𝐭.")
                 
             req_type = parts[0]  
             short_id = parts[1]
             payload = parts[2]
             
             if short_id not in BULK_CACHE:
-                return await message.reply_text("⏳ **Session Expired!**\nYour search result has expired to save memory. Please search for the movie again in the group.")
+                return await message.reply_text("⏳ **𝐒𝐞𝐬𝐬𝐢𝐨𝐧 𝐄𝐱𝐩𝐢𝐫𝐞𝐝!**\n𝐘𝐨𝐮𝐫 𝐬𝐞𝐚𝐫𝐜𝐡 𝐫𝐞𝐬𝐮𝐥𝐭 𝐡𝐚𝐬 𝐞𝐱𝐩𝐢𝐫𝐞𝐝 𝐭𝐨 𝐬𝐚𝐯𝐞 𝐦𝐞𝐦𝐨𝐫𝐲. 𝐏𝐥𝐞𝐚𝐬𝐞 𝐬𝐞𝐚𝐫𝐜𝐡 𝐟𝐨𝐫 𝐭𝐡𝐞 𝐦𝐨𝐯𝐢𝐞 𝐚𝐠𝐚𝐢𝐧 𝐢𝐧 𝐭𝐡𝐞 𝐠𝐫𝐨𝐮𝐩.")
                 
             cached_time, cached_files, _ = BULK_CACHE[short_id]
             selected_indices = []
 
             if req_type == "blks":
                 try: selected_indices = [int(x) for x in payload.split("-") if x.isdigit()]
-                except Exception: return await message.reply_text("❌ **Error:** Failed to read your file selections.")
+                except Exception: return await message.reply_text("❌ **𝐄𝐫𝐫𝐨𝐫:** 𝐅𝐚𝐢𝐥𝐞𝐝 𝐭𝐨 𝐫𝐞𝐚𝐝 𝐲𝐨𝐮𝐫 𝐟𝐢𝐥𝐞 𝐬𝐞𝐥𝐞𝐜𝐭𝐢𝐨𝐧𝐬.")
             
             elif req_type == "blkc":
-                status_msg = await message.reply_text("☁️ **Fetching your massive selection from the secure cloud...**")
+                status_msg = await message.reply_text("☁️ **𝗙𝗲𝘁𝗰𝗵𝗶𝗻𝗴 𝘆𝗼𝘂𝗿 𝗺𝗮𝘀𝘀𝗶𝘃𝗲 𝘀𝗲𝗹𝗲𝗰𝘁𝗶𝗼𝗻 𝗳𝗿𝗼𝗺 𝘁𝗵𝗲 𝘀𝗲𝗰𝘂𝗿𝗲 𝗰𝗹𝗼𝘂𝗱...**")
                 try:
                     async with aiohttp.ClientSession() as session:
                         if payload.startswith("np_"):
@@ -166,7 +166,7 @@ async def handle_bulk_delivery(client: Client, message: Message):
                                     text_data = await resp.text()
                                     selected_indices = json.loads(text_data)
                                 else:
-                                    return await status_msg.edit_text(f"❌ **Error:** Npoint fetch failed (Code: {resp.status}).")
+                                    return await status_msg.edit_text(f"❌ **𝐄𝐫𝐫𝐨𝐫:** 𝐍𝐩𝐨𝐢𝐧𝐭 𝐟𝐞𝐭𝐜𝐡 𝐟𝐚𝐢𝐥𝐞𝐝 (𝐂𝐨𝐝𝐞: {resp.status}).")
                                     
                         elif payload.startswith("dp_"):
                             dp_id = payload.replace("dp_", "")
@@ -175,7 +175,7 @@ async def handle_bulk_delivery(client: Client, message: Message):
                                     text_data = await resp.text()
                                     selected_indices = json.loads(text_data)
                                 else:
-                                    return await status_msg.edit_text(f"❌ **Error:** Dpaste fetch failed (Code: {resp.status}).")
+                                    return await status_msg.edit_text(f"❌ **𝐄𝐫𝐫𝐨𝐫:** 𝐃𝐩𝐚𝐬𝐭𝐞 𝐟𝐞𝐭𝐜𝐡 𝐟𝐚𝐢𝐥𝐞𝐝 (𝐂𝐨𝐝𝐞: {resp.status}).")
                         else:
                             # 🚀 SMART FALLBACK: Just Npoint and Dpaste (No Bytebin)
                             async with session.get(f"https://api.npoint.io/{payload}") as resp:
@@ -190,24 +190,24 @@ async def handle_bulk_delivery(client: Client, message: Message):
                                         else:
                                             # THIS WILL TELL US EXACTLY WHY IT IS FAILING!
                                             return await status_msg.edit_text(
-                                                f"❌ **Error:** Cloud fetch failed.\n\n"
-                                                f"🛠 **Debug Info:** Npoint `[{resp.status}]`, Dpaste `[{resp2.status}]`\n"
-                                                f"**Received ID:** `{payload}`"
+                                                f"❌ **𝐄𝐫𝐫𝐨𝐫:** 𝐂𝐥𝐨𝐮𝐝 𝐟𝐞𝐭𝐜𝐡 𝐟𝐚𝐢𝐥𝐞𝐝.\n\n"
+                                                f"🛠 **𝐃𝐞𝐛𝐮𝐠 𝐈𝐧𝐟𝐨:** 𝐍𝐩𝐨𝐢𝐧𝐭 `[{resp.status}]`, 𝐃𝐩𝐚𝐬𝐭𝐞 `[{resp2.status}]`\n"
+                                                f"**𝐑𝐞𝐜𝐞𝐢𝐯𝐞𝐝 𝐈𝐃:** `{payload}`"
                                             )
                     await status_msg.delete()
                     
                 except Exception as e:
                     logger.error(f"Bulk Cloud Fetch Error: {e}")
-                    return await status_msg.edit_text(f"❌ **Error:** Network error contacting cloud. Details: {e}")
-
+                    return await status_msg.edit_text(f"❌ **𝐄𝐫𝐫𝐨𝐫:** 𝐍𝐞𝐭𝐰𝐨𝐫𝐤 𝐞𝐫𝐫𝐨𝐫 𝐜𝐨𝐧𝐭𝐚𝐜𝐭𝐢𝐧𝐠 𝐜𝐥𝐨𝐮𝐝. 𝐃𝐞𝐭𝐚𝐢𝐥𝐬: {e}")
+                    
             selected_files = []
             for i in selected_indices:
                 if 0 <= i < len(cached_files):
                     selected_files.append(cached_files[i])
                     
-            if not selected_files: return await message.reply_text("⚠️ No valid files were selected.")
+            if not selected_files: return await message.reply_text("⚠️ 𝐍𝐨 𝐯𝐚𝐥𝐢𝐝 𝐟𝐢𝐥𝐞𝐬 𝐰𝐞𝐫𝐞 𝐬𝐞𝐥𝐞𝐜𝐭𝐞𝐝.")
             
-            # 🛑 VIP BACKEND SECURITY CHECK (Fixed to properly read the 50-file limit!)
+            # 🛑 VIP BACKEND SECURITY CHECK
             try:
                 from plugins.vip_system import get_all_plans, FREE_USER_LIMITS
                 active_plan = await db.get_active_vip_plan(user_id)
@@ -215,16 +215,15 @@ async def handle_bulk_delivery(client: Client, message: Message):
                 user_limits = plans.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan and active_plan in plans else FREE_USER_LIMITS
                 bulk_limit = user_limits.get("bulk_select_limit", 10)
             except Exception:
-                # Fallback limit just in case
                 bulk_limit = 10 
                 
             if len(selected_files) > bulk_limit:
                 return await message.reply_text(
-                    f"🛑 **Security Lock:** You requested **{len(selected_files)}** files, but your current tier is limited to **{bulk_limit}** files per batch.\n\n"
-                    f"_Please select fewer files or upgrade to a VIP plan to unlock larger batch downloads!_"
+                    f"🛑 **𝐒𝐞𝐜𝐮𝐫𝐢𝐭𝐲 𝐋𝐨𝐜𝐤:** 𝐘𝐨𝐮 𝐫𝐞𝐪𝐮𝐞𝐬𝐭𝐞𝐝 **{len(selected_files)}** 𝐟𝐢𝐥𝐞𝐬, 𝐛𝐮𝐭 𝐲𝐨𝐮𝐫 𝐜𝐮𝐫𝐫𝐞𝐧𝐭 𝐭𝐢𝐞𝐫 𝐢𝐬 𝐥𝐢𝐦𝐢𝐭𝐞𝐝 𝐭𝐨 **{bulk_limit}** 𝐟𝐢𝐥𝐞𝐬 𝐩𝐞𝐫 𝐛𝐚𝐭𝐜𝐡.\n\n"
+                    f"_𝐏𝐥𝐞𝐚𝐬𝐞 𝐬𝐞𝐥𝐞𝐜𝐭 𝐟𝐞𝐰𝐞𝐫 𝐟𝐢𝐥𝐞𝐬 𝐨𝐫 𝐮𝐩𝐠𝐫𝐚𝐝𝐞 𝐭𝐨 𝐚 𝐕𝐈𝐏 𝐩𝐥𝐚𝐧 𝐭𝐨 𝐮𝐧𝐥𝐨𝐜𝐤 𝐥𝐚𝐫𝐠𝐞𝐫 𝐛𝐚𝐭𝐜𝐡 𝐝𝐨𝐰𝐧𝐥𝐨𝐚𝐝𝐬!_"
                 )
             
-            status_msg = await message.reply_text(f"📦 **Processing {len(selected_files)} files...**\nSending them securely to your PM.")
+            status_msg = await message.reply_text(f"📦 **𝗣𝗿𝗼𝗰𝗲𝘀𝘀𝗶𝗻𝗴 {len(selected_files)} 𝗳𝗶𝗹𝗲𝘀...**\n𝖲𝖾𝗇𝖽𝗂𝗇𝗀 𝗍𝗁𝖾𝗆 𝗌𝖾𝖼𝗎𝗋𝖾𝗅𝗒 𝗍𝗈 𝗒𝗈𝗎𝗋 𝖯𝖬.")
             
             successful = 0
             sent_message_ids = []
@@ -277,8 +276,8 @@ async def handle_bulk_delivery(client: Client, message: Message):
                             
                     except UserIsBlocked:
                         logger.warning(f"User {user_id} blocked the bot during massive bulk delivery.")
-                        await status_msg.edit_text("❌ **Delivery Stopped:** You blocked the bot!")
-                        return # Immediately abort the entire delivery process to save API calls
+                        await status_msg.edit_text("❌ **𝐃𝐞𝐥𝐢𝐯𝐞𝐫𝐲 𝐒𝐭𝐨𝐩𝐩𝐞𝐝:** 𝐘𝐨𝐮 𝐛𝐥𝐨𝐜𝐤𝐞𝐝 𝐭𝐡𝐞 𝐛𝐨𝐭!")
+                        return 
                         
                     except Exception as e:
                         logger.error(f"Bulk send error: {e}")
@@ -289,8 +288,8 @@ async def handle_bulk_delivery(client: Client, message: Message):
             if settings.get("file_delete_enabled", False):
                 del_time = settings.get("file_delete_time", 10)
                 summary_msg = await message.reply_text(
-                    f"✅ **Successfully delivered {successful} files!**\n\n"
-                    f"⏳ **Caution:** All {successful} files will be automatically deleted in **{del_time} minutes** to protect our servers. Please forward them to your Saved Messages!"
+                    f"✅ **𝗦𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹𝗹𝘆 𝗱𝗲𝗹𝗶𝘃𝗲𝗿𝗲𝗱 {successful} 𝗳𝗶𝗹𝗲𝘀!**\n\n"
+                    f"⏳ **𝗖𝗮𝘂𝘁𝗶𝗼𝗻:** 𝖠𝗅𝗅 {successful} 𝖿𝗂𝗅𝖾𝗌 𝗐𝗂𝗅𝗅 𝖻𝖾 𝖺𝗎𝗍𝗈𝗆𝖺𝗍𝗂𝖼𝖺𝗅𝗅𝗒 𝖽𝖾𝗅𝖾𝗍𝖾𝖽 𝗂𝗇 **{del_time} 𝗆𝗂𝗇𝗎𝗍𝖾𝗌** 𝗍𝗈 𝗉𝗋𝗈𝗍𝖾𝖼𝗍 𝗈𝗎𝗋 𝗌𝖾𝗋𝗏𝖾𝗋𝗌. 𝖯𝗅𝖾𝖺𝗌𝖾 𝖿𝗈𝗋𝗐𝖺𝗋𝖽 𝗍𝗁𝖾𝗆 𝗍𝗈 𝗒𝗈𝗎𝗋 𝖲𝖺𝗏𝖾𝖽 𝖬𝖾𝗌𝗌𝖺𝗀𝖾𝗌!"
                 )
                 try:
                     from plugins.advanced import trigger_ghost_self_destruct
@@ -300,4 +299,4 @@ async def handle_bulk_delivery(client: Client, message: Message):
                 except Exception as e:
                     logger.error(f"Bulk Ghost Destruct Error: {e}")
             else:
-                await message.reply_text(f"✅ **Successfully delivered {successful} files directly to your PM!**")
+                await message.reply_text(f"✅ **𝗦𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹𝗹𝘆 𝗱𝗲𝗹𝗶𝘃𝗲𝗿𝗲𝗱 {successful} 𝗳𝗶𝗹𝗲𝘀 𝗱𝗶𝗿𝗲𝗰𝘁𝗹𝘆 𝘁𝗼 𝘆𝗼𝘂𝗿 𝗣𝗠!**")
