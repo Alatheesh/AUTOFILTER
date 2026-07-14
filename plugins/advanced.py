@@ -5,10 +5,9 @@ import time
 import random
 import urllib.parse
 from pyrogram import Client, filters, ContinuePropagation, StopPropagation
-from pyrogram.enums import ButtonStyle
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from config import Config
-from database.multi_db import db  
+from database.multi_db import db  # 🚀 Added database import for Permanent History!
 
 logger = logging.getLogger(__name__)
 
@@ -17,14 +16,16 @@ PLOT_STATE = {}
 
 @Client.on_callback_query(filters.regex("^pages_info$"))
 async def ignore_page_button(client: Client, callback: CallbackQuery):
-    await callback.answer("📖 𝖸𝗈𝗎 𝖺𝗋𝖾 𝖼𝗎𝗋𝗋𝖾𝗇𝗍𝗅𝗒 𝗏𝗂𝖾𝗐𝗂𝗇𝗀 𝗍𝗁𝗂𝗌 𝗉𝖺𝗀𝖾.", show_alert=False)
+    await callback.answer("📖 You are currently viewing this page.", show_alert=False)
 
 # ==========================================
 # 🎬 CORE TMDB PLOT FETCHER ENGINE
 # ==========================================
 async def process_plot_query(client: Client, message: Message, query: str, prompt_msg_id: int = None):
+    """Handles the TMDB fetching and history logging, then edits the UI."""
     user_id = message.from_user.id
     
+    # 🚀 FIX: Save History PERMANENTLY to MongoDB (Keep last 10 only)
     await db.users.update_one(
         {"user_id": user_id},
         {"$push": {
@@ -36,7 +37,7 @@ async def process_plot_query(client: Client, message: Message, query: str, promp
         upsert=True
     )
 
-    status_text = f"🔍 **𝖲𝖾𝖺𝗋𝖼𝗁𝗂𝗇𝗀 𝖳𝖬𝖣𝖡 𝖽𝖺𝗍𝖺𝖻𝖺𝗌𝖾 𝖿𝗈𝗋 `{query}`...**"
+    status_text = f"🔍 **Searching TMDB database for `{query}`...**"
     
     if prompt_msg_id:
         try: await client.edit_message_text(message.chat.id, prompt_msg_id, status_text)
@@ -45,12 +46,14 @@ async def process_plot_query(client: Client, message: Message, query: str, promp
         status_msg = await message.reply_text(status_text)
         prompt_msg_id = status_msg.id
 
+    # Ensure API keys are loaded
     if not hasattr(Config, "TMDB_API_KEYS") or not Config.TMDB_API_KEYS:
-        err_msg = "❌ **𝐄𝐫𝐫𝐨𝐫:** 𝐓𝐌𝐃𝐁 𝐀𝐏𝐈 𝐤𝐞𝐲𝐬 𝐚𝐫𝐞 𝐦𝐢𝐬𝐬𝐢𝐧𝐠 𝐢𝐧 𝐭𝐡𝐞 𝐜𝐨𝐧𝐟𝐢𝐠𝐮𝐫𝐚𝐭𝐢𝐨𝐧."
+        err_msg = "❌ **Error:** TMDB API keys are missing in the configuration."
         try: await client.edit_message_text(message.chat.id, prompt_msg_id, err_msg)
         except Exception: await message.reply_text(err_msg)
         return
 
+    # Randomly select a key to prevent rate limiting
     api_key = random.choice(Config.TMDB_API_KEYS)
     safe_query = urllib.parse.quote_plus(query)
 
@@ -62,15 +65,15 @@ async def process_plot_query(client: Client, message: Message, query: str, promp
                     results = data.get("results")
                     if results:
                         movie = results[0]
-                        overview = movie.get("overview") or "𝖭𝗈 𝗉𝗅𝗈𝗍 𝗈𝗏𝖾𝗋𝗏𝗂𝖾𝗐 𝖺𝗏𝖺𝗂𝗅𝖺𝖻𝗅𝖾 𝗈𝗇 𝖳𝖬𝖣𝖡."
-                        release_date = movie.get("release_date", "𝖴𝗇𝗄𝗇𝗈𝗐𝗇")
-                        year = release_date[:4] if release_date else "𝖴𝗇𝗄𝗇𝗈𝗐𝗇"
+                        overview = movie.get("overview") or "No plot overview available on TMDB."
+                        release_date = movie.get("release_date", "Unknown")
+                        year = release_date[:4] if release_date else "Unknown"
                         rating = round(movie.get("vote_average", 0), 1)
                         
                         summary_text = (
-                            f"🎬 **𝗠𝗼𝘃𝗶𝗲 𝗗𝗲𝘁𝗮𝗶𝗹𝘀: {movie.get('title', query)}**\n"
-                            f"🗓️ **𝗥𝗲𝗹𝗲𝗮𝘀𝗲 𝗬𝗲𝗮𝗿:** `{year}`  ⭐️ **𝗥𝗮𝘁𝗶𝗻𝗴:** `{rating}/𝟭𝟬`\n\n"
-                            f"📝 **𝗣𝗹𝗼𝘁 𝗢𝘃𝗲𝗿𝘃𝗶𝗲𝘄:**\n{overview}"
+                            f"🎬 **Movie Details: {movie.get('title', query)}**\n"
+                            f"🗓️ **Release Year:** `{year}`  ⭐️ **Rating:** `{rating}/10`\n\n"
+                            f"📝 **Plot Overview:**\n{overview}"
                         )
                         try: await client.edit_message_text(message.chat.id, prompt_msg_id, summary_text)
                         except Exception: await message.reply_text(summary_text)
@@ -78,7 +81,8 @@ async def process_plot_query(client: Client, message: Message, query: str, promp
     except Exception as e:
         logger.error(f"TMDB Plot fetch error: {e}")
 
-    fallback_summary = f"❌ **𝐍𝐨 𝐫𝐞𝐬𝐮𝐥𝐭𝐬 𝐟𝐨𝐮𝐧𝐝 𝐨𝐧 𝐓𝐌𝐃𝐁 𝐟𝐨𝐫:** `{query}`"
+    # Fallback if TMDB fails or no results found
+    fallback_summary = f"❌ **No results found on TMDB for:** `{query}`"
     try: await client.edit_message_text(message.chat.id, prompt_msg_id, fallback_summary)
     except Exception: await message.reply_text(fallback_summary)
 
@@ -88,16 +92,18 @@ async def process_plot_query(client: Client, message: Message, query: str, promp
 # ==========================================
 @Client.on_message(filters.command("plot"))
 async def plot_command(client: Client, message: Message):
+    # 1. Fast Route (If they provide the movie name in the command)
     if len(message.command) >= 2:
         query = " ".join(message.command[1:])
         await process_plot_query(client, message, query)
         raise StopPropagation
 
+    # 2. Clean Interactive Route
     prompt = await message.reply_text(
-        "🍿 **𝗠𝗼𝘃𝗶𝗲 𝗣𝗹𝗼𝘁 𝗙𝗲𝘁𝗰𝗵𝗲𝗿**\n\n"
-        "𝖶𝗁𝖺𝗍 𝗆𝗈𝗏𝗂𝖾 𝗈𝗋 𝗌𝖾𝗋𝗂𝖾𝗌 𝗐𝗈𝗎𝗅𝖽 𝗒𝗈𝗎 𝗅𝗂𝗄𝖾 𝗍𝗈 𝗄𝗇𝗈𝗐 𝖺𝖻𝗈𝗎𝗍?\n"
-        "*(𝖯𝗅𝖾𝖺𝗌𝖾 𝗋𝖾𝗉𝗅𝗒 𝗐𝗂𝗍𝗁 𝗍𝗁𝖾 𝗍𝗂𝗍𝗅𝖾, 𝗈𝗋 𝖼𝗅𝗂𝖼𝗄 𝖢𝖺𝗇𝖼𝖾𝗅)*",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ 𝗖𝗮𝗻𝗰𝗲𝗹", callback_data="cancel_plot_flow", style=ButtonStyle.DANGER)]])
+        "🍿 **Movie Plot Fetcher**\n\n"
+        "What movie or series would you like to know about?\n"
+        "*(Please reply with the title, or click Cancel)*",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_plot_flow")]])
     )
     
     PLOT_STATE[message.from_user.id] = {
@@ -113,6 +119,7 @@ async def plot_command(client: Client, message: Message):
 @Client.on_message(filters.text & filters.private, group=-7)
 async def interactive_plot_listener(client: Client, message: Message):
     user_id = message.from_user.id
+    
     if user_id not in PLOT_STATE:
         raise ContinuePropagation
 
@@ -124,21 +131,25 @@ async def interactive_plot_listener(client: Client, message: Message):
     prompt_msg_id = state["message_id"]
     timestamp = state["timestamp"]
 
+    # 🛑 48-Hour Security Check
     if time.time() - timestamp > 172800:
         del PLOT_STATE[user_id]
         try: await message.delete() 
         except Exception: pass
-        expired_text = "⚠️ **𝐒𝐞𝐬𝐬𝐢𝐨𝐧 𝐄𝐱𝐩𝐢𝐫𝐞𝐝.**\n\n𝐓𝐡𝐢𝐬 𝐩𝐫𝐨𝐦𝐩𝐭 𝐢𝐬 𝐨𝐥𝐝𝐞𝐫 𝐭𝐡𝐚𝐧 𝟒𝟖 𝐡𝐨𝐮𝐫𝐬. 𝐏𝐥𝐞𝐚𝐬𝐞 𝐫𝐮𝐧 `/plot` 𝐚𝐠𝐚𝐢𝐧."
+        expired_text = "⚠️ **Session Expired.**\n\nThis prompt is older than 48 hours. Please run `/plot` again."
         try: await client.edit_message_text(message.chat.id, prompt_msg_id, expired_text)
         except Exception: await message.reply_text(expired_text)
         raise StopPropagation 
 
+    # ✅ Capture Data & Clean the Chat
     query = message.text.strip()
     del PLOT_STATE[user_id]
+    
     try: await message.delete() 
     except Exception: pass
 
     await process_plot_query(client, message, query, prompt_msg_id)
+    
     raise StopPropagation
 
 
@@ -147,8 +158,8 @@ async def cancel_plot_callback(client: Client, callback: CallbackQuery):
     user_id = callback.from_user.id
     if user_id in PLOT_STATE:
         del PLOT_STATE[user_id]
-    await callback.message.edit_text("❌ **𝐎𝐩𝐞𝐫𝐚𝐭𝐢𝐨𝐧 𝐂𝐚𝐧𝐜𝐞𝐥𝐥𝐞𝐝.**\n\n𝐘𝐨𝐮 𝐜𝐚𝐧 𝐮𝐬𝐞 `/plot` 𝐰𝐡𝐞𝐧𝐞𝐯𝐞𝐫 𝐲𝐨𝐮'𝐫𝐞 𝐫𝐞𝐚𝐝𝐲.")
-    await callback.answer("𝖢𝖺𝗇𝖼𝖾𝗅𝗅𝖾𝖽", show_alert=False)
+    await callback.message.edit_text("❌ **Operation Cancelled.**\n\nYou can use `/plot` whenever you're ready.")
+    await callback.answer("Cancelled", show_alert=False)
 
 
 # ==========================================
@@ -157,11 +168,13 @@ async def cancel_plot_callback(client: Client, callback: CallbackQuery):
 @Client.on_message(filters.command("history"))
 async def view_search_history(client: Client, message: Message):
     user_id = message.from_user.id
+    
+    # 🚀 Fetch History PERMANENTLY from MongoDB
     user_data = await db.users.find_one({"user_id": user_id})
     history = user_data.get("search_history", []) if user_data else []
 
     if not history:
-        await message.reply_text("✨ 𝖸𝗈𝗎𝗋 𝗊𝗎𝖾𝗋𝗒 𝗁𝗂𝗌𝗍𝗈𝗋𝗒 𝗂𝗌 𝗉𝗋𝖾𝗌𝖾𝗇𝗍𝗅𝗒 𝖼𝗅𝖾𝖺𝗇!")
+        await message.reply_text("✨ Your query history is presently clean!")
         raise StopPropagation
 
     history_lines = []
@@ -171,9 +184,9 @@ async def view_search_history(client: Client, message: Message):
         history_lines.append(f"{idx}. `[{h_type}]` {h_query}")
 
     history_text = (
-        f"📑 **𝗬𝗼𝘂𝗿 𝗥𝗲𝗰𝗲𝗻𝘁 𝗦𝗲𝗮𝗿𝗰𝗵 & 𝗣𝗹𝗼𝘁 𝗛𝗶𝘀𝘁𝗼𝗿𝘆 (𝗧𝗼𝗽 𝟭𝟬):**\n\n"
+        f"📑 **Your Recent Search & Plot History (Top 10):**\n\n"
         f"{chr(10).join(history_lines)}\n\n"
-        f"💡 𝖴𝗌𝖾 `/clear_history` 𝗍𝗈 𝗐𝗂𝗉𝖾 𝗌𝗍𝗈𝗋𝖺𝗀𝖾 𝗅𝗈𝗀𝗌."
+        f"💡 Use `/clear_history` to wipe storage logs."
     )
     await message.reply_text(history_text)
     raise StopPropagation
@@ -181,8 +194,9 @@ async def view_search_history(client: Client, message: Message):
 @Client.on_message(filters.command("clear_history"))
 async def clear_history(client: Client, message: Message):
     user_id = message.from_user.id
+    # 🚀 Erase History PERMANENTLY from MongoDB
     await db.users.update_one({"user_id": user_id}, {"$set": {"search_history": []}})
-    await message.reply_text("🧹 **𝗬𝗼𝘂𝗿 𝘀𝗲𝗮𝗿𝗰𝗵 𝗵𝗶𝘀𝘁𝗼𝗿𝘆 𝗵𝗮𝘀 𝗯𝗲𝗲𝗻 𝘄𝗶𝗽𝗲𝗱 𝗰𝗹𝗲𝗮𝗻 𝘀𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹𝗹𝘆.**")
+    await message.reply_text("🧹 **Your search history has been wiped clean successfully.**")
     raise StopPropagation
 
 async def ghost_mode_delete_routine(client: Client, chat_id: int, message_id: int, expiry: int):
