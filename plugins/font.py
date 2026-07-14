@@ -136,6 +136,7 @@ async def process_font_reply(client, message):
     if message.reply_to_message and "Send the text you want to convert to" in message.reply_to_message.text:
         
         try:
+            # Safely extract the font name
             font_style = message.reply_to_message.text.split("convert to ")[1].split(":")[0].strip()
         except IndexError:
             return
@@ -144,6 +145,13 @@ async def process_font_reply(client, message):
         if not raw_text:
             return
             
+        # 💥 THE FIX: Delete the bot's prompt message so it cannot be used again!
+        try:
+            await message.reply_to_message.delete()
+        except Exception:
+            pass # Ignores errors just in case the message was already deleted
+            
+        # Send the final converted text
         await send_split_text(client, message.chat.id, raw_text, font_style)
 
 
