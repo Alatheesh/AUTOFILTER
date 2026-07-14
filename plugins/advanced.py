@@ -5,9 +5,10 @@ import time
 import random
 import urllib.parse
 from pyrogram import Client, filters, ContinuePropagation, StopPropagation
+from pyrogram.enums import ButtonStyle
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from config import Config
-from database.multi_db import db  # 🚀 Added database import for Permanent History!
+from database.multi_db import db  
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +23,8 @@ async def ignore_page_button(client: Client, callback: CallbackQuery):
 # 🎬 CORE TMDB PLOT FETCHER ENGINE
 # ==========================================
 async def process_plot_query(client: Client, message: Message, query: str, prompt_msg_id: int = None):
-    """Handles the TMDB fetching and history logging, then edits the UI."""
     user_id = message.from_user.id
     
-    # 🚀 FIX: Save History PERMANENTLY to MongoDB (Keep last 10 only)
     await db.users.update_one(
         {"user_id": user_id},
         {"$push": {
@@ -46,14 +45,12 @@ async def process_plot_query(client: Client, message: Message, query: str, promp
         status_msg = await message.reply_text(status_text)
         prompt_msg_id = status_msg.id
 
-    # Ensure API keys are loaded
     if not hasattr(Config, "TMDB_API_KEYS") or not Config.TMDB_API_KEYS:
         err_msg = "❌ **𝐄𝐫𝐫𝐨𝐫:** 𝐓𝐌𝐃𝐁 𝐀𝐏𝐈 𝐤𝐞𝐲𝐬 𝐚𝐫𝐞 𝐦𝐢𝐬𝐬𝐢𝐧𝐠 𝐢𝐧 𝐭𝐡𝐞 𝐜𝐨𝐧𝐟𝐢𝐠𝐮𝐫𝐚𝐭𝐢𝐨𝐧."
         try: await client.edit_message_text(message.chat.id, prompt_msg_id, err_msg)
         except Exception: await message.reply_text(err_msg)
         return
 
-    # Randomly select a key to prevent rate limiting
     api_key = random.choice(Config.TMDB_API_KEYS)
     safe_query = urllib.parse.quote_plus(query)
 
@@ -81,7 +78,6 @@ async def process_plot_query(client: Client, message: Message, query: str, promp
     except Exception as e:
         logger.error(f"TMDB Plot fetch error: {e}")
 
-    # Fallback if TMDB fails or no results found
     fallback_summary = f"❌ **𝐍𝐨 𝐫𝐞𝐬𝐮𝐥𝐭𝐬 𝐟𝐨𝐮𝐧𝐝 𝐨𝐧 𝐓𝐌𝐃𝐁 𝐟𝐨𝐫:** `{query}`"
     try: await client.edit_message_text(message.chat.id, prompt_msg_id, fallback_summary)
     except Exception: await message.reply_text(fallback_summary)
@@ -92,18 +88,16 @@ async def process_plot_query(client: Client, message: Message, query: str, promp
 # ==========================================
 @Client.on_message(filters.command("plot"))
 async def plot_command(client: Client, message: Message):
-    # 1. Fast Route (If they provide the movie name in the command)
     if len(message.command) >= 2:
         query = " ".join(message.command[1:])
         await process_plot_query(client, message, query)
         raise StopPropagation
 
-    # 2. Clean Interactive Route
     prompt = await message.reply_text(
         "🍿 **𝗠𝗼𝘃𝗶𝗲 𝗣𝗹𝗼𝘁 𝗙𝗲𝘁𝗰𝗵𝗲𝗿**\n\n"
         "𝖶𝗁𝖺𝗍 𝗆𝗈𝗏𝗂𝖾 𝗈𝗋 𝗌𝖾𝗋𝗂𝖾𝗌 𝗐𝗈𝗎𝗅𝖽 𝗒𝗈𝗎 𝗅𝗂𝗄𝖾 𝗍𝗈 𝗄𝗇𝗈𝗐 𝖺𝖻𝗈𝗎𝗍?\n"
         "*(𝖯𝗅𝖾𝖺𝗌𝖾 𝗋𝖾𝗉𝗅𝗒 𝗐𝗂𝗍𝗁 𝗍𝗁𝖾 𝗍𝗂𝗍𝗅𝖾, 𝗈𝗋 𝖼𝗅𝗂𝖼𝗄 𝖢𝖺𝗇𝖼𝖾𝗅)*",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ 𝗖𝗮𝗻𝗰𝗲𝗹", callback_data="cancel_plot_flow")]])
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ 𝗖𝗮𝗻𝗰𝗲𝗹", callback_data="cancel_plot_flow", style=ButtonStyle.DANGER)]])
     )
     
     PLOT_STATE[message.from_user.id] = {
@@ -119,7 +113,6 @@ async def plot_command(client: Client, message: Message):
 @Client.on_message(filters.text & filters.private, group=-7)
 async def interactive_plot_listener(client: Client, message: Message):
     user_id = message.from_user.id
-    
     if user_id not in PLOT_STATE:
         raise ContinuePropagation
 
@@ -131,7 +124,6 @@ async def interactive_plot_listener(client: Client, message: Message):
     prompt_msg_id = state["message_id"]
     timestamp = state["timestamp"]
 
-    # 🛑 48-Hour Security Check
     if time.time() - timestamp > 172800:
         del PLOT_STATE[user_id]
         try: await message.delete() 
@@ -141,15 +133,12 @@ async def interactive_plot_listener(client: Client, message: Message):
         except Exception: await message.reply_text(expired_text)
         raise StopPropagation 
 
-    # ✅ Capture Data & Clean the Chat
     query = message.text.strip()
     del PLOT_STATE[user_id]
-    
     try: await message.delete() 
     except Exception: pass
 
     await process_plot_query(client, message, query, prompt_msg_id)
-    
     raise StopPropagation
 
 
@@ -168,8 +157,6 @@ async def cancel_plot_callback(client: Client, callback: CallbackQuery):
 @Client.on_message(filters.command("history"))
 async def view_search_history(client: Client, message: Message):
     user_id = message.from_user.id
-    
-    # 🚀 Fetch History PERMANENTLY from MongoDB
     user_data = await db.users.find_one({"user_id": user_id})
     history = user_data.get("search_history", []) if user_data else []
 
@@ -194,7 +181,6 @@ async def view_search_history(client: Client, message: Message):
 @Client.on_message(filters.command("clear_history"))
 async def clear_history(client: Client, message: Message):
     user_id = message.from_user.id
-    # 🚀 Erase History PERMANENTLY from MongoDB
     await db.users.update_one({"user_id": user_id}, {"$set": {"search_history": []}})
     await message.reply_text("🧹 **𝗬𝗼𝘂𝗿 𝘀𝗲𝗮𝗿𝗰𝗵 𝗵𝗶𝘀𝘁𝗼𝗿𝘆 𝗵𝗮𝘀 𝗯𝗲𝗲𝗻 𝘄𝗶𝗽𝗲𝗱 𝗰𝗹𝗲𝗮𝗻 𝘀𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹𝗹𝘆.**")
     raise StopPropagation
