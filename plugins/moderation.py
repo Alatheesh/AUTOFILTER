@@ -3,7 +3,7 @@ import re
 import asyncio
 from pyrogram import Client, filters, StopPropagation
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from pyrogram.enums import ChatType, ChatMemberStatus
+from pyrogram.enums import ChatType, ChatMemberStatus, ButtonStyle
 from database.multi_db import db
 from config import Config
 
@@ -64,7 +64,6 @@ async def contextual_punishment(client: Client, message: Message):
             try: duration_secs = int(time_str) * 3600
             except: reason = f"{time_str} {reason}"
 
-    # Fetch limits and toggles dynamically
     sett = await db.get_settings() if is_global else await db.get_group_settings(int(chat_id_str))
     warn_lim = sett.get("warn_limit", 3)
     mute_lim = sett.get("mute_limit", 3)
@@ -76,7 +75,7 @@ async def contextual_punishment(client: Client, message: Message):
         
         if am_en and warns >= warn_lim:
             mutes = await db.add_punishment(target_user, chat_id_str, "mute", expiry_ts=time.time()+86400, reason="Exceeded warnings limit via manual warn")
-            await db.remove_punishment(target_user, chat_id_str, "warn") # Reset warns
+            await db.remove_punishment(target_user, chat_id_str, "warn") 
             
             if ab_en and mutes >= mute_lim:
                 await db.add_punishment(target_user, chat_id_str, "ban", reason="Exceeded mute limit")
@@ -93,13 +92,13 @@ async def contextual_punishment(client: Client, message: Message):
             await db.add_punishment(target_user, chat_id_str, "ban", reason="Exceeded mute limit via manual mute")
             await message.reply_text(f"🚫 𝐔𝐬𝐞𝐫 `{target_user}` 𝐡𝐢𝐭 {mute_lim}/{mute_lim} 𝐦𝐮𝐭𝐞𝐬 𝐚𝐧𝐝 𝐡𝐚𝐬 𝐛𝐞𝐞𝐧 **𝐀𝐮𝐭𝐨-𝐁𝐚𝐧𝐧𝐞𝐝**.")
         else:
-            btn = None if is_global else InlineKeyboardMarkup([[InlineKeyboardButton("🔓 𝗨𝗻𝗺𝘂𝘁𝗲", callback_data=f"admin_unmute_{chat_id_str}_{target_user}")]])
+            btn = None if is_global else InlineKeyboardMarkup([[InlineKeyboardButton("🔓 𝗨𝗻𝗺𝘂𝘁𝗲", callback_data=f"admin_unmute_{chat_id_str}_{target_user}", style=ButtonStyle.SUCCESS)]])
             await message.reply_text(f"🔇 𝐔𝐬𝐞𝐫 `{target_user}` 𝐦𝐮𝐭𝐞𝐝 ({mutes}/{mute_lim} 𝐦𝐮𝐭𝐞𝐬).\n𝐔𝐧𝐥𝐨𝐜𝐤𝐬: <t:{int(time.time() + duration_secs)}:R>", reply_markup=btn)
             if is_global: await log_to_channel(client, f"#muteuser `{target_user}`\nReason: {reason}")
 
     elif cmd == "ban":
         await db.add_punishment(target_user, chat_id_str, "ban", reason=reason)
-        btn = None if is_global else InlineKeyboardMarkup([[InlineKeyboardButton("✅ 𝗨𝗻𝗯𝗮𝗻", callback_data=f"admin_unban_{chat_id_str}_{target_user}")]])
+        btn = None if is_global else InlineKeyboardMarkup([[InlineKeyboardButton("✅ 𝗨𝗻𝗯𝗮𝗻", callback_data=f"admin_unban_{chat_id_str}_{target_user}", style=ButtonStyle.SUCCESS)]])
         await message.reply_text(f"🚫 𝐔𝐬𝐞𝐫 `{target_user}` 𝐛𝐚𝐧𝐧𝐞𝐝.\n𝐑𝐞𝐚𝐬𝐨𝐧: {reason}", reply_markup=btn)
         if is_global: await log_to_channel(client, f"#banuser `{target_user}`\nReason: {reason}")
 
@@ -117,19 +116,14 @@ async def emergency_admin_report(client: Client, message: Message):
     chat_id = message.chat.id
     reporter = message.from_user
     
-    # 1. Fetch admins
     admin_ids = await db.get_group_admins(chat_id)
-    
-    # Fallback to connected_by if admins list is empty
     if not admin_ids:
         g_sett = await db.get_group_settings(chat_id)
-        if g_sett.get("connected_by"):
-            admin_ids = [g_sett.get("connected_by")]
+        if g_sett.get("connected_by"): admin_ids = [g_sett.get("connected_by")]
             
     if not admin_ids:
         return await message.reply_text("⚠️ **𝐄𝐫𝐫𝐨𝐫:** 𝖭𝗈 𝖺𝖽𝗆𝗂𝗇𝗌 𝖺𝗋𝖾 𝗋𝖾𝗀𝗂𝗌𝗍𝖾𝗋𝖾𝖽 𝗂𝗇 𝗍𝗁𝖾 𝖻𝗈𝗍'𝗌 𝖽𝖺𝗍𝖺𝖻𝖺𝗌𝖾 𝖿𝗈𝗋 𝗍𝗁𝗂𝗌 𝗀𝗋𝗈𝗎𝗉. 𝖠𝗇 𝖺𝖽𝗆𝗂𝗇 𝗇𝖾𝖾𝖽𝗌 𝗍𝗈 𝗋𝗎𝗇 `/connect` 𝗈𝗋 `/refreshadmins` 𝖿𝗂𝗋𝗌𝗍.")
         
-    # 2. Construct Report
     chat_title = message.chat.title
     msg_link = message.link if message.link else f"https://t.me/c/{str(chat_id).replace('-100', '')}/{message.id}"
     
@@ -148,9 +142,8 @@ async def emergency_admin_report(client: Client, message: Message):
         
     report_text += f"*(𝖯𝗅𝖾𝖺𝗌𝖾 𝖼𝗁𝖾𝖼𝗄 𝗍𝗁𝖾 𝗀𝗋𝗈𝗎𝗉 𝗍𝗈 𝗍𝖺𝗄𝖾 𝖺𝖼𝗍𝗂𝗈𝗇)*"
     
-    # 3. Send to admins securely in PM
     sent_count = 0
-    markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 𝗚𝗼 𝘁𝗼 𝗠𝗲𝘀𝘀𝗮𝗴𝗲", url=msg_link)]])
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 𝗚𝗼 𝘁𝗼 𝗠𝗲𝘀𝘀𝗮𝗴𝗲", url=msg_link, style=ButtonStyle.PRIMARY)]])
     for adm in admin_ids:
         try:
             await client.send_message(adm, report_text, disable_web_page_preview=True, reply_markup=markup)
@@ -186,18 +179,15 @@ async def auto_moderation_triggers(client: Client, message: Message):
     issue_warn = False
     warn_reason = ""
 
-    # 1. LINK FILTER
     if link_en and re.search(r"(https?://|t\.me/|www\.)", text):
         issue_warn = True
         warn_reason = "Sending unauthorized links"
 
-    # 2. BAD WORDS FILTER
     if bw_en and not issue_warn:
         if any(word in text for word in bad_words if word.strip()):
             issue_warn = True
             warn_reason = "Using prohibited language"
 
-    # 3. SPAM FILTER (Always on: 5 msgs / 3 secs)
     if not issue_warn:
         if user_id not in SPAM_TRACKER: SPAM_TRACKER[user_id] = []
         SPAM_TRACKER[user_id].append(current_time)
@@ -206,14 +196,13 @@ async def auto_moderation_triggers(client: Client, message: Message):
             issue_warn = True
             warn_reason = "Extreme message flooding"
 
-    # 🚨 CASCADE EXECUTION 🚨
     if issue_warn:
         await message.delete()
         warns = await db.add_punishment(user_id, chat_id_str, "warn", reason=warn_reason)
         
         if am_en and warns >= warn_lim:
             mutes = await db.add_punishment(user_id, chat_id_str, "mute", expiry_ts=current_time + 86400, reason=f"Hit warnings limit ({warn_reason})")
-            await db.remove_punishment(user_id, chat_id_str, "warn") # clear warns after muting
+            await db.remove_punishment(user_id, chat_id_str, "warn") 
             
             if ab_en and mutes >= mute_lim:
                 await db.add_punishment(user_id, chat_id_str, "ban", reason="Hit mutes limit")
@@ -242,13 +231,13 @@ async def process_appeal(client: Client, callback: CallbackQuery):
     except Exception: pass
     
     if scope == "global":
-        markup = InlineKeyboardMarkup([[InlineKeyboardButton(f"✅ 𝗨𝗻{ptype.capitalize()}", callback_data=f"log_un{ptype}_{user_id}")], [InlineKeyboardButton("❌ 𝗥𝗲𝗷𝗲𝗰𝘁 𝗔𝗽𝗽𝗲𝗮𝗹", callback_data=f"log_reject_{user_id}")]])
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton(f"✅ 𝗨𝗻{ptype.capitalize()}", callback_data=f"log_un{ptype}_{user_id}", style=ButtonStyle.SUCCESS)], [InlineKeyboardButton("❌ 𝗥𝗲𝗷𝗲𝗰𝘁 𝗔𝗽𝗽𝗲𝗮𝗹", callback_data=f"log_reject_{user_id}", style=ButtonStyle.DANGER)]])
         await log_to_channel(client, f"⚖️ **𝗡𝗘𝗪 𝗚𝗟𝗢𝗕𝗔𝗟 𝗔𝗣𝗣𝗘𝗔𝗟**\n\n👤 𝗨𝘀𝗲𝗿: `{user_id}`\n𝗧𝘆𝗽𝗲: **{ptype.upper()}**\n\n𝖯𝗅𝖾𝖺𝗌𝖾 𝗋𝖾𝗏𝗂𝖾𝗐:", markup)
     else:
         g_sett = await db.get_group_settings(int(chat_id))
         connected_by = g_sett.get("connected_by")
         if connected_by:
-            markup = InlineKeyboardMarkup([[InlineKeyboardButton(f"✅ 𝗨𝗻{ptype.capitalize()}", callback_data=f"admin_un{ptype}_{chat_id}_{user_id}")], [InlineKeyboardButton("❌ 𝗥𝗲𝗷𝗲𝗰𝘁 𝗔𝗽𝗽𝗲𝗮𝗹", callback_data=f"admin_reject_{chat_id}_{user_id}")]])
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton(f"✅ 𝗨𝗻{ptype.capitalize()}", callback_data=f"admin_un{ptype}_{chat_id}_{user_id}", style=ButtonStyle.SUCCESS)], [InlineKeyboardButton("❌ 𝗥𝗲𝗷𝗲𝗰𝘁 𝗔𝗽𝗽𝗲𝗮𝗹", callback_data=f"admin_reject_{chat_id}_{user_id}", style=ButtonStyle.DANGER)]])
             try: await client.send_message(connected_by, f"⚖️ **𝗚𝗥𝗢𝗨𝗣 𝗔𝗣𝗣𝗘𝗔𝗟**\n\n👤 𝗨𝘀𝗲𝗿: `{user_id}`\n👥 𝗚𝗿𝗼𝘂𝗽: `{callback.message.chat.title}`\n𝗧𝘆𝗽𝗲: **{ptype.upper()}**", reply_markup=markup)
             except: pass
 
