@@ -76,7 +76,7 @@ async def execute_file_delivery(client: Client, chat_id: int, file_data: dict, u
                 # 📨 2. SEND the new caution message at the bottom
                 warning_msg = await client.send_message(
                     chat_id, 
-                    f"⏳ **Attention:** This file will automatically self-destruct in {delete_time_mins} minutes to protect our servers. Please forward it to your Saved Messages!"
+                    f"⏳ **𝗔𝘁𝘁𝗲𝗻𝘁𝗶𝗼𝗻:** 𝖳𝗁𝗂𝗌 𝖿𝗂𝗅𝖾 𝗐𝗂𝗅𝗅 𝖺𝗎𝗍𝗈𝗆𝖺𝗍𝗂𝖼𝖺𝗅𝗅𝗒 𝗌𝖾𝗅𝖿-𝖽𝖾𝗌𝗍𝗋𝗎𝖼𝗍 𝗂𝗇 {delete_time_mins} 𝗆𝗂𝗇𝗎𝗍𝖾𝗌 𝗍𝗈 𝗉𝗋𝗈𝗍𝖾𝖼𝗍 𝗈𝗎𝗋 𝗌𝖾𝗋𝗏𝖾𝗋𝗌. 𝖯𝗅𝖾𝖺𝗌𝖾 𝖿𝗈𝗋𝗐𝖺𝗋𝖽 𝗂𝗍 𝗍𝗈 𝗒𝗈𝗎𝗋 𝖲𝖺𝗏𝖾𝖽 𝖬𝖾𝗌𝗌𝖺𝗀𝖾𝗌!"
                 )
                 
                 # 🧠 3. SAVE the new message ID so it can be deleted next time
@@ -98,7 +98,7 @@ async def direct_send_callback(client: Client, callback: CallbackQuery):
     # 🛑 ANTI-SPAM DEBOUNCE (3 Seconds)
     current_time = time.time()
     if user_id in USER_CLICK_TRACKER and current_time - USER_CLICK_TRACKER[user_id] < 3.0:
-        return await callback.answer("⏳ Processing... please wait a moment before clicking again.", show_alert=False)
+        return await callback.answer("⏳ 𝖯𝗋𝗈𝖼𝖾𝗌𝗌𝗂𝗇𝗀... 𝗉𝗅𝖾𝖺𝗌𝖾 𝗐𝖺𝗂𝗍 𝖺 𝗆𝗈𝗆𝖾𝗇𝗍 𝖻𝖾𝖿𝗈𝗋𝖾 𝖼𝗅𝗂𝖼𝗄𝗂𝗇𝗀 𝖺𝗀𝖺𝗂𝗇.", show_alert=False)
     USER_CLICK_TRACKER[user_id] = current_time
 
     chat_id = callback.message.chat.id
@@ -112,26 +112,26 @@ async def direct_send_callback(client: Client, callback: CallbackQuery):
                 chat = await client.get_chat(channel)
                 invite_link = chat.invite_link if chat.invite_link else await client.export_chat_invite_link(channel)
             except Exception: invite_link = "https://t.me/telegram"
-            buttons.append([InlineKeyboardButton(text=f"Join Channel #{idx}", url=invite_link)])
-        buttons.append([InlineKeyboardButton(text="🔄 Request Verification", callback_data="check_membership_retry")])
-        await callback.message.reply_text("🛑 **Lock Warning:**\nYou must join our official distribution channels before downloading files.", reply_markup=InlineKeyboardMarkup(buttons))
-        return await callback.answer("You must join the channels first!", show_alert=True)
+            buttons.append([InlineKeyboardButton(text=f"𝗝𝗼𝗶𝗻 𝗖𝗵𝗮𝗻𝗻𝗲𝗹 #{idx}", url=invite_link)])
+        buttons.append([InlineKeyboardButton(text="🔄 𝗥𝗲𝗾𝘂𝗲𝘀𝘁 𝗩𝗲𝗿𝗶𝗳𝗶𝗰𝗮𝘁𝗶𝗼𝗻", callback_data="check_membership_retry")])
+        await callback.message.reply_text("🛑 **𝐋𝐨𝐜𝐤 𝐖𝐚𝐫𝐧𝐢𝐧𝐠:**\n𝐘𝐨𝐮 𝐦𝐮𝐬𝐭 𝐣𝐨𝐢𝐧 𝐨𝐮𝐫 𝐨𝐟𝐟𝐢𝐜𝐢𝐚𝐥 𝐝𝐢𝐬𝐭𝐫𝐢𝐛𝐮𝐭𝐢𝐨𝐧 𝐜𝐡𝐚𝐧𝐧𝐞𝐥𝐬 𝐛𝐞𝐟𝐨𝐫𝐞 𝐝𝐨𝐰𝐧𝐥𝐨𝐚𝐝𝐢𝐧𝐠 𝐟𝐢𝐥𝐞𝐬.", reply_markup=InlineKeyboardMarkup(buttons))
+        return await callback.answer("𝐘𝐨𝐮 𝐦𝐮𝐬𝐭 𝐣𝐨𝐢𝐧 𝐭𝐡𝐞 𝐜𝐡𝐚𝐧𝐧𝐞𝐥𝐬 𝐟𝐢𝐫𝐬𝐭!", show_alert=True)
 
     file_data = await db.get_file(db_id)
-    if not file_data: return await callback.answer("❌ Error: File not found in database.", show_alert=True)
+    if not file_data: return await callback.answer("❌ 𝐄𝐫𝐫𝐨𝐫: 𝐅𝐢𝐥𝐞 𝐧𝐨𝐭 𝐟𝐨𝐮𝐧𝐝 𝐢𝐧 𝐝𝐚𝐭𝐚𝐛𝐚𝐬𝐞.", show_alert=True)
 
     try:
         await execute_file_delivery(client, user_id, file_data, callback.from_user.first_name)
         if callback.message.chat.type.name in ["GROUP", "SUPERGROUP"]:
-            await callback.answer("✅ File sent securely to your Private Messages!", show_alert=True)
+            await callback.answer("✅ 𝗙𝗶𝗹𝗲 𝘀𝗲𝗻𝘁 𝘀𝗲𝗰𝘂𝗿𝗲𝗹𝘆 𝘁𝗼 𝘆𝗼𝘂𝗿 𝗣𝗿𝗶𝘃𝗮𝘁𝗲 𝗠𝗲𝘀𝘀𝗮𝗴𝗲𝘀!", show_alert=True)
         else:
-            await callback.answer("✅ File retrieved successfully!", show_alert=False)
+            await callback.answer("✅ 𝗙𝗶𝗹𝗲 𝗿𝗲𝘁𝗿𝗶𝗲𝘃𝗲𝗱 𝘀𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹𝗹𝘆!", show_alert=False)
     except (UserIsBlocked, PeerIdInvalid, Exception) as e:
         bot_me = await client.get_me()
         start_url = f"https://t.me/{bot_me.username}?start=getfile_{db_id}"
-        error_text = f"👋 Hey {callback.from_user.mention},\n\nI cannot send files to your PM until you start me! Please click the button below to start the bot and receive your file."
-        alert_msg = await client.send_message(chat_id=chat_id, text=error_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Start Bot to Get File", url=start_url)]]))
-        await callback.answer("⚠️ You must start the bot in PM first!", show_alert=True)
+        error_text = f"👋 𝗛𝗲𝘆 {callback.from_user.mention},\n\n𝖨 𝖼𝖺𝗇𝗇𝗈𝗍 𝗌𝖾𝗇𝖽 𝖿𝗂𝗅𝖾𝗌 𝗍𝗈 𝗒𝗈𝗎𝗋 𝖯𝖬 𝗎𝗇𝗍𝗂𝗅 𝗒𝗈𝗎 𝗌𝗍𝖺𝗋𝗍 𝗆𝖾! 𝖯𝗅𝖾𝖺𝗌𝖾 𝖼𝗅𝗂𝖼𝗄 𝗍𝗁𝖾 𝖻𝗎𝗍𝗍𝗈𝗇 𝖻𝖾𝗅𝗈𝗐 𝗍𝗈 𝗌𝗍𝖺𝗋𝗍 𝗍𝗁𝖾 𝖻𝗈𝗍 𝖺𝗇𝖽 𝗋𝖾𝖼𝖾𝗂𝗏𝖾 𝗒𝗈𝗎𝗋 𝖿𝗂𝗅𝖾."
+        alert_msg = await client.send_message(chat_id=chat_id, text=error_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚀 𝗦𝘁𝗮𝗿𝘁 𝗕𝗼𝘁 𝘁𝗼 𝗚𝗲𝘁 𝗙𝗶𝗹𝗲", url=start_url)]]))
+        await callback.answer("⚠️ 𝐘𝐨𝐮 𝐦𝐮𝐬𝐭 𝐬𝐭𝐚𝐫𝐭 𝐭𝐡𝐞 𝐛𝐨𝐭 𝐢𝐧 𝐏𝐌 𝐟𝐢𝐫𝐬𝐭!", show_alert=True)
         settings = await db.get_settings()
         if settings.get("filter_delete_enabled", False):
             try:
@@ -168,8 +168,8 @@ async def deep_link_start(client: Client, message: Message):
                     del_enabled = settings.get("filter_delete_enabled", False)
                     del_time = settings.get("filter_delete_time", 5)
 
-                    v_text = "✅ **Verification Successful!** You now have temporary unlimited access to direct files."
-                    if del_enabled: v_text += f"\n\n⏳ *Note: This message will automatically delete in {del_time} minutes.*"
+                    v_text = "✅ **𝗩𝗲𝗿𝗶𝗳𝗶𝗰𝗮𝘁𝗶𝗼𝗻 𝗦𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹!** 𝖸𝗈𝗎 𝗇𝗈𝗐 𝗁𝖺𝗏𝖾 𝗍𝖾𝗆𝗉𝗈𝗋𝖺𝗋𝗒 𝗎𝗇𝗅𝗂𝗆𝗂𝗍𝖾𝖽 𝖺𝖼𝖼𝖾𝗌𝗌 𝗍𝗈 𝖽𝗂𝗋𝖾𝖼𝗍 𝖿𝗂𝗅𝖾𝗌."
+                    if del_enabled: v_text += f"\n\n⏳ *𝖭𝗈𝗍𝖾: 𝖳𝗁𝗂𝗌 𝗆𝖾𝗌𝗌𝖺𝗀𝖾 𝗐𝗂𝗅𝗅 𝖺𝗎𝗍𝗈𝗆𝖺𝗍𝗂𝖼𝖺𝗅𝗅𝗒 𝖽𝖾𝗅𝖾𝗍𝖾 𝗂𝗇 {del_time} 𝗆𝗂𝗇𝗎𝗍𝖾𝗌.*"
 
                     success_msg = await message.reply_text(v_text)
                     
@@ -185,7 +185,7 @@ async def deep_link_start(client: Client, message: Message):
                         if file_data: await execute_file_delivery(client, user_id, file_data, message.from_user.first_name)
                 return
             else:
-                return await message.reply_text("❌ **Invalid or Expired Token.** Please search for the movie again.")
+                return await message.reply_text("❌ **𝐈𝐧𝐯𝐚𝐥𝐢𝐝 𝐨𝐫 𝐄𝐱𝐩𝐢𝐫𝐞𝐝 𝐓𝐨𝐤𝐞𝐧.** 𝐏𝐥𝐞𝐚𝐬𝐞 𝐬𝐞𝐚𝐫𝐜𝐡 𝐟𝐨𝐫 𝐭𝐡𝐞 𝐦𝐨𝐯𝐢𝐞 𝐚𝐠𝐚𝐢𝐧.")
 
         if cmd.startswith("getfile_"):
             db_id = cmd.split("_")[1]
@@ -198,9 +198,9 @@ async def deep_link_start(client: Client, message: Message):
                         chat = await client.get_chat(channel)
                         invite_link = chat.invite_link if chat.invite_link else await client.export_chat_invite_link(channel)
                     except Exception: invite_link = "https://t.me/telegram"
-                    buttons.append([InlineKeyboardButton(text=f"Join Channel #{idx}", url=invite_link)])
-                buttons.append([InlineKeyboardButton(text="🔄 Request Verification", callback_data=f"retry_getfile_{db_id}")])
-                return await message.reply_text("🛑 **Lock Warning:**\nYou must join our official distribution channels before downloading files.", reply_markup=InlineKeyboardMarkup(buttons))
+                    buttons.append([InlineKeyboardButton(text=f"𝗝𝗼𝗶𝗻 𝗖𝗵𝗮𝗻𝗻𝗲𝗹 #{idx}", url=invite_link)])
+                buttons.append([InlineKeyboardButton(text="🔄 𝗥𝗲𝗾𝘂𝗲𝘀𝘁 𝗩𝗲𝗿𝗶𝗳𝗶𝗰𝗮𝘁𝗶𝗼𝗻", callback_data=f"retry_getfile_{db_id}")])
+                return await message.reply_text("🛑 **𝐋𝐨𝐜𝐤 𝐖𝐚𝐫𝐧𝐢𝐧𝐠:**\n𝐘𝐨𝐮 𝐦𝐮𝐬𝐭 𝐣𝐨𝐢𝐧 𝐨𝐮𝐫 𝐨𝐟𝐟𝐢𝐜𝐢𝐚𝐥 𝐝𝐢𝐬𝐭𝐫𝐢𝐛𝐮𝐭𝐢𝐨𝐧 𝐜𝐡𝐚𝐧𝐧𝐞𝐥𝐬 𝐛𝐞𝐟𝐨𝐫𝐞 𝐝𝐨𝐰𝐧𝐥𝐨𝐚𝐝𝐢𝐧𝐠 𝐟𝐢𝐥𝐞𝐬.", reply_markup=InlineKeyboardMarkup(buttons))
 
             settings = await db.get_settings()
             
@@ -228,17 +228,17 @@ async def deep_link_start(client: Client, message: Message):
                     del_time = settings.get("filter_delete_time", 5)
 
                     v_req_text = (
-                        "🔒 **Verification Required**\n\n"
-                        "To keep this bot alive, please verify your access. This will grant you **24 Hours of Unlimited Downloads!**\n\n"
-                        f"👉 [Click Here to Verify]({short_link})\n\n"
+                        "🔒 **𝗩𝗲𝗿𝗶𝗳𝗶𝗰𝗮𝘁𝗶𝗼𝗻 𝗥𝗲𝗾𝘂𝗶𝗿𝗲𝗱**\n\n"
+                        "𝖳𝗈 𝗄𝖾𝖾𝗉 𝗍𝗁𝗂𝗌 𝖻𝗈𝗍 𝖺𝗅𝗂𝗏𝖾, 𝗉𝗅𝖾𝖺𝗌𝖾 𝗏𝖾𝗋𝗂𝖿𝗒 𝗒𝗈𝗎𝗋 𝖺𝖼𝖼𝖾𝗌𝗌. 𝖳𝗁𝗂𝗌 𝗐𝗂𝗅𝗅 𝗀𝗋𝖺𝗇𝗍 𝗒𝗈𝗎 **𝟮𝟰 𝗛𝗼𝘂𝗿𝘀 𝗼𝗳 𝗨𝗻𝗹𝗶𝗺𝗶𝘁𝗲𝗱 𝗗𝗼𝘄𝗻𝗹𝗼𝗮𝗱𝘀!**\n\n"
+                        f"👉 [𝖢𝗅𝗂𝖼𝗄 𝖧𝖾𝗋𝖾 𝗍𝗈 𝖵𝖾𝗋𝗂𝖿𝗒]({short_link})\n\n"
                         "➖➖➖➖➖➖➖➖➖➖\n"
-                        "🛠 **Admin Note (If links are broken):**\n"
-                        "Use `/setshort <API_KEY> <URL_TEMPLATE>` to test and fix your configuration!"
+                        "🛠 **𝗔𝗱𝗺𝗶𝗻 𝗡𝗼𝘁𝗲 (𝗜𝗳 𝗹𝗶𝗻𝗸𝘀 𝗮𝗿𝗲 𝗯𝗿𝗼𝗸𝗲𝗻):**\n"
+                        "𝖴𝗌𝖾 `/setshort <API_KEY> <URL_TEMPLATE>` 𝗍𝗈 𝗍𝖾𝗌𝗍 𝖺𝗇𝖽 𝖿𝗂𝗑 𝗒𝗈𝗎𝗋 𝖼𝗈𝗇𝖿𝗂𝗀𝗎𝗋𝖺𝗍𝗂𝗈𝗇!"
                     )
-                    if del_enabled: v_req_text += f"\n\n⏳ *Note: This message will automatically delete in {del_time} minutes.*"
+                    if del_enabled: v_req_text += f"\n\n⏳ *𝖭𝗈𝗍𝖾: 𝖳𝗁𝗂𝗌 𝗆𝖾𝗌𝗌𝖺𝗀𝖾 𝗐𝗂𝗅𝗅 𝖺𝗎𝗍𝗈𝗆𝖺𝗍𝗂𝖼𝖺𝗅𝗅𝗒 𝖽𝖾𝗅𝖾𝗍𝖾 𝗂𝗇 {del_time} 𝗆𝗂𝗇𝗎𝗍𝖾𝗌.*"
 
                     req_msg = await message.reply_text(
-                        v_req_text, link_preview_options=LinkPreviewOptions(is_disabled=True), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Verify Access", url=short_link)]])
+                        v_req_text, link_preview_options=LinkPreviewOptions(is_disabled=True), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 𝗩𝗲𝗿𝗶𝗳𝘆 𝗔𝗰𝗰𝗲𝘀𝘀", url=short_link)]])
                     )
 
                     if del_enabled:
@@ -249,7 +249,7 @@ async def deep_link_start(client: Client, message: Message):
                     return
 
             file_data = await db.get_file(db_id)
-            if not file_data: return await message.reply_text("❌ **Error:** File not found in database or has been deleted.")
+            if not file_data: return await message.reply_text("❌ **𝐄𝐫𝐫𝐨𝐫:** 𝐅𝐢𝐥𝐞 𝐧𝐨𝐭 𝐟𝐨𝐮𝐧𝐝 𝐢𝐧 𝐝𝐚𝐭𝐚𝐛𝐚𝐬𝐞 𝐨𝐫 𝐡𝐚𝐬 𝐛𝐞𝐞𝐧 𝐝𝐞𝐥𝐞𝐭𝐞𝐝.")
             await execute_file_delivery(client, user_id, file_data, message.from_user.first_name)
 
 @Client.on_callback_query(filters.regex(r"^retry_getfile_(.+)"))
@@ -259,14 +259,14 @@ async def retry_getfile_callback(client: Client, callback: CallbackQuery):
     # 🛑 ANTI-SPAM DEBOUNCE (3 Seconds)
     current_time = time.time()
     if user_id in USER_CLICK_TRACKER and current_time - USER_CLICK_TRACKER[user_id] < 3.0:
-        return await callback.answer("⏳ Checking... please wait a moment.", show_alert=False)
+        return await callback.answer("⏳ 𝖢𝗁𝖾𝖼𝗄𝗂𝗇𝗀... 𝗉𝗅𝖾𝖺𝗌𝖾 𝗐𝖺𝗂𝗍 𝖺 𝗆𝗈𝗆𝖾𝗇𝗍.", show_alert=False)
     USER_CLICK_TRACKER[user_id] = current_time
 
     db_id = callback.data.split("_")[2]
     is_joined = await check_double_fsub(client, user_id)
-    if not is_joined: return await callback.answer("❌ You still haven't joined all required channels!", show_alert=True)
+    if not is_joined: return await callback.answer("❌ 𝐘𝐨𝐮 𝐬𝐭𝐢𝐥𝐥 𝐡𝐚𝐯𝐞𝐧'𝐭 𝐣𝐨𝐢𝐧𝐞𝐝 𝐚𝐥𝐥 𝐫𝐞𝐪𝐮𝐢𝐫𝐞𝐝 𝐜𝐡𝐚𝐧𝐧𝐞𝐥𝐬!", show_alert=True)
     file_data = await db.get_file(db_id)
-    if not file_data: return await callback.answer("❌ Error: File not found.", show_alert=True)
+    if not file_data: return await callback.answer("❌ 𝐄𝐫𝐫𝐨𝐫: 𝐅𝐢𝐥𝐞 𝐧𝐨𝐭 𝐟𝐨𝐮𝐧𝐝.", show_alert=True)
     await callback.message.delete()
     await execute_file_delivery(client, user_id, file_data, callback.from_user.first_name)
 
@@ -277,10 +277,10 @@ async def standard_retry_callback(client: Client, callback: CallbackQuery):
     # 🛑 ANTI-SPAM DEBOUNCE (3 Seconds)
     current_time = time.time()
     if user_id in USER_CLICK_TRACKER and current_time - USER_CLICK_TRACKER[user_id] < 3.0:
-        return await callback.answer("⏳ Checking... please wait a moment.", show_alert=False)
+        return await callback.answer("⏳ 𝖢𝗁𝖾𝖼𝗄𝗂𝗇𝗀... 𝗉𝗅𝖾𝖺𝗌𝖾 𝗐𝖺𝗂𝗍 𝖺 𝗆𝗈𝗆𝖾𝗇𝗍.", show_alert=False)
     USER_CLICK_TRACKER[user_id] = current_time
 
     is_joined = await check_double_fsub(client, user_id)
-    if not is_joined: return await callback.answer("❌ You still haven't joined all required channels!", show_alert=True)
+    if not is_joined: return await callback.answer("❌ 𝐘𝐨𝐮 𝐬𝐭𝐢𝐥𝐥 𝐡𝐚𝐯𝐞𝐧'𝐭 𝐣𝐨𝐢𝐧𝐞𝐝 𝐚𝐥𝐥 𝐫𝐞𝐪𝐮𝐢𝐫𝐞𝐝 𝐜𝐡𝐚𝐧𝐧𝐞𝐥𝐬!", show_alert=True)
     await callback.message.delete()
-    await callback.message.reply_text("✅ Verification successful! Please click the download button again.")
+    await callback.message.reply_text("✅ **𝗩𝗲𝗿𝗶𝗳𝗶𝗰𝗮𝘁𝗶𝗼𝗻 𝘀𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹!** 𝖯𝗅𝖾𝖺𝗌𝖾 𝖼𝗅𝗂𝖼𝗄 𝗍𝗁𝖾 𝖽𝗈𝗐𝗇𝗅𝗈𝖺𝖽 𝖻𝗎𝗍𝗍𝗈𝗇 𝖺𝗀𝖺𝗂𝗇.")
