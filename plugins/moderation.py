@@ -42,17 +42,17 @@ async def contextual_punishment(client: Client, message: Message):
         if len(message.command) > 2: reason = " ".join(message.command[2:])
     else:
         if len(message.command) < 2: 
-            await message.reply_text(f"⚠️ **Usage:** `/{cmd} <user_id> [time] [reason]`")
+            await message.reply_text(f"⚠️ **𝐔𝐬𝐚𝐠𝐞:** `/{cmd} <user_id> [time] [reason]`")
             raise StopPropagation
         try: target_user = int(message.command[1])
         except ValueError: 
-            await message.reply_text("⚠️ Invalid User ID.")
+            await message.reply_text("⚠️ 𝐈𝐧𝐯𝐚𝐥𝐢𝐝 𝐔𝐬𝐞𝐫 𝐈𝐃.")
             raise StopPropagation
         if len(message.command) > 2: time_str = message.command[2]
         if len(message.command) > 3: reason = " ".join(message.command[3:])
 
     if target_user in Config.ADMINS: 
-        await message.reply_text("🛑 Cannot punish a System Administrator.")
+        await message.reply_text("🛑 𝐂𝐚𝐧𝐧𝐨𝐭 𝐩𝐮𝐧𝐢𝐬𝐡 𝐚 𝐒𝐲𝐬𝐭𝐞𝐦 𝐀𝐝𝐦𝐢𝐧𝐢𝐬𝐭𝐫𝐚𝐭𝐨𝐫.")
         raise StopPropagation
 
     duration_secs = 86400 # 1 day default
@@ -80,32 +80,32 @@ async def contextual_punishment(client: Client, message: Message):
             
             if ab_en and mutes >= mute_lim:
                 await db.add_punishment(target_user, chat_id_str, "ban", reason="Exceeded mute limit")
-                await message.reply_text(f"🔴 User `{target_user}` hit {warn_lim}/{warn_lim} warnings and {mute_lim}/{mute_lim} mutes. They have been **Auto-Banned**.")
+                await message.reply_text(f"🔴 𝐔𝐬𝐞𝐫 `{target_user}` 𝐡𝐢𝐭 {warn_lim}/{warn_lim} 𝐰𝐚𝐫𝐧𝐢𝐧𝐠𝐬 𝐚𝐧𝐝 {mute_lim}/{mute_lim} 𝐦𝐮𝐭𝐞𝐬. 𝐓𝐡𝐞𝐲 𝐡𝐚𝐯𝐞 𝐛𝐞𝐞𝐧 **𝐀𝐮𝐭𝐨-𝐁𝐚𝐧𝐧𝐞𝐝**.")
             else:
-                await message.reply_text(f"🔴 User `{target_user}` hit {warn_lim}/{warn_lim} warnings and has been **Auto-Muted for 24H**.")
+                await message.reply_text(f"🔴 𝐔𝐬𝐞𝐫 `{target_user}` 𝐡𝐢𝐭 {warn_lim}/{warn_lim} 𝐰𝐚𝐫𝐧𝐢𝐧𝐠𝐬 𝐚𝐧𝐝 𝐡𝐚𝐬 𝐛𝐞𝐞𝐧 **𝐀𝐮𝐭𝐨-𝐌𝐮𝐭𝐞𝐝 𝐟𝐨𝐫 𝟐𝟒𝐇**.")
         else:
-            await message.reply_text(f"⚠️ User `{target_user}` warned ({warns}/{warn_lim}).\nReason: {reason}")
+            await message.reply_text(f"⚠️ 𝐔𝐬𝐞𝐫 `{target_user}` 𝐰𝐚𝐫𝐧𝐞𝐝 ({warns}/{warn_lim}).\n𝐑𝐞𝐚𝐬𝐨𝐧: {reason}")
             
     elif cmd == "mute":
         mutes = await db.add_punishment(target_user, chat_id_str, "mute", expiry_ts=time.time() + duration_secs, reason=reason)
         
         if ab_en and mutes >= mute_lim:
             await db.add_punishment(target_user, chat_id_str, "ban", reason="Exceeded mute limit via manual mute")
-            await message.reply_text(f"🚫 User `{target_user}` hit {mute_lim}/{mute_lim} mutes and has been **Auto-Banned**.")
+            await message.reply_text(f"🚫 𝐔𝐬𝐞𝐫 `{target_user}` 𝐡𝐢𝐭 {mute_lim}/{mute_lim} 𝐦𝐮𝐭𝐞𝐬 𝐚𝐧𝐝 𝐡𝐚𝐬 𝐛𝐞𝐞𝐧 **𝐀𝐮𝐭𝐨-𝐁𝐚𝐧𝐧𝐞𝐝**.")
         else:
-            btn = None if is_global else InlineKeyboardMarkup([[InlineKeyboardButton("🔓 Unmute", callback_data=f"admin_unmute_{chat_id_str}_{target_user}")]])
-            await message.reply_text(f"🔇 User `{target_user}` muted ({mutes}/{mute_lim} mutes).\nUnlocks: <t:{int(time.time() + duration_secs)}:R>", reply_markup=btn)
+            btn = None if is_global else InlineKeyboardMarkup([[InlineKeyboardButton("🔓 𝗨𝗻𝗺𝘂𝘁𝗲", callback_data=f"admin_unmute_{chat_id_str}_{target_user}")]])
+            await message.reply_text(f"🔇 𝐔𝐬𝐞𝐫 `{target_user}` 𝐦𝐮𝐭𝐞𝐝 ({mutes}/{mute_lim} 𝐦𝐮𝐭𝐞𝐬).\n𝐔𝐧𝐥𝐨𝐜𝐤𝐬: <t:{int(time.time() + duration_secs)}:R>", reply_markup=btn)
             if is_global: await log_to_channel(client, f"#muteuser `{target_user}`\nReason: {reason}")
 
     elif cmd == "ban":
         await db.add_punishment(target_user, chat_id_str, "ban", reason=reason)
-        btn = None if is_global else InlineKeyboardMarkup([[InlineKeyboardButton("✅ Unban", callback_data=f"admin_unban_{chat_id_str}_{target_user}")]])
-        await message.reply_text(f"🚫 User `{target_user}` banned.\nReason: {reason}", reply_markup=btn)
+        btn = None if is_global else InlineKeyboardMarkup([[InlineKeyboardButton("✅ 𝗨𝗻𝗯𝗮𝗻", callback_data=f"admin_unban_{chat_id_str}_{target_user}")]])
+        await message.reply_text(f"🚫 𝐔𝐬𝐞𝐫 `{target_user}` 𝐛𝐚𝐧𝐧𝐞𝐝.\n𝐑𝐞𝐚𝐬𝐨𝐧: {reason}", reply_markup=btn)
         if is_global: await log_to_channel(client, f"#banuser `{target_user}`\nReason: {reason}")
 
     elif cmd in ["unwarn", "unmute", "unban"]:
         await db.remove_punishment(target_user, chat_id_str, cmd.replace("un", ""))
-        await message.reply_text(f"✅ User `{target_user}` successfully {cmd}ed.")
+        await message.reply_text(f"✅ 𝗨𝘀𝗲𝗿 `{target_user}` 𝘀𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹𝗹𝘆 {cmd}𝗲𝗱.")
         
     raise StopPropagation
 
@@ -127,30 +127,30 @@ async def emergency_admin_report(client: Client, message: Message):
             admin_ids = [g_sett.get("connected_by")]
             
     if not admin_ids:
-        return await message.reply_text("⚠️ **Error:** No admins are registered in the bot's database for this group. An admin needs to run `/connect` or `/refreshadmins` first.")
+        return await message.reply_text("⚠️ **𝐄𝐫𝐫𝐨𝐫:** 𝖭𝗈 𝖺𝖽𝗆𝗂𝗇𝗌 𝖺𝗋𝖾 𝗋𝖾𝗀𝗂𝗌𝗍𝖾𝗋𝖾𝖽 𝗂𝗇 𝗍𝗁𝖾 𝖻𝗈𝗍'𝗌 𝖽𝖺𝗍𝖺𝖻𝖺𝗌𝖾 𝖿𝗈𝗋 𝗍𝗁𝗂𝗌 𝗀𝗋𝗈𝗎𝗉. 𝖠𝗇 𝖺𝖽𝗆𝗂𝗇 𝗇𝖾𝖾𝖽𝗌 𝗍𝗈 𝗋𝗎𝗇 `/connect` 𝗈𝗋 `/refreshadmins` 𝖿𝗂𝗋𝗌𝗍.")
         
     # 2. Construct Report
     chat_title = message.chat.title
     msg_link = message.link if message.link else f"https://t.me/c/{str(chat_id).replace('-100', '')}/{message.id}"
     
-    report_text = f"🚨 **EMERGENCY REPORT** 🚨\n\n"
-    report_text += f"👥 **Group:** `{chat_title}`\n"
-    report_text += f"👤 **Reporter:** {reporter.mention} (`{reporter.id}`)\n"
+    report_text = f"🚨 **𝗘𝗠𝗘𝗥𝗚𝗘𝗡𝗖𝗬 𝗥𝗘𝗣𝗢𝗥𝗧** 🚨\n\n"
+    report_text += f"👥 **𝗚𝗿𝗼𝘂𝗽:** `{chat_title}`\n"
+    report_text += f"👤 **𝗥𝗲𝗽𝗼𝗿𝘁𝗲𝗿:** {reporter.mention} (`{reporter.id}`)\n"
     
     if message.reply_to_message:
         target_msg = message.reply_to_message
         target_user = target_msg.from_user
         user_info = f"{target_user.mention} (`{target_user.id}`)" if target_user else "Unknown/Anonymous"
-        report_text += f"🎯 **Reported User:** {user_info}\n\n"
-        report_text += f"📝 **Reported Message:**\n_{target_msg.text or target_msg.caption or '[Media/Non-text message]'}_\n\n"
+        report_text += f"🎯 **𝗥𝗲𝗽𝗼𝗿𝘁𝗲𝗱 𝗨𝘀𝗲𝗿:** {user_info}\n\n"
+        report_text += f"📝 **𝗥𝗲𝗽𝗼𝗿𝘁𝗲𝗱 𝗠𝗲𝘀𝘀𝗮𝗴𝗲:**\n_{target_msg.text or target_msg.caption or '[Media/Non-text message]'}_\n\n"
     else:
-        report_text += f"\n📝 **Report Message:**\n_{message.text}_\n\n"
+        report_text += f"\n📝 **𝗥𝗲𝗽𝗼𝗿𝘁 𝗠𝗲𝘀𝘀𝗮𝗴𝗲:**\n_{message.text}_\n\n"
         
-    report_text += f"*(Please check the group to take action)*"
+    report_text += f"*(𝖯𝗅𝖾𝖺𝗌𝖾 𝖼𝗁𝖾𝖼𝗄 𝗍𝗁𝖾 𝗀𝗋𝗈𝗎𝗉 𝗍𝗈 𝗍𝖺𝗄𝖾 𝖺𝖼𝗍𝗂𝗈𝗇)*"
     
     # 3. Send to admins securely in PM
     sent_count = 0
-    markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Go to Message", url=msg_link)]])
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 𝗚𝗼 𝘁𝗼 𝗠𝗲𝘀𝘀𝗮𝗴𝗲", url=msg_link)]])
     for adm in admin_ids:
         try:
             await client.send_message(adm, report_text, disable_web_page_preview=True, reply_markup=markup)
@@ -159,9 +159,9 @@ async def emergency_admin_report(client: Client, message: Message):
             logger.error(f"Failed to send report to admin {adm}: {e}")
             
     if sent_count > 0:
-        await message.reply_text(f"✅ **Emergency Report sent securely to {sent_count} admin(s).**")
+        await message.reply_text(f"✅ **𝗘𝗺𝗲𝗿𝗴𝗲𝗻𝗰𝘆 𝗥𝗲𝗽𝗼𝗿𝘁 𝘀𝗲𝗻𝘁 𝘀𝗲𝗰𝘂𝗿𝗲𝗹𝘆 𝘁𝗼 {sent_count} 𝗮𝗱𝗺𝗶𝗻(𝘀).**")
     else:
-        await message.reply_text("⚠️ **Failed to reach admins.** They might have blocked the bot in their private messages.")
+        await message.reply_text("⚠️ **𝐅𝐚𝐢𝐥𝐞𝐝 𝐭𝐨 𝐫𝐞𝐚𝐜𝐡 𝐚𝐝𝐦𝐢𝐧𝐬.** 𝖳𝗁𝖾𝗒 𝗆𝗂𝗀𝗁𝗍 𝗁𝖺𝗏𝖾 𝖻𝗅𝗈𝖼𝗄𝖾𝖽 𝗍𝗁𝖾 𝖻𝗈𝗍 𝗂𝗇 𝗍𝗁𝖾𝗂𝗋 𝗉𝗋𝗂𝗏𝖺𝗍𝖾 𝗆𝖾𝗌𝗌𝖺𝗀𝖾𝗌.")
 
 # ==========================================
 # 🚨 AUTO-MODERATION TRIGGERS (Groups Only)
@@ -217,11 +217,11 @@ async def auto_moderation_triggers(client: Client, message: Message):
             
             if ab_en and mutes >= mute_lim:
                 await db.add_punishment(user_id, chat_id_str, "ban", reason="Hit mutes limit")
-                alert = await message.reply_text(f"🚫 {message.from_user.mention} was **Auto-Banned** for repeatedly breaking rules ({mutes}/{mute_lim} mutes).")
+                alert = await message.reply_text(f"🚫 {message.from_user.mention} 𝐰𝐚𝐬 **𝐀𝐮𝐭𝐨-𝐁𝐚𝐧𝐧𝐞𝐝** 𝐟𝐨𝐫 𝐫𝐞𝐩𝐞𝐚𝐭𝐞𝐝𝐥𝐲 𝐛𝐫𝐞𝐚𝐤𝐢𝐧𝐠 𝐫𝐮𝐥𝐞𝐬 ({mutes}/{mute_lim} 𝐦𝐮𝐭𝐞𝐬).")
             else:
-                alert = await message.reply_text(f"🔇 {message.from_user.mention} was **Auto-Muted for 24h** for hitting {warn_lim}/{warn_lim} warnings.")
+                alert = await message.reply_text(f"🔇 {message.from_user.mention} 𝐰𝐚𝐬 **𝐀𝐮𝐭𝐨-𝐌𝐮𝐭𝐞𝐝 𝐟𝐨𝐫 𝟐𝟒𝐡** 𝐟𝐨𝐫 𝐡𝐢𝐭𝐭𝐢𝐧𝐠 {warn_lim}/{warn_lim} 𝐰𝐚𝐫𝐧𝐢𝐧𝐠𝐬.")
         else:
-            alert = await message.reply_text(f"⚠️ {message.from_user.mention}, you have been warned! ({warns}/{warn_lim})\nReason: {warn_reason}")
+            alert = await message.reply_text(f"⚠️ {message.from_user.mention}, 𝐲𝐨𝐮 𝐡𝐚𝐯𝐞 𝐛𝐞𝐞𝐧 𝐰𝐚𝐫𝐧𝐞𝐝! ({warns}/{warn_lim})\n𝐑𝐞𝐚𝐬𝐨𝐧: {warn_reason}")
             
         await asyncio.sleep(10)
         try: await alert.delete()
@@ -237,19 +237,19 @@ async def process_appeal(client: Client, callback: CallbackQuery):
     user_id = callback.from_user.id
     chat_id = str(callback.message.chat.id)
     
-    await callback.answer("✅ Your appeal has been submitted to the administration.", show_alert=True)
-    try: await callback.message.edit_text(callback.message.text + "\n\n✅ **Appeal Submitted.** Please wait for admin review.", reply_markup=None)
+    await callback.answer("✅ 𝗬𝗼𝘂𝗿 𝗮𝗽𝗽𝗲𝗮𝗹 𝗵𝗮𝘀 𝗯𝗲𝗲𝗻 𝘀𝘂𝗯𝗺𝗶𝘁𝘁𝗲𝗱 𝘁𝗼 𝘁𝗵𝗲 𝗮𝗱𝗺𝗶𝗻𝗶𝘀𝘁𝗿𝗮𝘁𝗶𝗼𝗻.", show_alert=True)
+    try: await callback.message.edit_text(callback.message.text + "\n\n✅ **𝗔𝗽𝗽𝗲𝗮𝗹 𝗦𝘂𝗯𝗺𝗶𝘁𝘁𝗲𝗱.** 𝖯𝗅𝖾𝖺𝗌𝖾 𝗐𝖺𝗂𝗍 𝖿𝗈𝗋 𝖺𝖽𝗆𝗂𝗇 𝗋𝖾𝗏𝗂𝖾𝗐.", reply_markup=None)
     except Exception: pass
     
     if scope == "global":
-        markup = InlineKeyboardMarkup([[InlineKeyboardButton(f"✅ Un{ptype.capitalize()}", callback_data=f"log_un{ptype}_{user_id}")], [InlineKeyboardButton("❌ Reject Appeal", callback_data=f"log_reject_{user_id}")]])
-        await log_to_channel(client, f"⚖️ **NEW GLOBAL APPEAL**\n\n👤 User: `{user_id}`\nType: **{ptype.upper()}**\n\nPlease review:", markup)
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton(f"✅ 𝗨𝗻{ptype.capitalize()}", callback_data=f"log_un{ptype}_{user_id}")], [InlineKeyboardButton("❌ 𝗥𝗲𝗷𝗲𝗰𝘁 𝗔𝗽𝗽𝗲𝗮𝗹", callback_data=f"log_reject_{user_id}")]])
+        await log_to_channel(client, f"⚖️ **𝗡𝗘𝗪 𝗚𝗟𝗢𝗕𝗔𝗟 𝗔𝗣𝗣𝗘𝗔𝗟**\n\n👤 𝗨𝘀𝗲𝗿: `{user_id}`\n𝗧𝘆𝗽𝗲: **{ptype.upper()}**\n\n𝖯𝗅𝖾𝖺𝗌𝖾 𝗋𝖾𝗏𝗂𝖾𝗐:", markup)
     else:
         g_sett = await db.get_group_settings(int(chat_id))
         connected_by = g_sett.get("connected_by")
         if connected_by:
-            markup = InlineKeyboardMarkup([[InlineKeyboardButton(f"✅ Un{ptype.capitalize()}", callback_data=f"admin_un{ptype}_{chat_id}_{user_id}")], [InlineKeyboardButton("❌ Reject Appeal", callback_data=f"admin_reject_{chat_id}_{user_id}")]])
-            try: await client.send_message(connected_by, f"⚖️ **GROUP APPEAL**\n\n👤 User: `{user_id}`\n👥 Group: `{callback.message.chat.title}`\nType: **{ptype.upper()}**", reply_markup=markup)
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton(f"✅ 𝗨𝗻{ptype.capitalize()}", callback_data=f"admin_un{ptype}_{chat_id}_{user_id}")], [InlineKeyboardButton("❌ 𝗥𝗲𝗷𝗲𝗰𝘁 𝗔𝗽𝗽𝗲𝗮𝗹", callback_data=f"admin_reject_{chat_id}_{user_id}")]])
+            try: await client.send_message(connected_by, f"⚖️ **𝗚𝗥𝗢𝗨𝗣 𝗔𝗣𝗣𝗘𝗔𝗟**\n\n👤 𝗨𝘀𝗲𝗿: `{user_id}`\n👥 𝗚𝗿𝗼𝘂𝗽: `{callback.message.chat.title}`\n𝗧𝘆𝗽𝗲: **{ptype.upper()}**", reply_markup=markup)
             except: pass
 
 @Client.on_callback_query(filters.regex(r"^(log|admin)_(unban|unmute|reject)_(.+)$"))
@@ -266,13 +266,13 @@ async def admin_appeal_actions(client: Client, callback: CallbackQuery):
         target_user = int(data_parts[3])
 
     if action == "reject":
-        try: await client.send_message(target_user, "❌ Your appeal has been reviewed and **rejected** by the administration.")
+        try: await client.send_message(target_user, "❌ 𝗬𝗼𝘂𝗿 𝗮𝗽𝗽𝗲𝗮𝗹 𝗵𝗮𝘀 𝗯𝗲𝗲𝗻 𝗿𝗲𝘃𝗶𝗲𝘄𝗲𝗱 𝗮𝗻𝗱 **𝗿𝗲𝗷𝗲𝗰𝘁𝗲𝗱** 𝗯𝘆 𝘁𝗵𝗲 𝗮𝗱𝗺𝗶𝗻𝗶𝘀𝘁𝗿𝗮𝘁𝗶𝗼𝗻.")
         except: pass
-        return await callback.message.edit_text(callback.message.text + "\n\n❌ **Status: REJECTED**")
+        return await callback.message.edit_text(callback.message.text + "\n\n❌ **𝗦𝘁𝗮𝘁𝘂𝘀: 𝗥𝗘𝗝𝗘𝗖𝗧𝗘𝗗**")
 
     await db.remove_punishment(target_user, chat_id, action.replace("un", ""))
-    await callback.answer(f"✅ User {action}ed!", show_alert=True)
-    await callback.message.edit_text(callback.message.text + f"\n\n✅ **Status: {action.upper()}ED**")
+    await callback.answer(f"✅ 𝗨𝘀𝗲𝗿 {action}𝗲𝗱!", show_alert=True)
+    await callback.message.edit_text(callback.message.text + f"\n\n✅ **𝗦𝘁𝗮𝘁𝘂𝘀: {action.upper()}𝗘𝗗**")
     
-    try: await client.send_message(target_user, f"✅ Good news! Your `{action.replace('un', '')}` has been lifted by the administrators.")
+    try: await client.send_message(target_user, f"✅ 𝗚𝗼𝗼𝗱 𝗻𝗲𝘄𝘀! 𝖸𝗈𝗎𝗋 `{action.replace('un', '')}` 𝗁𝖺𝗌 𝖻𝖾𝖾𝗇 𝗅𝗂𝖿𝗍𝖾𝖽 𝖻𝗒 𝗍𝗁𝖾 𝖺𝖽𝗆𝗂𝗇𝗂𝗌𝗍𝗋𝖺𝗍𝗈𝗋𝗌.")
     except: pass
