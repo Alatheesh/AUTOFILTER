@@ -1,7 +1,7 @@
 import math
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
-from fonts import apply_font
+from plugins.fonts import apply_font
 
 # 🧠 Temporary RAM Cache
 pending_font_texts = {}
