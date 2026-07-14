@@ -131,9 +131,12 @@ async def font_selection_handler(client, callback_query):
 @Client.on_message(filters.reply & filters.private)
 async def process_font_reply(client, message):
     """Triggers when the user replies to the ForceReply prompt."""
+    
+    # Verify they are replying to our specific font prompt
     if message.reply_to_message and "Send the text you want to convert to" in message.reply_to_message.text:
+        
         try:
-            font_style = message.reply_to_message.text.split("`")[1]
+            font_style = message.reply_to_message.text.split("convert to ")[1].split(":")[0].strip()
         except IndexError:
             return
 
