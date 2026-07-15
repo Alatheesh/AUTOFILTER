@@ -56,7 +56,10 @@ def parse_inline_buttons(text: str):
 # ⚙️ CORE EXECUTION LOOP
 # ==========================================
 async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: Message, command_text: str, batch_id: str, status_msg_id: int = None):
+    # 🚀 FIX & NEW FEATURE: VIP Parsing Flags
     skip_vips = "-novip" in command_text
+    only_vips = "-vip" in command_text and not skip_vips # Prioritizes -novip if both are accidentally used
+    
     is_silent = "-silent" in command_text
     allow_replies = "-reply" in command_text
     reply_marker = "\n\n*(💬 Reply directly to this message to respond!)*"
@@ -92,10 +95,21 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
     else:
         status_msg = await client.send_message(admin_chat_id, f"🔄 **Deploying Broadcast...**\nBatch ID: `{batch_id}`")
 
+    # 🚀 VIP PRE-FETCHER: Grabs all active VIPs into RAM instantly to prevent DB crashing during the loop!
+    active_vip_ids = set()
+    if skip_vips or only_vips:
+        now = datetime.datetime.now()
+        ts_now = time.time()
+        async for vip in db.vip_users.find({}):
+            if vip.get("status") == "Active" and "expiry" in vip and isinstance(vip["expiry"], datetime.datetime) and vip["expiry"] > now:
+                active_vip_ids.add(vip.get("user_id"))
+            elif "expires_at" in vip and isinstance(vip["expires_at"], (int, float)) and vip["expires_at"] > ts_now:
+                active_vip_ids.add(vip.get("user_id"))
+
     sent = failed = skipped = 0
     start_time = time.time()
 
-    # 🚀 FIX: Preserve exact markdown (bold, links, etc.) when converting to string
+    # Preserve exact markdown (bold, links, etc.) when converting to string
     base_text = ""
     if target_msg.text:
         base_text = target_msg.text.markdown if hasattr(target_msg.text, 'markdown') else str(target_msg.text)
@@ -126,16 +140,22 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
         user_id = item.get("user_id")
         if not user_id: continue
         
+        # 🚀 APPLY VIP FILTER LOGIC
+        if skip_vips or only_vips:
+            is_user_vip = user_id in active_vip_ids
+            if skip_vips and is_user_vip:
+                skipped += 1
+                continue
+            if only_vips and not is_user_vip:
+                skipped += 1
+                continue
+        
         reply_to_id = item.get("message_id") if followup_batch else None
         user_data = await db.users.find_one({"user_id": user_id}) if followup_batch else item
         if not user_data: user_data = {}
-        
-        if skip_vips and user_data.get("is_vip", False):
-            skipped += 1
-            continue
             
         try:
-            # 🚀 CORE FIX: Only run intensive name fetching if tags are actually used!
+            # Only run intensive name fetching if tags are actually used!
             if needs_custom_text:
                 first_name_raw = user_data.get("first_name")
                 last_name_raw = user_data.get("last_name")
@@ -199,7 +219,7 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
             
         if (sent + failed) % 20 == 0:
             elapsed = time.time() - start_time
-            await status_msg.edit_text(f"🚀 **LIVE TRACKER**\n🏷 `{batch_id}`\n🟢 Sent: `{sent}`\n🔴 Failed: `{failed}`\n⏱ Time: `{round(elapsed, 1)}s`")
+            await status_msg.edit_text(f"🚀 **LIVE TRACKER**\n🏷 `{batch_id}`\n🟢 Sent: `{sent}`\n🔴 Failed: `{failed}`\n⏭ Skipped: `{skipped}`\n⏱ Time: `{round(elapsed, 1)}s`")
             
     total_time = round(time.time() - start_time, 1)
     
@@ -304,7 +324,7 @@ async def interactive_broadcast_listener(client: Client, message: Message):
         }
         text = (
             "✅ **Message Saved!**\n\n"
-            "Now, send any parameters you want to apply (e.g., `-novip`, `-silent`, `-ask 10m`, or a schedule time like `2026-12-31 15:30`).\n\n"
+            "Now, send any parameters you want to apply (e.g., `-novip`, `-vip`, `-silent`, `-ask 10m`, or a schedule time like `2026-12-31 15:30`).\n\n"
             "*(Send `none` to deploy immediately without parameters)*"
         )
         markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_broadcast_flow")]])
@@ -651,7 +671,7 @@ async def direct_support(client: Client, message: Message):
         else:
             sent_msg = await client.send_message(target_user, text=parsed_text, disable_notification=is_silent, reply_markup=base_markup)
             
-        # 🚀 FIX 1: Save the Direct Message to the Vault so it can be deleted later!
+        # 🚀 Save the Direct Message to the Vault so it can be deleted later!
         await db.log_broadcast("DIRECT_PM", target_user, sent_msg.id)
         
         confirm_text = f"✅ Securely dropped into `{target_user}`'s PMs."
@@ -673,7 +693,7 @@ async def direct_support(client: Client, message: Message):
 @Client.on_message(filters.command("delbroadcastuser") & filters.user(Config.ADMINS))
 async def surgical_wipe(client: Client, message: Message):
     try:
-        # 🚀 FIX 2: Check if the ID is missing so it doesn't crash with "list index out of range"
+        # Check if the ID is missing so it doesn't crash with "list index out of range"
         if len(message.command) < 2:
             await message.reply_text("⚠️ **Format:** `/delbroadcastuser <user_id>`")
             raise StopPropagation
@@ -703,7 +723,7 @@ async def surgical_wipe(client: Client, message: Message):
             )
             
     except StopPropagation:
-        # 🚀 FIX 3: Ignore Pyrogram's silent exit command so it doesn't print a blank error
+        # Ignore Pyrogram's silent exit command so it doesn't print a blank error
         raise
     except ValueError:
         await message.reply_text("❌ **Failed:** Invalid User ID. Please provide a valid number.")
@@ -757,7 +777,7 @@ async def smart_admin_reply(client: Client, message: Message):
         
     raw_text = message.text.split(" ", 1)[1]
     
-    # 🚀 FIX: Sanitize Mobile Keyboards for this command too
+    # Sanitize Mobile Keyboards
     raw_text = raw_text.replace("—", "-").replace("–", "-")
     
     ask_match = re.search(r'-ask\s+(\d+)([smh])', raw_text)
