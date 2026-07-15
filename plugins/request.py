@@ -4,14 +4,20 @@ from pyrogram import Client, filters, ContinuePropagation, StopPropagation
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from database.multi_db import db
 from config import Config
-from plugins.search import fetch_imdb_tmdb
+
+# 🚀 Import the Kill-Switch Token and the upgraded TMDB fetcher!
+from plugins.search import fetch_imdb_tmdb, BOT_SESSION_TOKEN
 
 logger = logging.getLogger(__name__)
 
 # 🧠 State Machine for Clean Interactive Requests
 REQUEST_STATE = {}
-# 🧠 Ram Tracker for Request Cooldowns
+
+# 🧠 Ram Tracker for User Cooldowns
 USER_LAST_REQUEST = {}
+
+# 🧠 GLOBAL ANTI-SPAM LOCK: Prevents the same movie from flooding your logs
+GLOBAL_REQUEST_CACHE = {}
 
 # ==========================================
 # 📢 DIRECT COMMAND AND INTERACTIVE WIZARD
@@ -25,7 +31,6 @@ async def request_command(client: Client, message: Message):
         
     user = message.from_user
     
-    # 💎 NEW: Enforce VIP Request Cooldowns
     from plugins.vip_system import DEFAULT_PLANS, FREE_USER_LIMITS
     active_plan = await db.get_active_vip_plan(user.id)
     user_limits = DEFAULT_PLANS.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan else FREE_USER_LIMITS
@@ -48,7 +53,11 @@ async def request_command(client: Client, message: Message):
         if hasattr(Config, "LOG_CHANNEL") and Config.LOG_CHANNEL:
             try:
                 await client.send_message(Config.LOG_CHANNEL, req_text)
-                USER_LAST_REQUEST[user.id] = time.time() # 💎 Mark cooldown
+                USER_LAST_REQUEST[user.id] = time.time() 
+                
+                # Lock this title globally so others can't spam it
+                GLOBAL_REQUEST_CACHE[movie_name.lower().strip()] = time.time() 
+                
                 await message.reply_text("✅ **Success!** Your request has been delivered to the admin team.")
             except Exception: 
                 await message.reply_text("❌ **Error:** Could not deliver request. Make sure I am an Admin in the Logs Channel!")
@@ -112,7 +121,7 @@ async def interactive_request_listener(client: Client, message: Message):
     if hasattr(Config, "LOG_CHANNEL") and Config.LOG_CHANNEL:
         try:
             await client.send_message(Config.LOG_CHANNEL, admin_text)
-            USER_LAST_REQUEST[user_id] = time.time() # 💎 Mark cooldown
+            USER_LAST_REQUEST[user_id] = time.time() 
             success_msg = f"✅ **Request Sent Successfully!**\n\n**Your Request:**\n_{user_request_text}_\n\nThe admin team has been notified!"
             try: await client.edit_message_text(message.chat.id, prompt_msg_id, success_msg)
             except Exception: await message.reply_text(success_msg)
@@ -138,8 +147,32 @@ async def cancel_request_callback(client: Client, callback: CallbackQuery):
 # ==========================================
 # 🔘 INLINE BUTTON CALLBACK (From Search Results)
 # ==========================================
-@Client.on_callback_query(filters.regex(r"^req_(.+)"))
+@Client.on_callback_query(filters.regex(r"^req_([^_]+)_(\d+)_(.+)$"))
 async def request_button_callback(client: Client, callback: CallbackQuery):
+    token = callback.matches[0].group(1)
+    searcher_id = int(callback.matches[0].group(2))
+    movie_name = callback.matches[0].group(3)
+
+    # 🔐 1. Restart Kill-Switch
+    if token != BOT_SESSION_TOKEN:
+        return await callback.answer("⚠️ Session expired due to bot update/restart. Please search again!", show_alert=True)
+        
+    # 🔐 2. Button Leeching Protection
+    if callback.from_user.id != searcher_id:
+        return await callback.answer("⚠️ You didn't initiate this search! Please type the movie name yourself to request it.", show_alert=True)
+
+    # 🔐 3. Global Title Duplication Lock
+    clean_movie_key = movie_name.lower().strip()
+    current_time = time.time()
+    
+    # Auto-clean old cache entries (older than 24 hours)
+    keys_to_delete = [k for k, v in GLOBAL_REQUEST_CACHE.items() if current_time - v > 86400]
+    for k in keys_to_delete:
+        del GLOBAL_REQUEST_CACHE[k]
+        
+    if clean_movie_key in GLOBAL_REQUEST_CACHE:
+        return await callback.answer("🍿 This movie has already been requested recently and is currently under review by our admin team!", show_alert=True)
+
     settings = await db.get_settings()
     if not settings.get("requests_enabled", True): 
         return await callback.answer("❌ Requests are currently disabled.", show_alert=True)
@@ -153,15 +186,13 @@ async def request_button_callback(client: Client, callback: CallbackQuery):
     
     if cooldown_minutes > 0:
         last_req = USER_LAST_REQUEST.get(user.id, 0)
-        time_passed = time.time() - last_req
+        time_passed = current_time - last_req
         cooldown_seconds = cooldown_minutes * 60
         if time_passed < cooldown_seconds:
             remaining_mins = int((cooldown_seconds - time_passed) / 60)
             return await callback.answer(f"⏳ Cooldown Active! Please wait {remaining_mins} more minutes before requesting.", show_alert=True)
 
-    movie_name = callback.data.split("req_", 1)[1]
-    
-    # 🚀 NEW: Clean the data using TMDB before sending to Admin
+    # 🚀 Clean the data using TMDB before sending to Admin
     await callback.answer("⏳ Sending your request...", show_alert=False)
     metadata = await fetch_imdb_tmdb(movie_name)
     clean_title = metadata.get("title", movie_name)
@@ -178,9 +209,13 @@ async def request_button_callback(client: Client, callback: CallbackQuery):
     
     if hasattr(Config, "LOG_CHANNEL") and Config.LOG_CHANNEL:
         try:
-            # 🚀 Send a high-quality Photo instead of just text!
+            # Send a high-quality Photo instead of just text!
             await client.send_photo(Config.LOG_CHANNEL, photo=poster, caption=admin_text)
-            USER_LAST_REQUEST[user.id] = time.time()
+            
+            # Update trackers and lock the title globally
+            USER_LAST_REQUEST[user.id] = current_time
+            GLOBAL_REQUEST_CACHE[clean_movie_key] = current_time 
+            
             await callback.message.edit_text(f"✅ **You successfully requested:**\n`{clean_title}`\n\nThe admins have been notified!")
         except Exception as e: 
             logger.error(f"Request Error: {e}")
