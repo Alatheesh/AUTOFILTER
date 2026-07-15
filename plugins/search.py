@@ -21,11 +21,16 @@ from plugins.monetization import check_double_fsub
 from database.multi_db import db
 from config import Config
 from plugins.moderation import SCRAPER_TRACKER
-
-# 🚀 Import our new Extensible Filter Engine!
 from plugins.search_filters import get_filter_settings, apply_search_filters, SIZE_MAP
 
 logger = logging.getLogger(__name__)
+
+# ==========================================
+# 🔐 SESSION SECURITY TOKEN (Restart Kill-Switch)
+# ==========================================
+# This generates a new random token every time the bot starts/restarts.
+# If an old button has a different token, the bot knows it's from a previous session!
+BOT_SESSION_TOKEN = str(uuid.uuid4())[:6]
 
 # --- RAM CACHE SYSTEMS ---
 SPAM_TRACKER = {}       
@@ -36,19 +41,18 @@ CACHE_TTL = 300
 BULK_CACHE = {}
 BULK_CACHE_TTL = 1800 
 
-# 🚀 NEW: Multi Search Cache
 MULTI_SEARCH_CACHE = {}
-MULTI_SEARCH_TTL = 900 # 15 minutes
+MULTI_SEARCH_TTL = 900 
 
 SEARCH_STICKERS = [
     "CAACAgIAAxkBAAERau9qNXctqQUyQ4JPHMUlrBCSMmTpRwACvAwAAocoMEntN5GZWCFoBDwE",
     "CAACAgIAAxkBAAERavdqNXraBk9c93sSXemtFwSlSN_RnAAC_iYAAp2TAUsNtzXDZ_a-szwE",
     "CAACAgIAAxkBAAERavlqNXreh03oKow7UUFuKzMlU85awAACnRcAArwzqEn0nAMmwtD6cTwE"
 ]
-GHOST_STICKERS = [
-    "CAACAgEAAxkBAAERawtqNX0dllDVZhRw9UkAAeIssj3C9RAAAtEBAAI-HjBHuHEaSdq4kGA8BA"
-]
 BULK_BANNER = "https://telegra.ph/file/f8b495d98fd4d89c99150.jpg"
+
+# Language Code Mapper for better Metadata Display
+LANG_MAP = {"en": "English", "hi": "Hindi", "ta": "Tamil", "te": "Telugu", "ml": "Malayalam", "kn": "Kannada", "ja": "Japanese", "ko": "Korean", "es": "Spanish", "fr": "French"}
 
 def levenshtein_distance(s1: str, s2: str) -> int:
     if len(s1) < len(s2): return levenshtein_distance(s2, s1)
@@ -64,12 +68,13 @@ def levenshtein_distance(s1: str, s2: str) -> int:
         previous_row = current_row
     return previous_row[-1]
 
+# 🚀 UPGRADED: Rich Metadata Fetcher
 async def fetch_imdb_tmdb(query: str) -> dict:
-    tmdb_keys = Config.TMDB_API_KEYS
+    tmdb_keys = getattr(Config, "TMDB_API_KEYS", [])
     default_meta = {
         "title": query.title(), "rating": "N/A", 
         "poster": Config.DEFAULT_POSTER, 
-        "genre": "Unknown", "plot": f"Matches for: {query}", 
+        "genre": "Unknown", "plot": f"Search results for: {query}", 
         "release_date": "Unknown", "language": "Unknown"
     }
     
@@ -80,40 +85,37 @@ async def fetch_imdb_tmdb(query: str) -> dict:
         return default_meta
         
     for key in tmdb_keys:
-        url = f"https://api.themoviedb.org/3/search/movie?api_key={key}&query={urllib.parse.quote(query)}"
+        url = f"https://api.themoviedb.org/3/search/multi?api_key={key}&query={urllib.parse.quote(query)}&page=1"
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=3) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         if data.get("results"):
-                            movie = data["results"][0]
-                            poster_url = f"https://image.tmdb.org/t/p/w500{movie.get('poster_path')}" if movie.get("poster_path") else default_meta["poster"]
-                            return {
-                                "title": movie.get("title", query.title()), "rating": f"{movie.get('vote_average', 'N/A')}/10", 
-                                "poster": poster_url, "genre": "Drama", "plot": movie.get("overview", "No overview available."),
-                                "release_date": movie.get("release_date", "Unknown"), "language": movie.get("original_language", "en")
-                            }
+                            # Filter out people, keep movies/tv
+                            media_results = [r for r in data["results"] if r.get("media_type") in ["movie", "tv"]]
+                            if media_results:
+                                item = media_results[0]
+                                
+                                title = item.get("title") or item.get("name") or query.title()
+                                release_date = item.get("release_date") or item.get("first_air_date") or "Unknown Date"
+                                lang_code = item.get("original_language", "en")
+                                lang_full = LANG_MAP.get(lang_code, lang_code.upper())
+                                rating = round(item.get('vote_average', 0), 1)
+                                
+                                poster_url = f"https://image.tmdb.org/t/p/w500{item.get('poster_path')}" if item.get("poster_path") else default_meta["poster"]
+                                
+                                return {
+                                    "title": title, 
+                                    "rating": f"{rating}/10 ⭐" if rating > 0 else "N/A", 
+                                    "poster": poster_url, 
+                                    "genre": "Movie" if item.get("media_type") == "movie" else "TV Series", 
+                                    "plot": item.get("overview", "No plot overview available."),
+                                    "release_date": release_date, 
+                                    "language": lang_full
+                                }
         except Exception: continue
     return default_meta
-
-async def get_fuzzy_suggestions(query: str) -> list:
-    first_word = query.split()[0] if query else query
-    pool_query = first_word[:4] if len(first_word) >= 4 else first_word
-    titles = await db.search_files(pool_query, skip=0, limit=300, exact=False)
-    suggestions = []
-    query_lower = query.lower()
-    for item in titles:
-        title = item.get("title", "")
-        if not title: continue
-        title_lower = title.lower()
-        if all(word in title_lower for word in query_lower.split()):
-            suggestions.append(title)
-            continue
-        dist = levenshtein_distance(query_lower, title_lower)
-        if dist <= max(2, len(query_lower) // 4):
-            suggestions.append(title)
-    return list(dict.fromkeys(suggestions))[:3]
 
 def format_size(size_bytes):
     if size_bytes == 0: return "0B"
@@ -128,38 +130,23 @@ async def upload_json_payload(data_list):
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post("https://api.npoint.io/", json=data_list, timeout=8) as resp:
-                if resp.status == 200:
-                    return f"https://api.npoint.io/{(await resp.json())['id']}"
-    except Exception as e: logger.error(f"Npoint Cloud Upload Failed: {e}")
+                if resp.status == 200: return f"https://api.npoint.io/{(await resp.json())['id']}"
+    except Exception: pass
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post("https://dpaste.com/api/v2/", data={"content": json_string, "syntax": "json"}, timeout=8) as resp:
                 if resp.status in [200, 201]:
                     url = (await resp.text()).strip()
-                    if url.startswith("http"):
-                        return f"{url}.txt"
-    except Exception as e: logger.error(f"Dpaste Cloud Upload Failed: {e}")
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post("https://rentry.co/api/new", data={"text": json_string}, timeout=8) as resp:
-                if resp.status == 200:
-                    res = await resp.json()
-                    if res.get("url"):
-                        return f"{res['url']}/raw"
-    except Exception as e: logger.error(f"Rentry Cloud Upload Failed: {e}")
+                    if url.startswith("http"): return f"{url}.txt"
+    except Exception: pass
     return None
 
-# 🚀 UPDATE: Added 'is_vip' to the function parameters
 def build_safe_webapp_url(client_username, short_id, data_url, user_limit, is_vip=False):
     base_link = getattr(Config, "BULK_LINK", "https://yourusername.github.io/autofilter-web/").strip()
-    if not base_link.startswith("http"):
-        base_link = f"https://{base_link}"
+    if not base_link.startswith("http"): base_link = f"https://{base_link}"
     safe_url = urllib.parse.quote(data_url)
     bot_username = client_username or "Bot"
-    
-    # 🚀 UPDATE: Check VIP status and assign tier
     tier = "premium" if is_vip else "free"
-    
     return f"{base_link}?bot={bot_username}&id={short_id}&limit={user_limit}&tier={tier}&url={safe_url}"
 
 def get_progress_bar(current, total):
@@ -170,20 +157,14 @@ def get_progress_bar(current, total):
 
 def build_bulk_summary_text(found, not_found, time_taken):
     text = "🎬 **Bulk Search Results**\n━━━━━━━━━━━━━━━━━━\n\n**✅ Found**\n"
-    for movie, files in found:
-        text += f"🍿 {movie}\n`{len(files)} Files`\n\n"
-    if not found:
-        text += "No exact matches found.\n\n"
-    
+    for movie, files in found: text += f"🍿 {movie}\n`{len(files)} Files`\n\n"
+    if not found: text += "No exact matches found.\n\n"
     text += "━━━━━━━━━━━━━━━━━━\n"
     if not_found:
         text += "**❌ Not Found (Did you mean?)**\n"
         for movie, suggestion in not_found:
-            if suggestion:
-                text += f"❌ {movie} ➡️ *Try: {suggestion}*\n"
-            else:
-                text += f"❌ {movie} *(No suggestions)*\n"
-        
+            if suggestion: text += f"❌ {movie} ➡️ *Try: {suggestion}*\n"
+            else: text += f"❌ {movie} *(No suggestions)*\n"
     text += f"\n⏱ *Completed in {time_taken:.2f} Seconds*"
     return text
 
@@ -196,7 +177,7 @@ async def set_multi_search_limit(client: Client, message: Message):
         settings = await db.get_settings()
         limit = settings.get("multi_search_limit", 5)
         status = f"{limit} movies/search" if limit > 0 else "Disabled"
-        return await message.reply_text(f"⚙️ **Multi Search Settings**\n\nCurrently: `{status}`\n\nTo change, use:\n`/setmultisearch <number>` (e.g. `/setmultisearch 10`)\n`/setmultisearch off` (to disable)")
+        return await message.reply_text(f"⚙️ **Multi Search Settings**\n\nCurrently: `{status}`\n\nTo change, use:\n`/setmultisearch <number>` (e.g. `/setmultisearch 10`)\n`/setmultisearch off`")
     
     arg = message.command[1].strip().lower()
     if arg == "off":
@@ -211,7 +192,7 @@ async def set_multi_search_limit(client: Client, message: Message):
     raise StopPropagation
 
 # ==========================================
-# 🚀 CORE SEARCH ENGINE (HANDLES BOTH)
+# 🚀 CORE SEARCH ENGINE
 # ==========================================
 @Client.on_message((filters.group | filters.private) & filters.text & ~filters.regex(r"^/"))
 async def auto_filter(client: Client, message: Message):
@@ -219,29 +200,26 @@ async def auto_filter(client: Client, message: Message):
     if len(query) < 3: return
 
     query_lower = query.lower()
-    if "@admin" in query_lower or "@admins" in query_lower:
-        return
+    if "@admin" in query_lower or "@admins" in query_lower: return
         
     user_id = message.from_user.id
     chat_id = message.chat.id
     current_time = time.time()
     
-    # 🚀 NEW: Smart Group Connection Interceptor
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         is_connected = await db.is_group_connected(chat_id)
         if not is_connected:
             return await message.reply_text("⚠️ **Group Not Connected**\n\nThis group is not connected to my database. Please ask a Group Admin to type `/connect` to activate movie searches!")
 
-    # 🚨 1. Scraper Protection Layer
+    # Scraper Protection Layer
     if user_id not in SCRAPER_TRACKER: SCRAPER_TRACKER[user_id] = []
     SCRAPER_TRACKER[user_id].append(current_time)
     SCRAPER_TRACKER[user_id] = [t for t in SCRAPER_TRACKER[user_id] if current_time - t < 60]
-    
     if len(SCRAPER_TRACKER[user_id]) > 50:
         await db.add_punishment(user_id, "global", "ban", reason="Automated Scraper Detection.")
         return await message.reply_text("🚫 **SECURITY LOCK:** You have been permanently banned globally for API scraping.")
 
-    # ⚖️ 2. Lazy Evaluation Interception
+    # Lazy Evaluation Interception
     p_type, p_reason, p_expiry, p_scope = await db.check_punishment(user_id, str(chat_id))
     if p_type:
         lock_msg = f"🚫 You are **{p_type.upper()}ED** " + ("globally." if p_scope == "global" else "in this group.")
@@ -257,12 +235,6 @@ async def auto_filter(client: Client, message: Message):
         return await message.reply_text(lock_msg, reply_markup=btn)
 
     await asyncio.create_task(db.add_search_count(user_id))
-
-    await db.users.update_one(
-        {"user_id": user_id},
-        {"$push": {"search_history": {"$each": [{"type": "search", "query": query}], "$slice": -10}}},
-        upsert=True
-    )
     
     if user_id in SPAM_TRACKER and current_time - SPAM_TRACKER[user_id] < SPAM_COOLDOWN: return 
     SPAM_TRACKER[user_id] = current_time
@@ -271,7 +243,6 @@ async def auto_filter(client: Client, message: Message):
     resolved_mode, resolved_lang, resolved_size = await get_filter_settings(user_id, chat_id, chat_type)
     settings = await db.get_settings()
     
-   # 💎 NEW: Fetch Dynamic VIP Limits
     from plugins.vip_system import get_all_plans, FREE_USER_LIMITS
     active_plan = await db.get_active_vip_plan(user_id)
     plans = await get_all_plans()
@@ -308,8 +279,7 @@ async def auto_filter(client: Client, message: Message):
         try: progress_msg = await message.reply_photo(photo=BULK_BANNER, caption=initial_text)
         except Exception: progress_msg = await message.reply_text(initial_text)
 
-        found_movies = []
-        not_found_movies = []
+        found_movies, not_found_movies = [], []
 
         for idx, movie in enumerate(unique_movies):
             prog_text = "🔍 **Searching Movies...**\n\n"
@@ -321,7 +291,6 @@ async def auto_filter(client: Client, message: Message):
             try: await progress_msg.edit_caption(prog_text) if progress_msg.photo else await progress_msg.edit_text(prog_text)
             except Exception: pass
             
-            # Execute Search and Filter
             raw_results = await db.search_files(movie, skip=0, limit=10000, exact=False)
             if not raw_results and " " in movie:
                 raw_results = await db.search_files(movie.replace(" ", ""), skip=0, limit=10000, exact=False)
@@ -329,9 +298,8 @@ async def auto_filter(client: Client, message: Message):
             filtered = apply_search_filters(raw_results, resolved_mode, resolved_lang, resolved_size)
             
             if filtered: 
-                found_movies.append((movie, filtered[:10000])) # Save all found for bulk delivery later
+                found_movies.append((movie, filtered[:10000])) 
             else: 
-                # 🚀 NEW: Automatic Spell Check for Multi-Search failures!
                 from plugins.smart_suggestions import fetch_smart_spellcheck
                 suggestions = await fetch_smart_spellcheck(movie)
                 top_suggestion = suggestions[0] if suggestions else None
@@ -344,27 +312,24 @@ async def auto_filter(client: Client, message: Message):
         
         buttons = []
         for i, (m_name, files) in enumerate(found_movies):
-            buttons.append([InlineKeyboardButton(f"{m_name} ({len(files)})", callback_data=f"bms_sel_{session_id}_{i}_0")])
+            # 🔐 INCLUDE TOKEN & USER_ID FOR MULTI-SEARCH BUTTONS
+            buttons.append([InlineKeyboardButton(f"{m_name} ({len(files)})", callback_data=f"bms_sel_{BOT_SESSION_TOKEN}_{session_id}_{i}_0_{user_id}")])
             
         MULTI_SEARCH_CACHE[session_id] = {
-            "timestamp": time.time(),
-            "user_id": user_id,
-            "found": found_movies,
-            "not_found": not_found_movies,
-            "summary_text": summary_text,
-            "buttons": buttons
+            "timestamp": time.time(), "user_id": user_id, "found": found_movies,
+            "not_found": not_found_movies, "summary_text": summary_text, "buttons": buttons
         }
         
-        # 🚀 FIX: Prevent Pyrogram crash by strictly enforcing 'None' if the button list is empty!
         final_markup = InlineKeyboardMarkup(buttons) if buttons else None
         
         try: await progress_msg.edit_caption(summary_text, reply_markup=final_markup) if progress_msg.photo else await progress_msg.edit_text(summary_text, reply_markup=final_markup)
         except Exception: pass
 
-        # 👉 RESTORED: Auto-delete for Multi-Search
+        # 🚀 UPGRADED: Multi-Search Auto Delete (Ghost Mode perfectly tied to final message)
         if settings.get("filter_delete_enabled", False):
             from plugins.advanced import trigger_ghost_self_destruct
-            trigger_ghost_self_destruct(client, chat_id, progress_msg.id, settings.get("filter_delete_time", 5) * 60)
+            del_time = settings.get("filter_delete_time", 5) * 60
+            trigger_ghost_self_destruct(client, chat_id, progress_msg.id, del_time)
             
         return
 
@@ -406,21 +371,19 @@ async def auto_filter(client: Client, message: Message):
         btn_list = []
         if suggestions:
             for s in suggestions: 
+                # Buttons for suggestions
                 btn_list.append([InlineKeyboardButton(f"🎬 {s[:40]}", callback_data=f"fuzzy_{s[:40]}")])
         
-        # 🚀 ONLY show Request Button if toggle is ON
         if req_enabled:
-            btn_list.append([InlineKeyboardButton("🔔 Request this Movie", callback_data=f"req_{query[:40]}")])
+            # 🔐 TOKEN & USER_ID SECURED REQUEST BUTTON
+            btn_list.append([InlineKeyboardButton("🔔 Request this Movie", callback_data=f"req_{BOT_SESSION_TOKEN}_{user_id}_{query[:30]}")])
             
         if suggestions:
             btn_list.append([InlineKeyboardButton("❌ Cancel", callback_data="close_data")])
             text = f"❌ **No exact match found for '{query}'.**\n\n*Did you mean to search for one of these?*"
         else:
-            if req_enabled:
-                text = f"😔 **No exact matches found for '{query}'.**"
-            else:
-                # 🚀 OPTION A: When Requests are disabled
-                text = f"😔 We searched everywhere, but **{query}** isn't in our catalog right now. We add hundreds of new movies automatically every day, so please check back soon!"
+            if req_enabled: text = f"😔 **No exact matches found for '{query}'.**"
+            else: text = f"😔 We searched everywhere, but **{query}** isn't in our catalog right now. We add hundreds of new movies automatically every day, so please check back soon!"
 
         try: await message.reply_text(text, reply_markup=InlineKeyboardMarkup(btn_list) if btn_list else None, reply_parameters=ReplyParameters(message_id=message.id))
         except Exception: await client.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(btn_list) if btn_list else None)
@@ -429,15 +392,12 @@ async def auto_filter(client: Client, message: Message):
     metadata = await fetch_imdb_tmdb(query)
     buttons = []
     
-    # 💎 NEW: Evaluate Shortlink Bypass & Verification Pass
     has_bypass = user_limits.get("shortlink_bypass", False)
     if not has_bypass: has_bypass = await db.has_active_verification_pass(user_id)
     shortener_on = settings.get("shortener_enabled", False) and not has_bypass
 
-    # 👉 RESTORED: Bulk Delivery for Single Search
     if settings.get("bulk_enabled", True):
         bulk_limit = user_limits.get("bulk_select_limit", 10)
-        # 🚀 CHANGE: Upload up to 10,000 files to the cloud so they can see everything
         web_app_results = filtered_results[:10000] 
         short_id = hashlib.md5(f"{user_id}_{query}_{time.time()}".encode()).hexdigest()[:8]
         webapp_data = [f"{f.get('title', 'Unknown')}|{format_size(f.get('size', 0))}" for f in web_app_results]
@@ -445,10 +405,7 @@ async def auto_filter(client: Client, message: Message):
         data_url = await upload_json_payload(webapp_data)
         
         if data_url:
-            # 🚀 UPDATE: Determine if they have an active plan
             is_vip = True if active_plan else False
-            
-            # 🚀 UPDATE: Pass is_vip to the builder
             web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url, bulk_limit, is_vip)
             
             BULK_CACHE[short_id] = (time.time(), web_app_results, web_app_url)
@@ -460,24 +417,25 @@ async def auto_filter(client: Client, message: Message):
             else:
                 bot_url = f"https://t.me/{client.me.username}?start=bapp_{short_id}"
                 buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)})", url=bot_url)])
-        else:
-            logger.error("Skipped drawing Bulk Delivery button because Cloud Upload failed completely.")
 
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
-        if shortener_on: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
-        else: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{db_id}")])
+        if shortener_on: 
+            buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
+        else: 
+            # 🔐 TOKEN & USER_ID SECURED FILE BUTTON
+            buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{BOT_SESSION_TOKEN}_{user_id}_{db_id}")])
     
-    # 👉 RESTORED: Help Us button
     buttons.append([InlineKeyboardButton(text="🤝 Help Us!", callback_data="help_us_menu")])
     
     if len(filtered_results) > 10:
         total_pages = math.ceil(len(filtered_results) / 10)
+        # 🔐 SECURED PAGINATION BUTTONS
         buttons.append([
-            InlineKeyboardButton(text="◀️ Prev", callback_data=f"prev_0_{query}"),
+            InlineKeyboardButton(text="◀️ Prev", callback_data=f"prev_{BOT_SESSION_TOKEN}_{user_id}_0_{query}"),
             InlineKeyboardButton(text=f"Page 1 of {total_pages}", callback_data="pages_info"),
-            InlineKeyboardButton(text="Next ▶️", callback_data=f"next_1_{query}")
+            InlineKeyboardButton(text="Next ▶️", callback_data=f"next_{BOT_SESSION_TOKEN}_{user_id}_1_{query}")
         ])
     
     filter_notice = ""
@@ -486,15 +444,21 @@ async def auto_filter(client: Client, message: Message):
 
     if settings.get("filter_delete_enabled", False):
         m_time = settings.get("filter_delete_time", 5)
-        filter_notice += f"\n\n⏳ *Note: This search result will automatically delete in {m_time} minutes.*"
+        filter_notice += f"\n\n⏳ *Note: This message auto-deletes in {m_time} minutes.*"
 
     pm_notice = ""
     if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         pm_notice = "\n\n*(Click a file to receive it securely in your Private Messages)*"
 
+    # 🚀 UPGRADED: Rich Metadata Format Display
     caption = (
-        f"🎬 **{metadata['title']}**\n⭐️ Rating: `{metadata['rating']}`\n🎭 Genre: `{metadata['genre']}`\n\n"
-        f"📝 **Plot:** {metadata['plot']}\n\n🔍 Found {len(filtered_results)} matching files.{filter_notice}{pm_notice}"
+        f"🎬 **{metadata['title']}** ({metadata['release_date'][:4]})\n"
+        f"⭐️ **Rating:** `{metadata['rating']}`\n"
+        f"🗣 **Language:** `{metadata['language']}`\n"
+        f"🎭 **Type:** `{metadata['genre']}`\n\n"
+        f"📝 **Synopsis:**\n_{metadata['plot']}_\n\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🔍 **Found:** `{len(filtered_results)}` matching files.{filter_notice}{pm_notice}"
     )
     
     if loading_msg:
@@ -512,11 +476,22 @@ async def auto_filter(client: Client, message: Message):
 # ==========================================
 # 🌟 MULTI-SEARCH CALLBACKS
 # ==========================================
-@Client.on_callback_query(filters.regex(r"^bms_sel_(.+)_(.+)_(\d+)"))
+@Client.on_callback_query(filters.regex(r"^bms_sel_(.+)_(.+)_(.+)_(\d+)_(.+)"))
 async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
-    session_id = callback.matches[0].group(1)
-    movie_idx = int(callback.matches[0].group(2))
-    page = int(callback.matches[0].group(3))
+    # bms_sel_TOKEN_SESSIONID_MOVIEIDX_PAGE_USERID
+    token = callback.matches[0].group(1)
+    session_id = callback.matches[0].group(2)
+    movie_idx = int(callback.matches[0].group(3))
+    page = int(callback.matches[0].group(4))
+    searcher_id = int(callback.matches[0].group(5))
+    
+    # 🔐 Restart Kill-Switch
+    if token != BOT_SESSION_TOKEN:
+        return await callback.answer("⚠️ Session expired due to bot update/restart. Please search again!", show_alert=True)
+        
+    # 🔐 Button Leeching Protection
+    if callback.from_user.id != searcher_id:
+        return await callback.answer("⚠️ This multi-search wasn't requested by you. Please search your own!", show_alert=True)
     
     if session_id not in MULTI_SEARCH_CACHE or time.time() - MULTI_SEARCH_CACHE[session_id]["timestamp"] > MULTI_SEARCH_TTL:
         return await callback.answer("⏳ Session Expired! Please search again.", show_alert=True)
@@ -527,7 +502,6 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
     if page == 0: await callback.answer(f"Fetching details for {movie_name}...", show_alert=False)
     else: await callback.answer()
     
-    # 💎 NEW: Fetch Limits for Callback
     from plugins.vip_system import DEFAULT_PLANS, FREE_USER_LIMITS
     user_id = callback.from_user.id
     active_plan = await db.get_active_vip_plan(user_id)
@@ -540,26 +514,20 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
     if not has_bypass: has_bypass = await db.has_active_verification_pass(user_id)
     shortener_on = settings.get("shortener_enabled", False) and not has_bypass
     
-    # Get the paginated results for this specific movie
     results = files[page * 10 : (page + 1) * 10]
-    
     buttons = []
     chat_type = callback.message.chat.type
     
-    # 👉 RESTORED: Bulk WebApp Delivery explicitly added into Multi-Search!
     if settings.get("bulk_enabled", True):
         bulk_limit = user_limits.get("bulk_select_limit", 10)
-        # 🚀 CHANGE: Upload up to 10,000 files to the cloud
         web_app_results = files[:10000]
         short_id = hashlib.md5(f"{user_id}_{movie_name}_{time.time()}".encode()).hexdigest()[:8]
         webapp_data = [f"{f.get('title', 'Unknown')}|{format_size(f.get('size', 0))}" for f in web_app_results]
         
         data_url = await upload_json_payload(webapp_data)
-        
         if data_url:
-            # 🚀 CHANGE: Pass the user's bulk_limit to the URL builder
-            web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url, bulk_limit)
-            
+            is_vip = True if active_plan else False
+            web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url, bulk_limit, is_vip)
             BULK_CACHE[short_id] = (time.time(), web_app_results, web_app_url)
             for k in list(BULK_CACHE.keys()):
                 if time.time() - BULK_CACHE[k][0] > BULK_CACHE_TTL: del BULK_CACHE[k]
@@ -574,24 +542,31 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
         if shortener_on: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
-        else: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{db_id}")])
+        else: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{BOT_SESSION_TOKEN}_{user_id}_{db_id}")])
     
-    # 👉 RESTORED: Help Us Button in Multi-Search
     buttons.append([InlineKeyboardButton(text="🤝 Help Us!", callback_data="help_us_menu")])
     
-    # 👉 RESTORED: Pagination in Multi-Search
     if len(files) > 10:
         total_pages = math.ceil(len(files) / 10)
         nav_buttons = []
-        if page > 0: nav_buttons.append(InlineKeyboardButton(text="◀️ Prev", callback_data=f"bms_sel_{session_id}_{movie_idx}_{page - 1}"))
+        if page > 0: nav_buttons.append(InlineKeyboardButton(text="◀️ Prev", callback_data=f"bms_sel_{BOT_SESSION_TOKEN}_{session_id}_{movie_idx}_{page - 1}_{user_id}"))
         nav_buttons.append(InlineKeyboardButton(text=f"Page {page + 1} of {total_pages}", callback_data="pages_info"))
-        if len(files) > (page + 1) * 10: nav_buttons.append(InlineKeyboardButton(text="Next ▶️", callback_data=f"bms_sel_{session_id}_{movie_idx}_{page + 1}"))
+        if len(files) > (page + 1) * 10: nav_buttons.append(InlineKeyboardButton(text="Next ▶️", callback_data=f"bms_sel_{BOT_SESSION_TOKEN}_{session_id}_{movie_idx}_{page + 1}_{user_id}"))
         buttons.append(nav_buttons)
 
-    # Back to Movie List
-    buttons.append([InlineKeyboardButton("⬅ Back to Movie List", callback_data=f"bms_back_{session_id}")])
+    # 🔐 Add Token/User to Back Button
+    buttons.append([InlineKeyboardButton("⬅ Back to Movie List", callback_data=f"bms_back_{BOT_SESSION_TOKEN}_{user_id}_{session_id}")])
     
-    caption = f"🎬 **{metadata['title']}**\n🗓 Year: `{metadata['release_date'][:4]}` | ⭐️ `{metadata['rating']}`\n🎭 Genre: `{metadata['genre']}`\n🗣 Language: `{metadata['language'].upper()}`\n\n📝 **Plot:** {metadata['plot']}\n\n🔍 Found {len(files)} matching files."
+    # 🚀 UPGRADED: Rich Metadata Format Display
+    caption = (
+        f"🎬 **{metadata['title']}** ({metadata['release_date'][:4]})\n"
+        f"⭐️ **Rating:** `{metadata['rating']}`\n"
+        f"🗣 **Language:** `{metadata['language']}`\n"
+        f"🎭 **Type:** `{metadata['genre']}`\n\n"
+        f"📝 **Synopsis:**\n_{metadata['plot']}_\n\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🔍 **Found:** `{len(files)}` matching files."
+    )
     
     try:
         await callback.message.edit_media(InputMediaPhoto(media=metadata["poster"], caption=caption))
@@ -601,10 +576,17 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
         try: await callback.message.edit_text(caption, reply_markup=InlineKeyboardMarkup(buttons))
         except Exception: pass
 
-@Client.on_callback_query(filters.regex(r"^bms_back_(.+)"))
+@Client.on_callback_query(filters.regex(r"^bms_back_(.+)_(.+)_(.+)"))
 async def handle_bulk_movie_back(client: Client, callback: CallbackQuery):
-    session_id = callback.matches[0].group(1)
+    token = callback.matches[0].group(1)
+    searcher_id = int(callback.matches[0].group(2))
+    session_id = callback.matches[0].group(3)
     
+    if token != BOT_SESSION_TOKEN:
+        return await callback.answer("⚠️ Session expired due to bot update/restart. Please search again!", show_alert=True)
+    if callback.from_user.id != searcher_id:
+        return await callback.answer("⚠️ This multi-search wasn't requested by you. Please search your own!", show_alert=True)
+        
     if session_id not in MULTI_SEARCH_CACHE or time.time() - MULTI_SEARCH_CACHE[session_id]["timestamp"] > MULTI_SEARCH_TTL:
         return await callback.answer("⏳ Session Expired! Please search again.", show_alert=True)
         
@@ -619,14 +601,25 @@ async def handle_bulk_movie_back(client: Client, callback: CallbackQuery):
         
     await callback.answer()
 
-
 # ==========================================
 # 🌟 NORMAL PAGINATION CALLBACKS
 # ==========================================
-@Client.on_callback_query(filters.regex(r"^(next|prev)_(\d+)_(.+)$"))
+@Client.on_callback_query(filters.regex(r"^(next|prev)_(.+)_(.+)_(.+)_(.+)$"))
 async def handle_pagination(client: Client, callback: CallbackQuery):
-    action, page_str, base_query = callback.data.split("_", 2)
-    page = int(page_str)
+    # action_TOKEN_USERID_PAGE_QUERY
+    action = callback.matches[0].group(1)
+    token = callback.matches[0].group(2)
+    searcher_id = int(callback.matches[0].group(3))
+    page = int(callback.matches[0].group(4))
+    base_query = callback.matches[0].group(5)
+    
+    # 🔐 Restart Kill-Switch
+    if token != BOT_SESSION_TOKEN:
+        return await callback.answer("⚠️ Session expired due to bot update/restart. Please search again!", show_alert=True)
+        
+    # 🔐 Button Leeching Protection
+    if callback.from_user.id != searcher_id:
+        return await callback.answer("⚠️ This search wasn't requested by you. Please search your own movie!", show_alert=True)
     
     user_id = callback.from_user.id
     chat_id = callback.message.chat.id
@@ -645,7 +638,6 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     buttons = []
     settings = await db.get_settings()
     
-    # 💎 NEW: Fetch Limits for Pagination
     from plugins.vip_system import DEFAULT_PLANS, FREE_USER_LIMITS
     active_plan = await db.get_active_vip_plan(user_id)
     user_limits = DEFAULT_PLANS.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan else FREE_USER_LIMITS
@@ -654,20 +646,16 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     if not has_bypass: has_bypass = await db.has_active_verification_pass(user_id)
     shortener_on = settings.get("shortener_enabled", False) and not has_bypass
 
-    # 👉 RESTORED: Bulk Delivery in Single Search Pagination
     if settings.get("bulk_enabled", True):
         bulk_limit = user_limits.get("bulk_select_limit", 10)
-        # 🚀 CHANGE: Upload up to 10,000 files to the cloud
         web_app_results = filtered_results[:10000]
         short_id = hashlib.md5(f"{user_id}_{base_query}_{time.time()}".encode()).hexdigest()[:8]
         webapp_data = [f"{f.get('title', 'Unknown')}|{format_size(f.get('size', 0))}" for f in web_app_results]
         
         data_url = await upload_json_payload(webapp_data)
-        
         if data_url:
-            # 🚀 CHANGE: Pass the user's bulk_limit to the URL builder
-            web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url, bulk_limit)
-            
+            is_vip = True if active_plan else False
+            web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url, bulk_limit, is_vip)
             BULK_CACHE[short_id] = (time.time(), web_app_results, web_app_url)
             for k in list(BULK_CACHE.keys()):
                 if time.time() - BULK_CACHE[k][0] > BULK_CACHE_TTL: del BULK_CACHE[k]
@@ -682,16 +670,15 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
         if shortener_on: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
-        else: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{db_id}")])
+        else: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{BOT_SESSION_TOKEN}_{user_id}_{db_id}")])
     
-    # 👉 RESTORED: Help Us
     buttons.append([InlineKeyboardButton(text="🤝 Help Us!", callback_data="help_us_menu")])
     
     total_pages = math.ceil(len(filtered_results) / 10)
     nav_buttons = []
-    if page > 0: nav_buttons.append(InlineKeyboardButton(text="◀️ Prev", callback_data=f"prev_{page - 1}_{base_query}"))
+    if page > 0: nav_buttons.append(InlineKeyboardButton(text="◀️ Prev", callback_data=f"prev_{BOT_SESSION_TOKEN}_{user_id}_{page - 1}_{base_query}"))
     nav_buttons.append(InlineKeyboardButton(text=f"Page {page + 1} of {total_pages}", callback_data="pages_info"))
-    if len(filtered_results) > (page + 1) * 10: nav_buttons.append(InlineKeyboardButton(text="Next ▶️", callback_data=f"next_{page + 1}_{base_query}"))
+    if len(filtered_results) > (page + 1) * 10: nav_buttons.append(InlineKeyboardButton(text="Next ▶️", callback_data=f"next_{BOT_SESSION_TOKEN}_{user_id}_{page + 1}_{base_query}"))
     buttons.append(nav_buttons)
     
     await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
@@ -705,9 +692,7 @@ async def inline_search(client: Client, query: InlineQuery):
     if len(search_query) < 3: 
         return await query.answer([])
 
-    # 🛑 1. CHECK FORCE SUB (FSUB) FIRST
     is_joined = await check_double_fsub(client, user_id)
-    
     if not is_joined:
         buttons = []
         for idx, channel in enumerate(Config.FSUB_CHANNELS[:2], start=1):
@@ -730,23 +715,17 @@ async def inline_search(client: Client, query: InlineQuery):
         )
         return await query.answer([join_article], cache_time=0, is_personal=True)
 
-    # 🎬 2. IF SUBSCRIBED, SHOW ACTUAL FILES FOR DIRECT DELIVERY
     results = await db.search_files(search_query, skip=0, limit=Config.MAX_RESULTS, exact=False)
     articles = []
-    
-    # 📝 Fetch the global/default custom caption ONCE before the loop
     raw_caption = await db.get_custom_caption(None)
     
     for idx, file in enumerate(results):
         file_id = file.get("file_id")
-        if not file_id: 
-            continue
+        if not file_id: continue
             
-        # 📝 Format the custom caption placeholders for this specific file
         f_name = file.get("title", "Unknown File")
         f_size = format_size(file.get('size', 0))
         mention = f"<a href='tg://user?id={user_id}'>{query.from_user.first_name}</a>"
-        
         final_caption = raw_caption.replace("{file_name}", f_name).replace("{size}", f_size).replace("{mention}", mention)
             
         articles.append(
