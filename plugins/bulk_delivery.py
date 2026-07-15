@@ -91,7 +91,7 @@ async def handle_bulk_delivery(client: Client, message: Message):
                     try:
                         chat = await client.get_chat(channel)
                         invite_link = chat.invite_link if chat.invite_link else await client.export_chat_invite_link(channel)
-                    except Exception: invite_link = "https://t.me/telegram"
+                    except Exception: invite_link = "https://t.me/llathu63035"
                     buttons.append([InlineKeyboardButton(text=f"Join Channel #{idx}", url=invite_link)])
                 return await message.reply_text("🛑 **Lock Warning:**\nYou must join our official channels before downloading bulk files.", reply_markup=InlineKeyboardMarkup(buttons))
 
