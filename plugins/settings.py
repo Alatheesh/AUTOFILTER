@@ -8,6 +8,7 @@ from pyrogram.enums import ChatType
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from config import Config
 from database.multi_db import db
+from plugins.background_worker import is_fast_mode_active, toggle_fast_mode
 
 logger = logging.getLogger(__name__)
 
@@ -783,10 +784,15 @@ async def get_worker2_text_and_buttons():
         f"💡 *Note: This background process routes with a safety buffer delay to avoid hitting Telegram flood limits.*"
     )
 
+    fast_status = "⚡ Fast Mode: ON" if is_fast_mode_active() else "🐢 Fast Mode: OFF"
+
     buttons = [
         [
-            InlineKeyboardButton("🔙 Back", callback_data="stats_home"),
+            InlineKeyboardButton(fast_status, callback_data="stats_toggle_fastmode"),
             InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w2")
+        ],
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="stats_home")
         ]
     ]
     return text, InlineKeyboardMarkup(buttons)
@@ -826,6 +832,17 @@ async def bot_stats_dashboard(client: Client, message: Message):
 async def stats_callback_handler(client: Client, callback: CallbackQuery):
     action = callback.data
     try:
+        # 🚀 NEW: Fast Mode Button Interceptor
+        if action == "stats_toggle_fastmode":
+            from plugins.background_worker import toggle_fast_mode
+            new_state = toggle_fast_mode()
+            status_msg = "Fast Mode Activated! ⚡" if new_state else "Returned to Normal Speed 🐢"
+            await callback.answer(status_msg, show_alert=False)
+            
+            # Refresh the UI instantly to show the new button state
+            text, markup = await get_worker2_text_and_buttons()
+            return await callback.message.edit_text(text, reply_markup=markup)
+
         if action == "stats_home": text, markup = await get_stats_home_text_and_buttons()
         elif action == "stats_worker1": text, markup = await get_worker1_text_and_buttons()
         elif action == "stats_worker2": text, markup = await get_worker2_text_and_buttons()
@@ -840,5 +857,7 @@ async def stats_callback_handler(client: Client, callback: CallbackQuery):
             elif action == "stats_refresh_w3_home": text, markup = await get_worker3_home_text_and_buttons()
             elif action == "stats_refresh_w3_sched": text, markup = await get_worker3_sched_text_and_buttons()
             elif action == "stats_refresh_w3_recent": text, markup = await get_worker3_recent_text_and_buttons()
+            
         await callback.message.edit_text(text, reply_markup=markup)
-    except Exception: await callback.answer("⚠️ Processing sync issue. Try running /stats again.", show_alert=True)
+    except Exception: 
+        await callback.answer("⚠️ Processing sync issue. Try running /stats again.", show_alert=True)
