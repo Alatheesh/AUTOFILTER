@@ -5,16 +5,26 @@ import aiofiles
 from pymediainfo import MediaInfo
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
-from pyrogram.types import Message
 from database.multi_db import db
 from config import Config
 
 logger = logging.getLogger(__name__)
 
 # ==========================================
-# 🌙 GLOBAL NIGHT MODE TOGGLE
+# ⚡ DYNAMIC FAST MODE ENGINE
 # ==========================================
-NIGHT_MODE_SPEED = False 
+FAST_MODE_ACTIVE = False 
+
+def is_fast_mode_active():
+    """Returns the current state of the Fast Mode."""
+    global FAST_MODE_ACTIVE
+    return FAST_MODE_ACTIVE
+
+def toggle_fast_mode():
+    """Flips the Fast Mode state and returns the new state."""
+    global FAST_MODE_ACTIVE
+    FAST_MODE_ACTIVE = not FAST_MODE_ACTIVE
+    return FAST_MODE_ACTIVE
 
 # A clean, scalable dictionary of languages and their MKV abbreviations
 LANGUAGE_MAP = {
@@ -39,82 +49,6 @@ LANGUAGE_MAP = {
     "russian": ["russian", "'ru'", "'rus'"],
     "arabic": ["arabic", "'ar'", "'ara'"]
 }
-
-def format_eta(seconds):
-    """Helper to convert seconds into readable ETA format."""
-    if seconds <= 0: return "No pending files!"
-    days, hours, minutes = seconds // 86400, (seconds % 86400) // 3600, (seconds % 3600) // 60
-    eta = []
-    if days > 0: eta.append(f"{int(days)}d")
-    if hours > 0: eta.append(f"{int(hours)}h")
-    if minutes > 0: eta.append(f"{int(minutes)}m")
-    return " ".join(eta) if eta else "< 1 minute"
-
-# ==========================================
-# 🚀 ADMIN COMMAND: DYNAMIC SPEED TOGGLE
-# ==========================================
-@Client.on_message(filters.command("nightmode") & filters.user(Config.ADMINS))
-async def toggle_night_mode(client: Client, message: Message):
-    global NIGHT_MODE_SPEED
-
-    if len(message.command) < 2 or message.command[1].lower() not in ["on", "off"]:
-        status = "🟢 ON (Fast)" if NIGHT_MODE_SPEED else "🔴 OFF (Safe)"
-        return await message.reply_text(
-            f"🌙 **Night Mode Speed**\n\n"
-            f"Current Status: `{status}`\n\n"
-            f"**Usage:**\n"
-            f"`/nightmode on` - Speeds up background processing.\n"
-            f"`/nightmode off` - Returns to safe daytime speeds."
-        )
-
-    command_arg = message.command[1].lower()
-    new_status = command_arg == "on"
-
-    if new_status == NIGHT_MODE_SPEED:
-        return await message.reply_text(f"⚠️ Night mode is already `{'ON' if NIGHT_MODE_SPEED else 'OFF'}`.")
-
-    status_msg = await message.reply_text("⏳ **Calculating queue and ETAs...**")
-
-    # Count all pending files across all database shards
-    pending_count = 0
-    for coll in db.collections:
-        pending_count += await coll.count_documents({"language": "pending"})
-
-    # Calculate exact execution times
-    normal_eta_secs = pending_count * 5.5
-    night_eta_secs = pending_count * 3.5
-
-    if new_status: # Turning ON
-        old_eta = format_eta(normal_eta_secs)
-        new_eta = format_eta(night_eta_secs)
-        time_saved = format_eta(normal_eta_secs - night_eta_secs)
-        NIGHT_MODE_SPEED = True
-        
-        text = (
-            "🌙 **NIGHT MODE ACTIVATED** 🚀\n\n"
-            f"📂 **Pending Queue:** `{pending_count:,}` files\n"
-            f"🐢 **Old ETA (Normal):** `{old_eta}`\n"
-            f"⚡ **New ETA (Night):** `{new_eta}`\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"🎉 **Total Time Saved:** `{time_saved}`\n\n"
-            "*The worker will now process files significantly faster.*"
-        )
-    else: # Turning OFF
-        old_eta = format_eta(night_eta_secs)
-        new_eta = format_eta(normal_eta_secs)
-        NIGHT_MODE_SPEED = False
-        
-        text = (
-            "☀️ **DAY MODE ACTIVATED** 🐢\n\n"
-            f"📂 **Pending Queue:** `{pending_count:,}` files\n"
-            f"⚡ **Old ETA (Night):** `{old_eta}`\n"
-            f"🐢 **New ETA (Normal):** `{new_eta}`\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            "*Speed returned to safe limits to prevent Telegram FloodWaits during peak hours.*"
-        )
-
-    await status_msg.edit_text(text)
-
 
 async def extract_language_micro_chunk(client: Client, file_id: str, unique_id: str) -> tuple[str, str]:
     """Streams a 2MB chunk and extracts both Audio and Subtitle tracks."""
@@ -209,8 +143,8 @@ async def start_background_language_indexer(client: Client):
                 }}
             )
 
-            # 🛡️ DYNAMIC SAFETY TIMER 
-            sleep_time = 1.0 if NIGHT_MODE_SPEED else 3.0
+            # 🛡️ DYNAMIC SAFETY TIMER
+            sleep_time = 1.0 if FAST_MODE_ACTIVE else 3.0
             await asyncio.sleep(sleep_time)
 
         except Exception as e:
