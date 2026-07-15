@@ -167,27 +167,37 @@ async def cancel_plot_callback(client: Client, callback: CallbackQuery):
 # ==========================================
 @Client.on_message(filters.command("history"))
 async def view_search_history(client: Client, message: Message):
-    user_id = message.from_user.id
-    
-    # 🚀 Fetch History PERMANENTLY from MongoDB
-    user_data = await db.users.find_one({"user_id": user_id})
-    history = user_data.get("search_history", []) if user_data else []
+    user_data = await db.users.find_one({"user_id": message.from_user.id})
+    raw_history = user_data.get("search_history", []) if user_data else []
 
-    if not history:
+    if not raw_history:
         await message.reply_text("✨ Your query history is presently clean!")
         raise StopPropagation
 
-    history_lines = []
-    for idx, entry in enumerate(history, start=1):
-        h_type = entry.get("type", "search").upper()
-        h_query = entry.get("query", "")
-        history_lines.append(f"{idx}. `[{h_type}]` {h_query}")
+    # 🧠 THE FIX: Filter out duplicates while keeping the chronological order
+    unique_history = []
+    seen_queries = set()
+    
+    for entry in raw_history:
+        # Standardize the query to lowercase so "Avengers" and "avengers" are caught as duplicates
+        query_key = str(entry.get("query", "")).strip().lower()
+        
+        if query_key not in seen_queries:
+            unique_history.append(entry)
+            seen_queries.add(query_key)
+
+    # Build the final clean list
+    history_lines = [
+        f"{idx}. `[{entry.get('type', 'search').upper()}]` {entry.get('query', '')}" 
+        for idx, entry in enumerate(unique_history, start=1)
+    ]
 
     history_text = (
-        f"📑 **Your Recent Search & Plot History (Top 10):**\n\n"
+        f"📑 **Your Recent Search & Plot History:**\n\n"
         f"{chr(10).join(history_lines)}\n\n"
         f"💡 Use `/clear_history` to wipe storage logs."
     )
+    
     await message.reply_text(history_text)
     raise StopPropagation
 
