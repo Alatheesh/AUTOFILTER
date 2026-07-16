@@ -81,14 +81,14 @@ async def contextual_punishment(client: Client, message: Message):
             mutes = await db.add_punishment(target_user, chat_id_str, "mute", expiry_ts=time.time()+86400, reason="Exceeded warnings limit via manual warn")
             await db.remove_punishment(target_user, chat_id_str, "warn")
             
-            if not is_global: # 🚀 NATIVE TELEGRAM MUTE
+            if not is_global: 
                 until_dt = datetime.datetime.now() + datetime.timedelta(days=1)
                 try: await client.restrict_chat_member(message.chat.id, target_user, ChatPermissions(can_send_messages=False), until_date=until_dt)
                 except Exception: pass
             
             if ab_en and mutes >= mute_lim:
                 await db.add_punishment(target_user, chat_id_str, "ban", reason="Exceeded mute limit")
-                if not is_global: # 🚀 NATIVE TELEGRAM BAN
+                if not is_global: 
                     try: await client.ban_chat_member(message.chat.id, target_user)
                     except Exception: pass
                 await message.reply_text(f"🔴 User `{target_user}` hit {warn_lim}/{warn_lim} warnings and {mute_lim}/{mute_lim} mutes. They have been **Auto-Banned**.")
@@ -100,14 +100,14 @@ async def contextual_punishment(client: Client, message: Message):
     elif cmd == "mute":
         mutes = await db.add_punishment(target_user, chat_id_str, "mute", expiry_ts=time.time() + duration_secs, reason=reason)
         
-        if not is_global: # 🚀 NATIVE TELEGRAM MUTE
+        if not is_global: 
             until_dt = datetime.datetime.now() + datetime.timedelta(seconds=duration_secs)
             try: await client.restrict_chat_member(message.chat.id, target_user, ChatPermissions(can_send_messages=False), until_date=until_dt)
             except Exception: pass
 
         if ab_en and mutes >= mute_lim:
             await db.add_punishment(target_user, chat_id_str, "ban", reason="Exceeded mute limit via manual mute")
-            if not is_global: # 🚀 NATIVE TELEGRAM BAN
+            if not is_global: 
                 try: await client.ban_chat_member(message.chat.id, target_user)
                 except Exception: pass
             await message.reply_text(f"🚫 User `{target_user}` hit {mute_lim}/{mute_lim} mutes and has been **Auto-Banned**.")
@@ -118,7 +118,7 @@ async def contextual_punishment(client: Client, message: Message):
 
     elif cmd == "ban":
         await db.add_punishment(target_user, chat_id_str, "ban", reason=reason)
-        if not is_global: # 🚀 NATIVE TELEGRAM BAN
+        if not is_global: 
             try: await client.ban_chat_member(message.chat.id, target_user)
             except Exception: pass
         btn = None if is_global else InlineKeyboardMarkup([[InlineKeyboardButton("✅ Unban", callback_data=f"admin_unban_{chat_id_str}_{target_user}")]])
@@ -128,7 +128,7 @@ async def contextual_punishment(client: Client, message: Message):
     elif cmd in ["unwarn", "unmute", "unban"]:
         await db.remove_punishment(target_user, chat_id_str, cmd.replace("un", ""))
         
-        if not is_global: # 🚀 NATIVE RESTORE
+        if not is_global: 
             try: await client.unban_chat_member(message.chat.id, target_user)
             except Exception: pass
             
@@ -191,7 +191,6 @@ async def auto_moderation_triggers(client: Client, message: Message):
     text = message.text
     current_time = time.time()
     
-    # 🚀 FIX: Fetch both Global AND Group Settings
     global_settings = await db.get_settings()
     global_bad_words = global_settings.get("bad_words", [])
     
@@ -205,10 +204,13 @@ async def auto_moderation_triggers(client: Client, message: Message):
         mute_lim = g_sett.get("mute_limit", 3)
         local_bad_words = g_sett.get("bad_words", [])
     else:
-        # Private Message Defaults
-        am_en, link_en, ab_en = False, False, False # Don't auto-mute for links in PM
+        # 🚀 FIX: Private Message Defaults now sync with Global Limits
+        am_en = global_settings.get("auto_mute_enabled", True) 
+        link_en = False # Don't auto-mute for links in PM
         bw_en = True # ALWAYS check bad words in PM
-        warn_lim, mute_lim = 3, 3
+        ab_en = global_settings.get("auto_ban_enabled", True)
+        warn_lim = global_settings.get("warn_limit", 3)
+        mute_lim = global_settings.get("mute_limit", 3)
         local_bad_words = []
 
     issue_warn = False
@@ -247,9 +249,8 @@ async def auto_moderation_triggers(client: Client, message: Message):
         except Exception: pass
         
         warns = await db.add_punishment(user_id, chat_id_str, "warn", reason=warn_reason)
-        bot_me = await client.get_me()
         
-        # 🚀 PREPARE PM APPEAL SENDER
+        # PREPARE PM APPEAL SENDER
         async def send_pm_appeal(punishment_type):
             appeal_cb = f"appeal_{chat_id_str}_{punishment_type}_{user_id}"
             loc_name = "Global System" if chat_id_str == "global" else message.chat.title
@@ -257,7 +258,7 @@ async def auto_moderation_triggers(client: Client, message: Message):
                 msg = f"🚫 **Notice:** You were `{punishment_type}d` in **{loc_name}**.\n**Reason:** {warn_reason}\n\nIf you believe this was an error, click below to submit an appeal to the administrators."
                 btn = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Appeal", callback_data=appeal_cb)]])
                 await client.send_message(user_id, msg, reply_markup=btn)
-            except Exception: pass # User blocked bot in PM
+            except Exception: pass 
         
         if am_en and warns >= warn_lim:
             mutes = await db.add_punishment(user_id, chat_id_str, "mute", expiry_ts=current_time + 86400, reason=f"Hit warnings limit ({warn_reason})")
@@ -280,12 +281,20 @@ async def auto_moderation_triggers(client: Client, message: Message):
         else:
             if message.chat.type != ChatType.PRIVATE:
                 alert = await client.send_message(message.chat.id, f"⚠️ {message.from_user.mention}, you have been warned! ({warns}/{warn_lim})\n**Reason:** {warn_reason}")
-                await asyncio.sleep(10)
-                try: await alert.delete()
-                except Exception: pass
+                
+                # Background task to delete alert so StopPropagation triggers instantly!
+                async def auto_delete_alert(msg_to_delete):
+                    await asyncio.sleep(10)
+                    try: await msg_to_delete.delete()
+                    except Exception: pass
+                asyncio.create_task(auto_delete_alert(alert))
+                
             else:
                 # Private Message Warning
                 await client.send_message(user_id, f"⚠️ **SYSTEM WARNING** ({warns}/{warn_lim})\nYour message was deleted. Reason: {warn_reason}. Repeated violations will result in a global ban.")
+
+        # 🛑 BLOCK MESSAGE FROM REACHING SEARCH ENGINE
+        raise StopPropagation
 
 # ==========================================
 # ⚖️ APPEALS SYSTEM (With Spam & Leech Protection)
@@ -296,11 +305,9 @@ async def process_appeal(client: Client, callback: CallbackQuery):
     ptype = callback.matches[0].group(2)
     target_user_id = int(callback.matches[0].group(3))
     
-    # 🚀 BUTTON LEECH PROTECTION
     if callback.from_user.id != target_user_id:
         return await callback.answer("⚠️ Access Denied: You cannot submit an appeal for someone else!", show_alert=True)
         
-    # 🚀 SPAM PROTECTION (1 Appeal per Hour)
     current_time = time.time()
     if target_user_id in APPEAL_COOLDOWN and current_time - APPEAL_COOLDOWN[target_user_id] < 3600:
         rem = int((3600 - (current_time - APPEAL_COOLDOWN[target_user_id])) / 60)
@@ -343,7 +350,6 @@ async def admin_appeal_actions(client: Client, callback: CallbackQuery):
 
     await db.remove_punishment(target_user, chat_id_str, action.replace("un", ""))
     
-    # 🚀 RESTORE NATIVE TELEGRAM ACCESS IF IT WAS A GROUP BAN/MUTE
     if chat_id_str != "global":
         try: await client.unban_chat_member(int(chat_id_str), target_user)
         except Exception: pass
