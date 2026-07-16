@@ -171,7 +171,7 @@ async def admin_input_catcher(client: Client, message: Message):
             await finish_input(f"✅ **Filter Delete Time Saved:** `{user_input} Minutes`", "set_autodelete")
         else: await message.reply_text("❌ **Invalid Input!** Please send only a number in minutes (e.g., `5`).")
 
-    # 📝 NEW: FILE CAPTION INPUT CATCHER
+    # 📝 FILE CAPTION INPUT CATCHER
     elif state.startswith("setup_caption_"):
         scope = state.replace("setup_caption_", "")
         
@@ -206,7 +206,7 @@ async def settings_router(client: Client, message: Message):
         mode = g_sett.get("search_mode", "let_members_choose")
         buttons = [
             [InlineKeyboardButton("🛡️ Moderation Rules Hub", callback_data=f"set_mod_local_{message.chat.id}")],
-            [InlineKeyboardButton("📝 File Caption Settings", callback_data=f"set_caption_local_{message.chat.id}")], # <-- NEW BUTTON
+            [InlineKeyboardButton("📝 File Caption Settings", callback_data=f"set_caption_local_{message.chat.id}")],
             [InlineKeyboardButton(text=f"{'✅' if mode=='force_default' else '❌'} Force Default", callback_data=f"gset_mode_force_default_{message.chat.id}"),
              InlineKeyboardButton(text=f"{'✅' if mode=='force_interactive' else '❌'} Force Interactive", callback_data=f"gset_mode_force_interactive_{message.chat.id}")],
             [InlineKeyboardButton(text=f"{'✅' if mode=='let_members_choose' else '❌'} Let Members Choose", callback_data=f"gset_mode_let_members_choose_{message.chat.id}")]
@@ -231,8 +231,8 @@ async def admin_direct_command(client: Client, message: Message):
         [InlineKeyboardButton("🔗 Shortener Settings", callback_data="set_shortener")],
         [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests")],
         [InlineKeyboardButton("🕵️‍♂️ Inside Settings", callback_data="set_inside")], 
-        [InlineKeyboardButton("🗑 Auto-Delete Filters", callback_data="set_autodelete")],
-        [InlineKeyboardButton("📝 Global File Caption", callback_data="set_caption_global")], # <-- NEW BUTTON
+        [InlineKeyboardButton("🗑 Search & Auto-Delete Settings", callback_data="set_autodelete")], # <-- RENAMED 
+        [InlineKeyboardButton("📝 Global File Caption", callback_data="set_caption_global")], 
         [InlineKeyboardButton("🛡️ Global Moderation Hub", callback_data="set_mod_global")],
         [InlineKeyboardButton("🔙 Exit", callback_data="tier_root_fallback")]
     ]
@@ -335,7 +335,6 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
             keyboard.append([InlineKeyboardButton("📊 User Stats Dashboard", callback_data="ui_userstats")])
             keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="set_home")])
             
-        # 🚀 THE FIX: This safely connects the fallback settings hub back to your UI features menu!
         keyboard.append([InlineKeyboardButton("🔙 Back to Features", callback_data="ui_features")])
         
         return await query.message.edit_text("🎛️ **Central Command Settings Hub**", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -343,7 +342,7 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
 # ==========================================
 # 👑 CREATOR & MODERATION CALLBACKS
 # ==========================================
-@Client.on_callback_query(filters.regex(r"^(set_home|set_inside|set_shortener|set_requests|set_autodelete|set_mod_|mod_|inside_|time_|toggle_|set_placements|toggle_place_|set_caption_|edit_caption_|del_caption_|guide_caption_)"))
+@Client.on_callback_query(filters.regex(r"^(set_home|set_inside|set_shortener|set_requests|set_autodelete|toggle_multisearch|set_mod_|mod_|inside_|time_|toggle_|set_placements|toggle_place_|set_caption_|edit_caption_|del_caption_|guide_caption_)"))
 async def settings_callbacks(client: Client, callback: CallbackQuery):
     action = callback.data
     user_id = callback.from_user.id
@@ -357,8 +356,8 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
             [InlineKeyboardButton("🔗 Shortener Settings", callback_data="set_shortener")],
             [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests")],
             [InlineKeyboardButton("🕵️‍♂️ Inside Settings", callback_data="set_inside")], 
-            [InlineKeyboardButton("🗑 Auto-Delete Filters", callback_data="set_autodelete")],
-            [InlineKeyboardButton("📝 Global File Caption", callback_data="set_caption_global")], # <-- NEW BUTTON
+            [InlineKeyboardButton("🗑 Search & Auto-Delete Settings", callback_data="set_autodelete")], # <-- RENAMED
+            [InlineKeyboardButton("📝 Global File Caption", callback_data="set_caption_global")], 
             [InlineKeyboardButton("🛡️ Global Moderation Hub", callback_data="set_mod_global")],
             [InlineKeyboardButton("🔙 Exit", callback_data="tier_root_fallback")]
         ]
@@ -557,18 +556,37 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         await db.update_settings({"requests_enabled": not settings.get("requests_enabled", True)})
         callback.data = "set_requests"; await settings_callbacks(client, callback)
 
+    # 🚀 UPGRADED: SEARCH & AUTO-DELETE HUB
     elif action == "set_autodelete":
         settings = await db.get_settings()
-        f_status, m_status = "🟢 ON" if settings.get("file_delete_enabled", False) else "🔴 OFF", "🟢 ON" if settings.get("filter_delete_enabled", False) else "🔴 OFF"
-        f_time, m_time = settings.get("file_delete_time", 10), settings.get("filter_delete_time", 5)
+        
+        f_status = "🟢 ON" if settings.get("file_delete_enabled", False) else "🔴 OFF"
+        m_status = "🟢 ON" if settings.get("filter_delete_enabled", False) else "🔴 OFF"
+        ms_status = "🟢 ON" if settings.get("multi_search_enabled", True) else "🔴 OFF"
+        
+        f_time = settings.get("file_delete_time", 10)
+        m_time = settings.get("filter_delete_time", 5)
 
-        text = f"🗑 **Auto-Delete (Ghost Mode) Settings**\n\n📂 **File Deletion:** {f_status} `({f_time} mins)`\n🔍 **Search Filter Deletion:** {m_status} `({m_time} mins)`"
+        text = (
+            f"🗑 **Search & Auto-Delete Settings**\n\n"
+            f"🌟 **Multi-Search Engine:** {ms_status}\n"
+            f"📂 **File Deletion:** {f_status} `({f_time} mins)`\n"
+            f"🔍 **Search Filter Deletion:** {m_status} `({m_time} mins)`"
+        )
         buttons = [
             [InlineKeyboardButton(f"Files: {f_status}", callback_data="toggle_file_del"), InlineKeyboardButton(f"Filters: {m_status}", callback_data="toggle_filter_del")],
             [InlineKeyboardButton("⏱ Set File Time", callback_data="time_file_del"), InlineKeyboardButton("⏱ Set Filter Time", callback_data="time_filter_del")],
+            [InlineKeyboardButton(f"🌟 Multi-Search Engine: {ms_status}", callback_data="toggle_multisearch")],
             [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="set_home")]
         ]
         await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+    # 🚀 NEW: MULTI-SEARCH TOGGLE HANDLER
+    elif action == "toggle_multisearch":
+        settings = await db.get_settings()
+        await db.update_settings({"multi_search_enabled": not settings.get("multi_search_enabled", True)})
+        callback.data = "set_autodelete"
+        await settings_callbacks(client, callback)
 
     elif action == "toggle_file_del":
         settings = await db.get_settings()
@@ -588,7 +606,7 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         ADMIN_STATE[user_id] = {"state": "setup_filter_time", "msg_id": callback.message.id, "timestamp": time.time()}
         await callback.message.edit_text("✏️ **Send the Search Result Auto-Delete time in MINUTES.**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_autodelete")]]))
 
-    # 📝 NEW: FILE CAPTION MENUS & LOGIC
+    # 📝 FILE CAPTION MENUS & LOGIC
     elif action.startswith("set_caption_"):
         scope = action.replace("set_caption_", "")
         
@@ -832,14 +850,12 @@ async def bot_stats_dashboard(client: Client, message: Message):
 async def stats_callback_handler(client: Client, callback: CallbackQuery):
     action = callback.data
     try:
-        # 🚀 NEW: Fast Mode Button Interceptor
         if action == "stats_toggle_fastmode":
             from plugins.background_worker import toggle_fast_mode
             new_state = toggle_fast_mode()
             status_msg = "Fast Mode Activated! ⚡" if new_state else "Returned to Normal Speed 🐢"
             await callback.answer(status_msg, show_alert=False)
             
-            # Refresh the UI instantly to show the new button state
             text, markup = await get_worker2_text_and_buttons()
             return await callback.message.edit_text(text, reply_markup=markup)
 
