@@ -28,8 +28,6 @@ logger = logging.getLogger(__name__)
 # ==========================================
 # 🔐 SESSION SECURITY TOKEN (Restart Kill-Switch)
 # ==========================================
-# This generates a new random token every time the bot starts/restarts.
-# If an old button has a different token, the bot knows it's from a previous session!
 BOT_SESSION_TOKEN = str(uuid.uuid4())[:6]
 
 # --- RAM CACHE SYSTEMS ---
@@ -51,7 +49,6 @@ SEARCH_STICKERS = [
 ]
 BULK_BANNER = "https://telegra.ph/file/f8b495d98fd4d89c99150.jpg"
 
-# Language Code Mapper for better Metadata Display
 LANG_MAP = {"en": "English", "hi": "Hindi", "ta": "Tamil", "te": "Telugu", "ml": "Malayalam", "kn": "Kannada", "ja": "Japanese", "ko": "Korean", "es": "Spanish", "fr": "French"}
 
 def levenshtein_distance(s1: str, s2: str) -> int:
@@ -68,7 +65,6 @@ def levenshtein_distance(s1: str, s2: str) -> int:
         previous_row = current_row
     return previous_row[-1]
 
-# 🚀 UPGRADED: Rich Metadata Fetcher
 async def fetch_imdb_tmdb(query: str) -> dict:
     tmdb_keys = getattr(Config, "TMDB_API_KEYS", [])
     default_meta = {
@@ -92,7 +88,6 @@ async def fetch_imdb_tmdb(query: str) -> dict:
                     if resp.status == 200:
                         data = await resp.json()
                         if data.get("results"):
-                            # Filter out people, keep movies/tv
                             media_results = [r for r in data["results"] if r.get("media_type") in ["movie", "tv"]]
                             if media_results:
                                 item = media_results[0]
@@ -169,29 +164,6 @@ def build_bulk_summary_text(found, not_found, time_taken):
     return text
 
 # ==========================================
-# 🚀 ADMIN COMMAND: CONFIG MULTI-SEARCH
-# ==========================================
-@Client.on_message(filters.command("setmultisearch") & filters.user(Config.ADMINS))
-async def set_multi_search_limit(client: Client, message: Message):
-    if len(message.command) < 2:
-        settings = await db.get_settings()
-        limit = settings.get("multi_search_limit", 5)
-        status = f"{limit} movies/search" if limit > 0 else "Disabled"
-        return await message.reply_text(f"⚙️ **Multi Search Settings**\n\nCurrently: `{status}`\n\nTo change, use:\n`/setmultisearch <number>` (e.g. `/setmultisearch 10`)\n`/setmultisearch off`")
-    
-    arg = message.command[1].strip().lower()
-    if arg == "off":
-        await db.update_settings({"multi_search_limit": 0})
-        await message.reply_text("✅ Multi-Movie search has been **disabled**.")
-    elif arg.isdigit():
-        new_limit = int(arg)
-        await db.update_settings({"multi_search_limit": new_limit})
-        await message.reply_text(f"✅ Multi-Movie search limit updated to **{new_limit} movies per request**.")
-    else:
-        await message.reply_text("❌ Invalid input. Use a number or 'off'.")
-    raise StopPropagation
-
-# ==========================================
 # 🚀 CORE SEARCH ENGINE
 # ==========================================
 @Client.on_message((filters.group | filters.private) & filters.text & ~filters.regex(r"^/"))
@@ -264,8 +236,13 @@ async def auto_filter(client: Client, message: Message):
     )
         
     if len(unique_movies) > 1:
+        # 🚀 MASTER TOGGLE CHECK
+        if not settings.get("multi_search_enabled", True):
+            return await message.reply_text("⚠️ **Due to a technical issue, Multi-Search is temporarily paused for everyone. Please wait and stay with us, we will make Multi-Search faster as soon as possible!**")
+
+        # VIP LIMIT CHECK
         multi_limit = user_limits.get("multi_search_limit", 1)
-        if multi_limit == 0: return await message.reply_text("❌ Multi-movie search is currently disabled.")
+        if multi_limit == 0: return await message.reply_text("❌ Multi-movie search is currently disabled for your tier.")
         if len(unique_movies) > multi_limit:
             return await message.reply_text(f"❌ **Maximum allowed movies per search exceeded.**\n\nYour Limit : `{multi_limit}`\nRequested : `{len(unique_movies)}`\n\n_Upgrade to a higher VIP tier to search more at once!_")
 
@@ -310,9 +287,13 @@ async def auto_filter(client: Client, message: Message):
         total_time = time.time() - start_time
         summary_text = build_bulk_summary_text(found_movies, not_found_movies, total_time)
         
+        # 🚀 INJECT AUTO-DELETE INTIMATION INTO THE SUMMARY
+        if settings.get("filter_delete_enabled", False):
+            m_time = settings.get("filter_delete_time", 5)
+            summary_text += f"\n\n⏳ *Note: This message auto-deletes in {m_time} minutes.*"
+        
         buttons = []
         for i, (m_name, files) in enumerate(found_movies):
-            # 🔐 INCLUDE TOKEN & USER_ID FOR MULTI-SEARCH BUTTONS
             buttons.append([InlineKeyboardButton(f"{m_name} ({len(files)})", callback_data=f"bms_sel_{BOT_SESSION_TOKEN}_{session_id}_{i}_0_{user_id}")])
             
         MULTI_SEARCH_CACHE[session_id] = {
@@ -325,7 +306,6 @@ async def auto_filter(client: Client, message: Message):
         try: await progress_msg.edit_caption(summary_text, reply_markup=final_markup) if progress_msg.photo else await progress_msg.edit_text(summary_text, reply_markup=final_markup)
         except Exception: pass
 
-        # 🚀 UPGRADED: Multi-Search Auto Delete (Ghost Mode perfectly tied to final message)
         if settings.get("filter_delete_enabled", False):
             from plugins.advanced import trigger_ghost_self_destruct
             del_time = settings.get("filter_delete_time", 5) * 60
@@ -371,11 +351,9 @@ async def auto_filter(client: Client, message: Message):
         btn_list = []
         if suggestions:
             for s in suggestions: 
-                # Buttons for suggestions
                 btn_list.append([InlineKeyboardButton(f"🎬 {s[:40]}", callback_data=f"fuzzy_{s[:40]}")])
         
         if req_enabled:
-            # 🔐 TOKEN & USER_ID SECURED REQUEST BUTTON
             btn_list.append([InlineKeyboardButton("🔔 Request this Movie", callback_data=f"req_{BOT_SESSION_TOKEN}_{user_id}_{query[:30]}")])
             
         if suggestions:
@@ -424,14 +402,12 @@ async def auto_filter(client: Client, message: Message):
         if shortener_on: 
             buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
         else: 
-            # 🔐 TOKEN & USER_ID SECURED FILE BUTTON
             buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{BOT_SESSION_TOKEN}_{user_id}_{db_id}")])
     
     buttons.append([InlineKeyboardButton(text="🤝 Help Us!", callback_data="help_us_menu")])
     
     if len(filtered_results) > 10:
         total_pages = math.ceil(len(filtered_results) / 10)
-        # 🔐 SECURED PAGINATION BUTTONS
         buttons.append([
             InlineKeyboardButton(text="◀️ Prev", callback_data=f"prev_{BOT_SESSION_TOKEN}_{user_id}_0_{query}"),
             InlineKeyboardButton(text=f"Page 1 of {total_pages}", callback_data="pages_info"),
@@ -450,7 +426,6 @@ async def auto_filter(client: Client, message: Message):
     if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         pm_notice = "\n\n*(Click a file to receive it securely in your Private Messages)*"
 
-    # 🚀 UPGRADED: Rich Metadata Format Display
     caption = (
         f"🎬 **{metadata['title']}** ({metadata['release_date'][:4]})\n"
         f"⭐️ **Rating:** `{metadata['rating']}`\n"
@@ -472,24 +447,19 @@ async def auto_filter(client: Client, message: Message):
         from plugins.advanced import trigger_ghost_self_destruct
         trigger_ghost_self_destruct(client, chat_id, msg.id, settings.get("filter_delete_time", 5) * 60)
 
-
 # ==========================================
 # 🌟 MULTI-SEARCH CALLBACKS
 # ==========================================
 @Client.on_callback_query(filters.regex(r"^bms_sel_(.+)_(.+)_(.+)_(\d+)_(.+)"))
 async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
-    # bms_sel_TOKEN_SESSIONID_MOVIEIDX_PAGE_USERID
     token = callback.matches[0].group(1)
     session_id = callback.matches[0].group(2)
     movie_idx = int(callback.matches[0].group(3))
     page = int(callback.matches[0].group(4))
     searcher_id = int(callback.matches[0].group(5))
     
-    # 🔐 Restart Kill-Switch
     if token != BOT_SESSION_TOKEN:
         return await callback.answer("⚠️ Session expired due to bot update/restart. Please search again!", show_alert=True)
-        
-    # 🔐 Button Leeching Protection
     if callback.from_user.id != searcher_id:
         return await callback.answer("⚠️ This multi-search wasn't requested by you. Please search your own!", show_alert=True)
     
@@ -554,10 +524,8 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
         if len(files) > (page + 1) * 10: nav_buttons.append(InlineKeyboardButton(text="Next ▶️", callback_data=f"bms_sel_{BOT_SESSION_TOKEN}_{session_id}_{movie_idx}_{page + 1}_{user_id}"))
         buttons.append(nav_buttons)
 
-    # 🔐 Add Token/User to Back Button
     buttons.append([InlineKeyboardButton("⬅ Back to Movie List", callback_data=f"bms_back_{BOT_SESSION_TOKEN}_{user_id}_{session_id}")])
     
-    # 🚀 UPGRADED: Rich Metadata Format Display
     caption = (
         f"🎬 **{metadata['title']}** ({metadata['release_date'][:4]})\n"
         f"⭐️ **Rating:** `{metadata['rating']}`\n"
@@ -606,18 +574,14 @@ async def handle_bulk_movie_back(client: Client, callback: CallbackQuery):
 # ==========================================
 @Client.on_callback_query(filters.regex(r"^(next|prev)_(.+)_(.+)_(.+)_(.+)$"))
 async def handle_pagination(client: Client, callback: CallbackQuery):
-    # action_TOKEN_USERID_PAGE_QUERY
     action = callback.matches[0].group(1)
     token = callback.matches[0].group(2)
     searcher_id = int(callback.matches[0].group(3))
     page = int(callback.matches[0].group(4))
     base_query = callback.matches[0].group(5)
     
-    # 🔐 Restart Kill-Switch
     if token != BOT_SESSION_TOKEN:
         return await callback.answer("⚠️ Session expired due to bot update/restart. Please search again!", show_alert=True)
-        
-    # 🔐 Button Leeching Protection
     if callback.from_user.id != searcher_id:
         return await callback.answer("⚠️ This search wasn't requested by you. Please search your own movie!", show_alert=True)
     
