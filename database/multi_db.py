@@ -554,14 +554,17 @@ class MultiDB:
         else: # Mute or Ban
             payload = {"type": p_type, "reason": reason}
             if expiry_ts > 0: payload["expires_at"] = expiry_ts
-            await self.punishments.update_one({"_id": doc_id}, {"$set": payload}, upsert=True)
-            return 1
+            # 🚀 FIX: Updates punishment type and counts mutes/bans, ensuring previous warns are cleared properly
+            await self.punishments.update_one({"_id": doc_id}, {"$set": payload, "$inc": {f"{p_type}s": 1}}, upsert=True)
+            doc = await self.punishments.find_one({"_id": doc_id})
+            return doc.get(f"{p_type}s", 1)
 
     async def remove_punishment(self, user_id: int, chat_id: str, p_type: str):
-        """Removes a specific punishment based on the user and scope."""
+        """Removes a specific punishment securely based on its exact active type."""
         if not self.clients: return
         doc_id = f"{user_id}_{chat_id}"
-        await self.punishments.delete_one({"_id": doc_id})
+        # 🚀 FIX: Only deletes the document if the active punishment matches the type we are removing!
+        await self.punishments.delete_one({"_id": doc_id, "type": p_type})
 
     async def check_punishment(self, user_id: int, chat_id: str):
         """Lazy Evaluation Engine: Returns (type, reason, expiry, scope) or None"""
