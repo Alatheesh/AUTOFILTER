@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 SPAM_TRACKER = {}
 SCRAPER_TRACKER = {}
-APPEAL_COOLDOWN = {} # 🧠 Prevents appeal spam
+APPEAL_COOLDOWN = {} 
 
 async def is_group_admin(client, chat_id, user_id):
     if user_id in Config.ADMINS: return True
@@ -26,6 +26,97 @@ async def log_to_channel(client, text, markup=None):
     if Config.LOG_CHANNEL:
         try: await client.send_message(Config.LOG_CHANNEL, text, reply_markup=markup)
         except Exception: pass
+
+# ==========================================
+# 🧠 THE MASTER UNIFIED PUNISHMENT ENGINE
+# ==========================================
+async def execute_punishment(client: Client, message: Message, target_user: int, chat_id_str: str, action_type: str, reason: str, duration_secs: int = 86400):
+    """Handles ALL punishments (Manual + Automatic) as a single connected system."""
+    is_global = chat_id_str == "global"
+    
+    # 1. Fetch exact limits for the scope
+    if is_global:
+        sett = await db.get_settings()
+        am_en = sett.get("auto_mute_enabled", True)
+        ab_en = sett.get("auto_ban_enabled", True)
+    else:
+        sett = await db.get_group_settings(int(chat_id_str))
+        am_en = sett.get("auto_mute_enabled", False)
+        ab_en = sett.get("auto_ban_enabled", False)
+        
+    warn_lim = sett.get("warn_limit", 3)
+    mute_lim = sett.get("mute_limit", 3)
+
+    # 2. Check Hierarchy (Don't warn someone who is already muted/banned)
+    curr_type, _, _, curr_scope = await db.check_punishment(target_user, chat_id_str)
+    hierarchy = {"clean": 0, "warn": 1, "mute": 2, "ban": 3}
+    if hierarchy.get(curr_type, 0) > hierarchy.get(action_type, 1) and curr_scope == chat_id_str:
+        return False, f"User is already {curr_type.upper()}ED. Cannot apply a lesser punishment."
+
+    # 3. Apply to Database
+    expiry = time.time() + duration_secs if action_type == "mute" else 0
+    count = await db.add_punishment(target_user, chat_id_str, action_type, duration_secs, expiry, reason)
+
+    final_action = action_type
+    final_reason = reason
+    
+    # 4. ⚙️ THE ESCALATION PIPELINE
+    if final_action == "warn" and am_en and count >= warn_lim:
+        final_action = "mute"
+        final_reason = f"Hit warnings limit ({warn_lim}). Trigger: {reason}"
+        duration_secs = 86400
+        expiry = time.time() + 86400
+        count = await db.add_punishment(target_user, chat_id_str, "mute", 86400, expiry, final_reason)
+        await db.remove_punishment(target_user, chat_id_str, "warn")
+        
+    if final_action == "mute" and ab_en and count >= mute_lim:
+        final_action = "ban"
+        final_reason = f"Hit mutes limit ({mute_lim}). Trigger: {reason}"
+        count = await db.add_punishment(target_user, chat_id_str, "ban", 0, 0, final_reason)
+        await db.remove_punishment(target_user, chat_id_str, "mute")
+
+    # 5. Native Telegram Enforcement
+    if not is_global:
+        chat_id_int = int(chat_id_str)
+        if final_action == "mute":
+            until_dt = datetime.datetime.now() + datetime.timedelta(seconds=duration_secs)
+            try: await client.restrict_chat_member(chat_id_int, target_user, ChatPermissions(can_send_messages=False), until_date=until_dt)
+            except Exception: pass
+        elif final_action == "ban":
+            try: await client.ban_chat_member(chat_id_int, target_user)
+            except Exception: pass
+
+    # 6. Notifications & PM Appeals
+    try: target_user_obj = await client.get_users(target_user)
+    except Exception: target_user_obj = None
+    mention = target_user_obj.mention if target_user_obj else f"`{target_user}`"
+    loc_name = "Global System" if is_global else message.chat.title
+
+    if not is_global:
+        if final_action == "ban": alert = await client.send_message(int(chat_id_str), f"🚫 {mention} was **Banned**.\nReason: {final_reason}")
+        elif final_action == "mute": alert = await client.send_message(int(chat_id_str), f"🔇 {mention} was **Muted**.\nReason: {final_reason}")
+        elif final_action == "warn": alert = await client.send_message(int(chat_id_str), f"⚠️ {mention}, you have been **Warned** ({count}/{warn_lim}).\nReason: {final_reason}")
+            
+        async def auto_delete_alert(msg_to_delete):
+            await asyncio.sleep(10)
+            try: await msg_to_delete.delete()
+            except Exception: pass
+        if final_action == "warn": asyncio.create_task(auto_delete_alert(alert))
+
+    if final_action in ["mute", "ban"]:
+        appeal_cb = f"appeal_{chat_id_str}_{final_action}_{target_user}"
+        try:
+            msg = f"🚫 **Notice:** You were `{final_action}d` in **{loc_name}**.\n**Reason:** {final_reason}\n\nIf you believe this was an error, click below to submit an appeal to the administrators."
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Appeal", callback_data=appeal_cb)]])
+            await client.send_message(target_user, msg, reply_markup=btn)
+        except Exception: pass 
+        if is_global: await log_to_channel(client, f"#{final_action}user `{target_user}`\nReason: {final_reason}")
+        
+    elif is_global and final_action == "warn":
+        try: await client.send_message(target_user, f"⚠️ **SYSTEM WARNING** ({count}/{warn_lim})\nYour message was deleted. Reason: {final_reason}. Repeated violations will result in a global ban.")
+        except Exception: pass
+
+    return True, final_action
 
 # ==========================================
 # 🛑 SMART CONTEXTUAL MODERATION (Manual Commands)
@@ -69,69 +160,20 @@ async def contextual_punishment(client: Client, message: Message):
             try: duration_secs = int(time_str) * 3600
             except Exception: reason = f"{time_str} {reason}"
 
-    sett = await db.get_settings() if is_global else await db.get_group_settings(int(chat_id_str))
-    warn_lim = sett.get("warn_limit", 3)
-    mute_lim = sett.get("mute_limit", 3)
-    am_en = sett.get("auto_mute_enabled", False)
-    ab_en = sett.get("auto_ban_enabled", False)
-    
-    if cmd == "warn":
-        warns = await db.add_punishment(target_user, chat_id_str, "warn", reason=reason)
-        if am_en and warns >= warn_lim:
-            mutes = await db.add_punishment(target_user, chat_id_str, "mute", expiry_ts=time.time()+86400, reason="Exceeded warnings limit via manual warn")
-            await db.remove_punishment(target_user, chat_id_str, "warn")
-            
-            if not is_global: 
-                until_dt = datetime.datetime.now() + datetime.timedelta(days=1)
-                try: await client.restrict_chat_member(message.chat.id, target_user, ChatPermissions(can_send_messages=False), until_date=until_dt)
-                except Exception: pass
-            
-            if ab_en and mutes >= mute_lim:
-                await db.add_punishment(target_user, chat_id_str, "ban", reason="Exceeded mute limit")
-                if not is_global: 
-                    try: await client.ban_chat_member(message.chat.id, target_user)
-                    except Exception: pass
-                await message.reply_text(f"🔴 User `{target_user}` hit {warn_lim}/{warn_lim} warnings and {mute_lim}/{mute_lim} mutes. They have been **Auto-Banned**.")
-            else:
-                await message.reply_text(f"🔴 User `{target_user}` hit {warn_lim}/{warn_lim} warnings and has been **Auto-Muted for 24H**.")
-        else:
-            await message.reply_text(f"⚠️ User `{target_user}` warned ({warns}/{warn_lim}).\nReason: {reason}")
-            
-    elif cmd == "mute":
-        mutes = await db.add_punishment(target_user, chat_id_str, "mute", expiry_ts=time.time() + duration_secs, reason=reason)
-        
-        if not is_global: 
-            until_dt = datetime.datetime.now() + datetime.timedelta(seconds=duration_secs)
-            try: await client.restrict_chat_member(message.chat.id, target_user, ChatPermissions(can_send_messages=False), until_date=until_dt)
-            except Exception: pass
+    # 🚀 SEND TO THE UNIFIED ENGINE
+    if cmd in ["warn", "mute", "ban"]:
+        success, result_state = await execute_punishment(client, message, target_user, chat_id_str, cmd, reason, duration_secs)
+        if not success:
+            await message.reply_text(f"⚠️ {result_state}")
+        elif is_global:
+            await message.reply_text(f"✅ Command successful. User is now `{result_state.upper()}ED` globally.")
 
-        if ab_en and mutes >= mute_lim:
-            await db.add_punishment(target_user, chat_id_str, "ban", reason="Exceeded mute limit via manual mute")
-            if not is_global: 
-                try: await client.ban_chat_member(message.chat.id, target_user)
-                except Exception: pass
-            await message.reply_text(f"🚫 User `{target_user}` hit {mute_lim}/{mute_lim} mutes and has been **Auto-Banned**.")
-        else:
-            btn = None if is_global else InlineKeyboardMarkup([[InlineKeyboardButton("🔓 Unmute", callback_data=f"admin_unmute_{chat_id_str}_{target_user}")]])
-            await message.reply_text(f"🔇 User `{target_user}` muted ({mutes}/{mute_lim} mutes).\nUnlocks: <t:{int(time.time() + duration_secs)}:R>", reply_markup=btn)
-            if is_global: await log_to_channel(client, f"#muteuser `{target_user}`\nReason: {reason}")
-
-    elif cmd == "ban":
-        await db.add_punishment(target_user, chat_id_str, "ban", reason=reason)
-        if not is_global: 
-            try: await client.ban_chat_member(message.chat.id, target_user)
-            except Exception: pass
-        btn = None if is_global else InlineKeyboardMarkup([[InlineKeyboardButton("✅ Unban", callback_data=f"admin_unban_{chat_id_str}_{target_user}")]])
-        await message.reply_text(f"🚫 User `{target_user}` banned.\nReason: {reason}", reply_markup=btn)
-        if is_global: await log_to_channel(client, f"#banuser `{target_user}`\nReason: {reason}")
-
+    # 🟢 REMOVE PUNISHMENTS
     elif cmd in ["unwarn", "unmute", "unban"]:
         await db.remove_punishment(target_user, chat_id_str, cmd.replace("un", ""))
-        
         if not is_global: 
             try: await client.unban_chat_member(message.chat.id, target_user)
             except Exception: pass
-            
         await message.reply_text(f"✅ User `{target_user}` successfully {cmd}ed.")
         
     raise StopPropagation
@@ -147,11 +189,9 @@ async def emergency_admin_report(client: Client, message: Message):
     admin_ids = await db.get_group_admins(chat_id)
     if not admin_ids:
         g_sett = await db.get_group_settings(chat_id)
-        if g_sett.get("connected_by"):
-            admin_ids = [g_sett.get("connected_by")]
+        if g_sett.get("connected_by"): admin_ids = [g_sett.get("connected_by")]
             
-    if not admin_ids:
-        return await message.reply_text("⚠️ **Error:** No admins are registered in the bot's database for this group.")
+    if not admin_ids: return await message.reply_text("⚠️ **Error:** No admins are registered in the bot's database for this group.")
         
     chat_title = message.chat.title
     msg_link = message.link if message.link else f"https://t.me/c/{str(chat_id).replace('-100', '')}/{message.id}"
@@ -162,8 +202,7 @@ async def emergency_admin_report(client: Client, message: Message):
         target_user = target_msg.from_user
         user_info = f"{target_user.mention} (`{target_user.id}`)" if target_user else "Unknown/Anonymous"
         report_text += f"🎯 **Reported User:** {user_info}\n\n📝 **Reported Message:**\n_{target_msg.text or target_msg.caption or '[Media/Non-text message]'}_\n\n"
-    else:
-        report_text += f"\n📝 **Report Message:**\n_{message.text}_\n\n"
+    else: report_text += f"\n📝 **Report Message:**\n_{message.text}_\n\n"
         
     report_text += f"*(Please check the group to take action)*"
     markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Go to Message", url=msg_link)]])
@@ -184,33 +223,32 @@ async def emergency_admin_report(client: Client, message: Message):
 @Client.on_message(filters.text & (filters.group | filters.private), group=-1)
 async def auto_moderation_triggers(client: Client, message: Message):
     user_id = message.from_user.id
-    if user_id in Config.ADMINS: return # Admins bypass Auto-Mod
+    if user_id in Config.ADMINS: return 
 
     chat_id = message.chat.id
     chat_id_str = str(chat_id) if message.chat.type != ChatType.PRIVATE else "global"
     text = message.text
     current_time = time.time()
     
+    # 🚀 1. THE LOOPHOLE FIX: Block already muted/banned users immediately!
+    p_type, p_reason, p_expiry, p_scope = await db.check_punishment(user_id, chat_id_str)
+    if p_type in ["mute", "ban"]:
+        if message.chat.type != ChatType.PRIVATE:
+            try: await message.delete()
+            except Exception: pass
+        raise StopPropagation # DO NOT SCAN! THEY ARE ALREADY GHOSTED!
+    
     global_settings = await db.get_settings()
     global_bad_words = global_settings.get("bad_words", [])
     
     if message.chat.type != ChatType.PRIVATE:
         g_sett = await db.get_group_settings(chat_id)
-        am_en = g_sett.get("auto_mute_enabled", False)
         link_en = g_sett.get("anti_link_enabled", False)
         bw_en = g_sett.get("bad_words_enabled", False)
-        ab_en = g_sett.get("auto_ban_enabled", False)
-        warn_lim = g_sett.get("warn_limit", 3)
-        mute_lim = g_sett.get("mute_limit", 3)
         local_bad_words = g_sett.get("bad_words", [])
     else:
-        # 🚀 FIX: Private Message Defaults now sync with Global Limits
-        am_en = global_settings.get("auto_mute_enabled", True) 
-        link_en = False # Don't auto-mute for links in PM
-        bw_en = True # ALWAYS check bad words in PM
-        ab_en = global_settings.get("auto_ban_enabled", True)
-        warn_lim = global_settings.get("warn_limit", 3)
-        mute_lim = global_settings.get("mute_limit", 3)
+        link_en = False 
+        bw_en = True 
         local_bad_words = []
 
     issue_warn = False
@@ -221,13 +259,12 @@ async def auto_moderation_triggers(client: Client, message: Message):
         issue_warn = True
         warn_reason = "Sending unauthorized links"
 
-    # 2. 🚀 UPGRADED BAD WORDS FILTER (Regex Word Boundaries + Combined Lists)
+    # 2. BAD WORDS FILTER
     if bw_en and not issue_warn:
         combined_words = list(set(global_bad_words + local_bad_words))
         clean_words = [re.escape(w.strip()) for w in combined_words if w.strip()]
         
         if clean_words:
-            # \b forces standalone word matching. "ass" won't match "class".
             bad_words_pattern = r'\b(?:' + '|'.join(clean_words) + r')\b'
             if re.search(bad_words_pattern, text, re.IGNORECASE):
                 issue_warn = True
@@ -242,57 +279,14 @@ async def auto_moderation_triggers(client: Client, message: Message):
             issue_warn = True
             warn_reason = "Extreme message flooding"
 
-    # 🚨 CASCADE EXECUTION 🚨
+    # 🚨 EXECUTE UNIFIED PUNISHMENT 🚨
     if issue_warn:
-        # Step 1: Delete Message First
         try: await message.delete()
         except Exception: pass
         
-        warns = await db.add_punishment(user_id, chat_id_str, "warn", reason=warn_reason)
+        # Sent directly to the Master Engine
+        await execute_punishment(client, message, user_id, chat_id_str, "warn", warn_reason)
         
-        # PREPARE PM APPEAL SENDER
-        async def send_pm_appeal(punishment_type):
-            appeal_cb = f"appeal_{chat_id_str}_{punishment_type}_{user_id}"
-            loc_name = "Global System" if chat_id_str == "global" else message.chat.title
-            try:
-                msg = f"🚫 **Notice:** You were `{punishment_type}d` in **{loc_name}**.\n**Reason:** {warn_reason}\n\nIf you believe this was an error, click below to submit an appeal to the administrators."
-                btn = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Appeal", callback_data=appeal_cb)]])
-                await client.send_message(user_id, msg, reply_markup=btn)
-            except Exception: pass 
-        
-        if am_en and warns >= warn_lim:
-            mutes = await db.add_punishment(user_id, chat_id_str, "mute", expiry_ts=current_time + 86400, reason=f"Hit warnings limit ({warn_reason})")
-            await db.remove_punishment(user_id, chat_id_str, "warn") 
-            
-            if ab_en and mutes >= mute_lim:
-                await db.add_punishment(user_id, chat_id_str, "ban", reason="Hit mutes limit")
-                if message.chat.type != ChatType.PRIVATE:
-                    try: await client.ban_chat_member(message.chat.id, user_id)
-                    except Exception: pass
-                    alert = await client.send_message(message.chat.id, f"🚫 {message.from_user.mention} was **Auto-Banned** for repeatedly breaking rules ({mutes}/{mute_lim} mutes).")
-                await send_pm_appeal("ban")
-            else:
-                if message.chat.type != ChatType.PRIVATE:
-                    until_dt = datetime.datetime.now() + datetime.timedelta(days=1)
-                    try: await client.restrict_chat_member(message.chat.id, user_id, ChatPermissions(can_send_messages=False), until_date=until_dt)
-                    except Exception: pass
-                    alert = await client.send_message(message.chat.id, f"🔇 {message.from_user.mention} was **Auto-Muted for 24h** for hitting {warn_lim}/{warn_lim} warnings. (Reason: {warn_reason})")
-                await send_pm_appeal("mute")
-        else:
-            if message.chat.type != ChatType.PRIVATE:
-                alert = await client.send_message(message.chat.id, f"⚠️ {message.from_user.mention}, you have been warned! ({warns}/{warn_lim})\n**Reason:** {warn_reason}")
-                
-                # Background task to delete alert so StopPropagation triggers instantly!
-                async def auto_delete_alert(msg_to_delete):
-                    await asyncio.sleep(10)
-                    try: await msg_to_delete.delete()
-                    except Exception: pass
-                asyncio.create_task(auto_delete_alert(alert))
-                
-            else:
-                # Private Message Warning
-                await client.send_message(user_id, f"⚠️ **SYSTEM WARNING** ({warns}/{warn_lim})\nYour message was deleted. Reason: {warn_reason}. Repeated violations will result in a global ban.")
-
         # 🛑 BLOCK MESSAGE FROM REACHING SEARCH ENGINE
         raise StopPropagation
 
