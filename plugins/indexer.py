@@ -237,13 +237,22 @@ async def mass_indexer_command(client: Client, message: Message):
         target_chat = None
         last_msg_id = None
         
-        # 🚀 FIX: Removed deprecated forward_from_chat. Modern Pyrogram v2 check!
-        if getattr(reply, "forward_origin", None):
+        # 1. Restore standard forward check (Fixes the replied file bug)
+        if getattr(reply, "forward_from_chat", None):
+            target_chat = reply.forward_from_chat.id
+            last_msg_id = getattr(reply, "forward_from_message_id", 0)
+            
+        # 2. Keep modern Pyrogram v2 fallback
+        elif getattr(reply, "forward_origin", None):
             if getattr(reply.forward_origin, "chat", None):
                 target_chat = reply.forward_origin.chat.id
                 last_msg_id = getattr(reply.forward_origin, "message_id", 0)
+                
+        # 3. Text fallback (Allows replying to a message containing a channel ID)
+        elif reply.text:
+            target_chat = reply.text.strip()
             
-        if target_chat and last_msg_id:
+        if target_chat:
             await trigger_indexing_job(client, message, target_chat, known_msg_id=last_msg_id)
             raise StopPropagation
             
@@ -303,11 +312,18 @@ async def interactive_indexer_listener(client: Client, message: Message):
     target_chat = None
     known_msg_id = None
     
-    # 🚀 FIX: Removed deprecated forward_from_chat. Modern Pyrogram v2 check!
-    if getattr(message, "forward_origin", None):
+    # 1. Restore standard forward check
+    if getattr(message, "forward_from_chat", None):
+        target_chat = message.forward_from_chat.id
+        known_msg_id = getattr(message, "forward_from_message_id", 0)
+        
+    # 2. Keep v2 fallback
+    elif getattr(message, "forward_origin", None):
         if getattr(message.forward_origin, "chat", None):
             target_chat = message.forward_origin.chat.id
             known_msg_id = getattr(message.forward_origin, "message_id", 0)
+            
+    # 3. Existing text fallback
     elif message.text:
         target_chat = message.text.strip()
     else:
