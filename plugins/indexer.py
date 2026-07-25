@@ -1,5 +1,7 @@
+import io
 import re
 import time
+import json
 import hashlib
 import logging
 import asyncio
@@ -433,3 +435,35 @@ async def process_indexing_queue(client: Client):
         except Exception as e:
             logger.error(f"Indexer Queue error: {e}")
             await asyncio.sleep(10)
+
+# ==========================================
+# 📊 EXPORT INDEXING DATA
+# ==========================================
+@Client.on_message(filters.command("indexdata") & filters.user(Config.ADMINS))
+async def export_index_data(client: Client, message: Message):
+    status = await message.reply_text("📥 **Extracting indexing jobs data...**")
+    try:
+        # Fetch all indexing jobs from the database
+        cursor = db.jobs.find({})
+        jobs = await cursor.to_list(length=None)
+        
+        if not jobs:
+            return await status.edit_text("⚠️ **No indexing jobs found in the database.**")
+        
+        # Format the data cleanly
+        json_data = json.dumps(jobs, indent=4)
+        
+        # Create an in-memory JSON file
+        file_buffer = io.BytesIO(json_data.encode('utf-8'))
+        file_buffer.name = f"indexing_queue_{int(time.time())}.json"
+        
+        # Send the file to the creator
+        await message.reply_document(
+            document=file_buffer,
+            caption=f"📦 **Indexing Queue Export**\nTotal records found: `{len(jobs)}`\n\n_Contains detailed progression of all queued channels._"
+        )
+        await status.delete()
+        
+    except Exception as e:
+        logger.error(f"Index Data Export Error: {e}")
+        await status.edit_text(f"❌ **Failed to export data:** `{e}`")
