@@ -128,32 +128,31 @@ async def font_selection_handler(client, callback_query):
         )
 
 
-@Client.on_message(filters.reply & filters.private, group=5)
+@Client.on_message(filters.reply & filters.private)
 async def process_font_reply(client, message):
     """Triggers when the user replies to the ForceReply prompt."""
     
-    # 💥 THE FIX: Safely check if the replied message actually has text before reading it!
-    if message.reply_to_message and message.reply_to_message.text:
-        if "Send the text you want to convert to" in message.reply_to_message.text:
-            
-            try:
-                # Safely extract the font name
-                font_style = message.reply_to_message.text.split("convert to ")[1].split(":")[0].strip()
-            except IndexError:
-                return
+    # Verify they are replying to our specific font prompt
+    if message.reply_to_message and "Send the text you want to convert to" in message.reply_to_message.text:
+        
+        try:
+            # Safely extract the font name
+            font_style = message.reply_to_message.text.split("convert to ")[1].split(":")[0].strip()
+        except IndexError:
+            return
 
-            raw_text = message.text
-            if not raw_text:
-                return
-                
-            # 💥 THE FIX: Delete the bot's prompt message so it cannot be used again!
-            try:
-                await message.reply_to_message.delete()
-            except Exception:
-                pass # Ignores errors just in case the message was already deleted
-                
-            # Send the final converted text
-            await send_split_text(client, message.chat.id, raw_text, font_style)
+        raw_text = message.text
+        if not raw_text:
+            return
+            
+        # 💥 THE FIX: Delete the bot's prompt message so it cannot be used again!
+        try:
+            await message.reply_to_message.delete()
+        except Exception:
+            pass # Ignores errors just in case the message was already deleted
+            
+        # Send the final converted text
+        await send_split_text(client, message.chat.id, raw_text, font_style)
 
 
 async def send_split_text(client, chat_id, text, font_style):
