@@ -289,7 +289,9 @@ async def auto_moderation_triggers(client: Client, message: Message):
         
         # 🛑 BLOCK MESSAGE FROM REACHING SEARCH ENGINE
         raise StopPropagation
-
+        
+    # 🚀 FIX FOR BUG 2 & 3: Allow safe messages to pass to other plugins!
+    raise ContinuePropagation
 # ==========================================
 # ⚖️ APPEALS SYSTEM (With Spam & Leech Protection)
 # ==========================================
