@@ -25,11 +25,13 @@ def sanitize_title(title: str) -> str:
     return clean_title.strip() if clean_title.strip() else title
 
 def generate_file_hash(media) -> str:
+    # 🚀 FIX: Uses Telegram's absolute unique file ID.
+    # Completely eliminates the fake duplicate bug.
     hash_payload = str(media.file_unique_id).encode("utf-8")
     return hashlib.sha256(hash_payload).hexdigest()
 
 # ==========================================
-# 🚀 PASSIVE AUTO-INDEXER
+# 🚀 PASSIVE AUTO-INDEXER (Set-It-and-Forget-It)
 # ==========================================
 @Client.on_message(filters.document | filters.video | filters.audio, group=1)
 async def auto_indexer(client: Client, message: Message):
@@ -60,9 +62,11 @@ async def auto_indexer(client: Client, message: Message):
 # 🛠️ HELPER: TRIGGER INDEXING JOB
 # ==========================================
 async def trigger_indexing_job(client: Client, message: Message, target_chat, prompt_msg_id=None, known_msg_id=None):
+    """Processes the target chat, finds the absolute latest message, and queues the job."""
+    
     extracted_msg_id = None
     
-    # URL Parser
+    # 🚀 Advanced Link Parser 
     if isinstance(target_chat, str):
         target_chat = target_chat.strip()
         if "t.me/" in target_chat:
@@ -88,6 +92,7 @@ async def trigger_indexing_job(client: Client, message: Message, target_chat, pr
         chat_info = await client.get_chat(target_chat)
         target_chat_name = chat_info.title or str(target_chat)
         target_chat_id = f"@{chat_info.username}" if chat_info.username else chat_info.id
+            
     except PeerIdInvalid:
         err = (
             f"❌ **Error: Cannot locate chat `{target_chat}` in memory.**\n\n"
@@ -114,7 +119,7 @@ async def trigger_indexing_job(client: Client, message: Message, target_chat, pr
     except Exception:
         pass 
         
-    # 🚀 METHOD B: The "Ascending Radar Probe" (WITH GAP JUMPER) RESTORED!
+    # 🚀 METHOD B: The "Ascending Radar Probe" (WITH GAP JUMPER)
     if not actual_last_msg_id:
         try:
             if prompt_msg_id: 
@@ -187,7 +192,7 @@ async def trigger_indexing_job(client: Client, message: Message, target_chat, pr
                 "**How to Fix This:**\n"
                 "1️⃣ Add me to the channel as an Admin, OR\n"
                 "2️⃣ **Forward the absolute newest file** from the channel to me, OR\n"
-                "3️⃣ Paste a **direct link** to the newest post."
+                "3️⃣ Send a **direct link** to the newest post (e.g., `t.me/ChannelName/1500`)."
             )
             if prompt_msg_id: await client.edit_message_text(message.chat.id, prompt_msg_id, err)
             else: await message.reply_text(err)
@@ -206,10 +211,19 @@ async def trigger_indexing_job(client: Client, message: Message, target_chat, pr
 
 @Client.on_message(filters.command("cancel_index") & filters.user(Config.ADMINS))
 async def stop_active_index(client: Client, message: Message):
+    # Fetch the currently running job from the database
     job = await db.get_active_job()
-    if not job: return await message.reply_text("⚠️ **No active indexing jobs to cancel.**")
-    await db.update_job(job["_id"], {"status": "completed"})
-    await message.reply_text(f"🛑 **Indexing Cancelled!**\n\nThe background worker has been ordered to stop processing `{job['chat_name']}`.")
+    
+    if not job:
+        return await message.reply_text("⚠️ **No active indexing jobs to cancel.**")
+        
+    job_id = job["_id"]
+    chat_name = job["chat_name"]
+    
+    # Trick the background worker into thinking the job is finished
+    await db.update_job(job_id, {"status": "completed"})
+    
+    await message.reply_text(f"🛑 **Indexing Cancelled!**\n\nThe background worker has been ordered to stop processing `{chat_name}`.")
 
 
 # ==========================================
@@ -219,31 +233,18 @@ async def stop_active_index(client: Client, message: Message):
 async def mass_indexer_command(client: Client, message: Message):
     
     if message.reply_to_message:
-        status = await message.reply_text("⏳ **Reading forwarded file...**")
         reply = message.reply_to_message
         target_chat = None
         last_msg_id = None
         
-        # Smart Parser for Replies
-        if getattr(reply, "forward_from_chat", None):
-            target_chat = reply.forward_from_chat.id
-            last_msg_id = getattr(reply, "forward_from_message_id", None)
-        elif hasattr(reply, "forward_origin") and reply.forward_origin:
-            origin = reply.forward_origin
-            if getattr(origin, "chat", None): target_chat = origin.chat.id
-            elif getattr(origin, "sender_chat", None): target_chat = origin.sender_chat.id
-            last_msg_id = getattr(origin, "message_id", None)
+        # 🚀 FIX: Removed deprecated forward_from_chat. Modern Pyrogram v2 check!
+        if getattr(reply, "forward_origin", None):
+            if getattr(reply.forward_origin, "chat", None):
+                target_chat = reply.forward_origin.chat.id
+                last_msg_id = getattr(reply.forward_origin, "message_id", 0)
             
-        if not target_chat and reply.text:
-            target_chat = reply.text.strip()
-            
-        # We strictly check if target_chat exists!
-        if target_chat is not None:
-            # We pass the status.id so the bot can update this exact message during deep scans
-            await trigger_indexing_job(client, message, target_chat, prompt_msg_id=status.id, known_msg_id=last_msg_id)
-            raise StopPropagation
-        else:
-            await status.edit_text("❌ **Could not detect a channel.**\nPlease make sure you are forwarding a file directly from a channel.")
+        if target_chat and last_msg_id:
+            await trigger_indexing_job(client, message, target_chat, known_msg_id=last_msg_id)
             raise StopPropagation
             
     if len(message.command) > 1:
@@ -256,7 +257,7 @@ async def mass_indexer_command(client: Client, message: Message):
         "How would you like to target the channel?\n"
         "1️⃣ **Forward** any file from the channel here.\n"
         "2️⃣ **Type** the Channel ID (e.g., `-10012345678`).\n"
-        "3️⃣ **Paste** the Link or Username (e.g., `@MyChannel` or `t.me/c/...`).\n\n"
+        "3️⃣ **Type** the Link or Username (e.g., `@MyChannel` or `t.me/c/...`).\n\n"
         "*(Or click Cancel to abort)*",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_index_flow")]])
     )
@@ -290,7 +291,7 @@ async def interactive_indexer_listener(client: Client, message: Message):
         del INDEXER_STATE[user_id]
         try: await message.delete() 
         except Exception: pass
-        expired_text = "⚠️ **Session Expired.** Please run `/index` again."
+        expired_text = "⚠️ **Session Expired.**\n\nThis prompt is older than 48 hours. Please run `/index` again."
         try: await client.edit_message_text(message.chat.id, prompt_msg_id, expired_text)
         except Exception: await message.reply_text(expired_text)
         raise StopPropagation 
@@ -302,21 +303,15 @@ async def interactive_indexer_listener(client: Client, message: Message):
     target_chat = None
     known_msg_id = None
     
-    # Smart Parser for Wizard Input
-    if getattr(message, "forward_from_chat", None):
-        target_chat = message.forward_from_chat.id
-        known_msg_id = getattr(message, "forward_from_message_id", None)
-    elif hasattr(message, "forward_origin") and message.forward_origin:
-        origin = message.forward_origin
-        if getattr(origin, "chat", None): target_chat = origin.chat.id
-        elif getattr(origin, "sender_chat", None): target_chat = origin.sender_chat.id
-        known_msg_id = getattr(origin, "message_id", None)
-        
-    if not target_chat and message.text:
+    # 🚀 FIX: Removed deprecated forward_from_chat. Modern Pyrogram v2 check!
+    if getattr(message, "forward_origin", None):
+        if getattr(message.forward_origin, "chat", None):
+            target_chat = message.forward_origin.chat.id
+            known_msg_id = getattr(message.forward_origin, "message_id", 0)
+    elif message.text:
         target_chat = message.text.strip()
-        
-    if not target_chat:
-        err = "❌ Invalid input. Please forward a file or paste a link."
+    else:
+        err = "❌ Invalid input. Please forward a file or send text."
         try: await client.edit_message_text(message.chat.id, prompt_msg_id, err)
         except Exception: await message.reply_text(err)
         raise StopPropagation
@@ -331,7 +326,8 @@ async def interactive_indexer_listener(client: Client, message: Message):
 @Client.on_callback_query(filters.regex("^cancel_index_flow$"))
 async def cancel_index_callback(client: Client, callback: CallbackQuery):
     user_id = callback.from_user.id
-    if user_id in INDEXER_STATE: del INDEXER_STATE[user_id]
+    if user_id in INDEXER_STATE:
+        del INDEXER_STATE[user_id]
     await callback.message.edit_text("❌ **Operation Cancelled.**\n\nYou can start over whenever you're ready.")
     await callback.answer("Cancelled", show_alert=False)
 
@@ -340,6 +336,7 @@ async def cancel_index_callback(client: Client, callback: CallbackQuery):
 # ⚙️ BACKGROUND QUEUE WORKER
 # ==========================================
 async def process_indexing_queue(client: Client):
+    """Runs 24/7. Survives crashes. Safely parses queued channels."""
     logger.info("🟢 Safe Indexing Job Queue Started!")
 
     while True:
@@ -372,6 +369,7 @@ async def process_indexing_queue(client: Client):
                 await asyncio.sleep(fw.value)
                 continue
             except (PeerIdInvalid, ChannelInvalid): 
+                # Keep trying to resolve the peer instead of killing the job
                 logger.warning(f"⚠️ Telegram memory syncing for {chat_name}. Attempting to resolve peer...")
                 try:
                     await client.get_chat(chat_id)
@@ -400,6 +398,8 @@ async def process_indexing_queue(client: Client):
 
                 raw_title = getattr(media, "file_name", "") or getattr(msg, "caption", "") or "Unknown"
                 file_size = getattr(media, "file_size", 0)
+                
+                # 🚀 Apply the new perfect hashing system
                 crypto_hash = generate_file_hash(media)
 
                 if await db.check_exists(crypto_hash):
