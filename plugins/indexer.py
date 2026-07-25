@@ -323,21 +323,25 @@ async def interactive_indexer_listener(client: Client, message: Message):
     target_chat = None
     known_msg_id = None
     
-    # 1. Restore standard forward check
-    if getattr(message, "forward_from_chat", None):
-        target_chat = message.forward_from_chat.id
-        known_msg_id = getattr(message, "forward_from_message_id", 0)
-        
-    # 2. Keep v2 fallback
-    elif getattr(message, "forward_origin", None):
-        if getattr(message.forward_origin, "chat", None):
-            target_chat = message.forward_origin.chat.id
-            known_msg_id = getattr(message.forward_origin, "message_id", 0)
+    # 1. The Ultimate Pyrogram v3 Parser
+    if hasattr(message, "forward_origin") and message.forward_origin:
+        origin = message.forward_origin
+        if getattr(origin, "chat", None):
+            target_chat = origin.chat.id
+        elif getattr(origin, "sender_chat", None):
+            target_chat = origin.sender_chat.id
+        known_msg_id = getattr(origin, "message_id", None)
             
-    # 3. Existing text fallback
-    elif message.text:
+    # 2. Legacy Pyrogram Fallback
+    if not target_chat and getattr(message, "forward_from_chat", None):
+        target_chat = message.forward_from_chat.id
+        known_msg_id = getattr(message, "forward_from_message_id", None)
+        
+    # 3. Direct Text Fallback
+    elif not target_chat and message.text:
         target_chat = message.text.strip()
-    else:
+        
+    if not target_chat:
         err = "❌ Invalid input. Please forward a file or send text."
         try: await client.edit_message_text(message.chat.id, prompt_msg_id, err)
         except Exception: await message.reply_text(err)
