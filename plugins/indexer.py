@@ -237,22 +237,26 @@ async def mass_indexer_command(client: Client, message: Message):
         target_chat = None
         last_msg_id = None
         
-        # 1. Restore standard forward check (Fixes the replied file bug)
-        if getattr(reply, "forward_from_chat", None):
-            target_chat = reply.forward_from_chat.id
-            last_msg_id = getattr(reply, "forward_from_message_id", 0)
+        # 1. Modern Pyrogram v3 Check
+        if hasattr(reply, "forward_origin") and reply.forward_origin:
+            origin = reply.forward_origin
+            if hasattr(origin, "chat") and origin.chat:
+                target_chat = origin.chat.id
+            elif hasattr(origin, "sender_chat") and origin.sender_chat:
+                target_chat = origin.sender_chat.id
+            last_msg_id = getattr(origin, "message_id", None)
             
-        # 2. Keep modern Pyrogram v2 fallback
-        elif getattr(reply, "forward_origin", None):
-            if getattr(reply.forward_origin, "chat", None):
-                target_chat = reply.forward_origin.chat.id
-                last_msg_id = getattr(reply.forward_origin, "message_id", 0)
-                
-        # 3. Text fallback (Allows replying to a message containing a channel ID)
+        # 2. Legacy Pyrogram Fallback
+        elif getattr(reply, "forward_from_chat", None):
+            target_chat = reply.forward_from_chat.id
+            last_msg_id = getattr(reply, "forward_from_message_id", None)
+            
+        # 3. Text Fallback (In case you reply to a message containing just the ID)
         elif reply.text:
             target_chat = reply.text.strip()
             
-        if target_chat:
+        # 💥 THE FIX: We only check if target_chat exists. It will no longer fail if the message ID is missing!
+        if target_chat is not None:
             await trigger_indexing_job(client, message, target_chat, known_msg_id=last_msg_id)
             raise StopPropagation
             
