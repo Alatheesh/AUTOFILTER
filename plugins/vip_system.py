@@ -95,7 +95,7 @@ async def send_vip_receipt(client, user_id, order_id, plan_name, amount, utr, ad
         f"🆔 **Order ID:** `{order_id}`\n👤 **User ID:** `{user_id}`\n"
         f"📦 **Plan:** {plan_name}\n💵 **Amount Paid:** ₹{amount}\n🔖 **Ref/UTR:** `{utr}`\n"
         f"📅 **Date:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}\n━━━━━━━━━━━━━━━━━━━\n"
-        f"✅ **Approved By:** Admin (`{admin_id}`)\n🙏 Thank you for your support!"
+        f"✅ **Approved By:** System Admin\n🙏 Thank you for your support!"
     )
     try: await client.send_message(user_id, receipt)
     except: pass
@@ -206,7 +206,7 @@ async def vip_background_worker(client: Client):
 # ==========================================
 # 💳 PAYMENT & PURCHASE FLOW (USERS)
 # ==========================================
-@Client.on_message(filters.command("buyvip"), group=-1)
+@Client.on_message(filters.command("buyvip"))
 async def buy_vip_command(client, message):
     user_id = message.from_user.id
     active_plan_id = await db.get_active_vip_plan(user_id)
@@ -374,7 +374,7 @@ async def vip_paid_callback(client, callback: CallbackQuery):
         markup = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Yes, I Already Paid", callback_data=f"vip_recover_{order_id}", style=ButtonStyle.SUCCESS)], [InlineKeyboardButton("🔄 Create New Order", callback_data="vip_reorder", style=ButtonStyle.PRIMARY)]])
         return await callback.message.edit_text("⚠️ **Your payment order has expired.**\n\nDid you already complete the payment before it expired?", reply_markup=markup)
 
-    USER_STATES[callback.from_user.id] = {"action": "wait_utr", "order_id": order_id, "recovery": False}
+    USER_STATES[callback.fromuser.id] = {"action": "wait_utr", "order_id": order_id, "recovery": False}
     await callback.message.edit_text("📝 **Please send the 12-Digit UPI Reference Number (UTR) or a Screenshot of the payment.**")
 
 @Client.on_callback_query(filters.regex(r"^vip_recover_"))
@@ -382,7 +382,6 @@ async def vip_recover_callback(client, callback: CallbackQuery):
     order_id = callback.data.split("_")[2]
     USER_STATES[callback.from_user.id] = {"action": "wait_utr", "order_id": order_id, "recovery": True}
     await callback.message.edit_text("🔄 **PAYMENT RECOVERY QUEUE**\n\n📝 Please send the 12-Digit UTR or a Screenshot. Our admin will manually verify and recover your expired order.")
-
 
 # ==========================================
 # 💎 UNIVERSAL VIP ENTERPRISE DASHBOARD (/vippanel)
@@ -398,7 +397,7 @@ def get_dashboard_main_markup():
         [InlineKeyboardButton("❌ Close Panel", callback_data="vipdb_close", style=ButtonStyle.DANGER)]
     ])
 
-@Client.on_message(filters.command("vippanel") & filters.user(Config.ADMINS), group=-1)
+@Client.on_message(filters.command("vippanel") & filters.user(Config.ADMINS))
 async def open_vip_panel(client, message):
     USER_STATES.pop(message.from_user.id, None) 
     await message.reply("💎 **VIP ENTERPRISE DASHBOARD**\nSelect a module to manage:", reply_markup=get_dashboard_main_markup())
@@ -939,7 +938,7 @@ async def admin_wizards_router(client, callback: CallbackQuery):
 # ==========================================
 # 📸 CATCH USER INPUT (UTR & TEXT WIZARDS)
 # ==========================================
-@Client.on_message(filters.private & ~filters.regex(r"^/"), group=-1)
+@Client.on_message(filters.private & ~filters.regex(r"^/"), group=-10)
 async def catch_payment_proof(client, message: Message):
     state = USER_STATES.get(message.from_user.id)
     if not state: raise ContinuePropagation
@@ -1091,7 +1090,7 @@ async def catch_payment_proof(client, message: Message):
             )
             markup = InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ Approve", callback_data=f"vip_approve_{order_id}", style=ButtonStyle.SUCCESS), InlineKeyboardButton("❌ Reject", callback_data=f"vip_reject_{order_id}", style=ButtonStyle.DANGER)],
-                [InlineKeyboardButton("💬 Ask User", url=f"tg://user?id={message.from_user.id}", style=ButtonStyle.PRIMARY)]
+                [InlineKeyboardButton("💬 Ask User", url=f"tg://openmessage?user_id={message.from_user.id}", style=ButtonStyle.PRIMARY)]
             ])
             
             if message.photo: await client.send_photo(Config.ADMINS[0], message.photo.file_id, caption=admin_text, reply_markup=markup)
@@ -1130,13 +1129,70 @@ async def admin_reject(client, callback: CallbackQuery):
     order = await vip_orders.find_one({"order_id": order_id})
     await update_order_state(order_id, "Rejected")
     await callback.message.edit_reply_markup(InlineKeyboardMarkup([[InlineKeyboardButton("❌ REJECTED", callback_data="noop", style=ButtonStyle.DANGER)]]))
-    await client.send_message(order["user_id"], f"❌ **Payment Rejected**\n\nYour payment for Order `{order_id}` could not be verified. Please double check and reorder.")
+    
+    # 🚀 NEW: Send Rejection with Appeal Button
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Appeal", callback_data=f"vip_appeal_init_{order_id}", style=ButtonStyle.PRIMARY)]])
+    await client.send_message(order["user_id"], f"❌ **Payment Rejected**\n\nYour payment for Order `{order_id}` could not be verified. If you believe this is a mistake (e.g., sent the wrong screenshot or UTR), you can submit an appeal.", reply_markup=markup)
     await log_vip_event("Rejected", order["user_id"], f"Order {order_id} rejected", callback.from_user.id)
+
+# ==========================================
+# ⚖️ REJECTION APPEAL SYSTEM
+# ==========================================
+@Client.on_callback_query(filters.regex(r"^vip_appeal_init_"))
+async def vip_appeal_init(client, callback: CallbackQuery):
+    order_id = callback.data.split("_")[3]
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Mistaken UTR", callback_data=f"vip_appeal_submit_{order_id}_utr", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("Mistaken Screenshot", callback_data=f"vip_appeal_submit_{order_id}_screenshot", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("❌ Cancel", callback_data="vip_appeal_cancel", style=ButtonStyle.DANGER)]
+    ])
+    await callback.message.edit_text("📝 **VIP Payment Appeal**\n\nPlease select the reason for your appeal:", reply_markup=markup)
+
+@Client.on_callback_query(filters.regex(r"^vip_appeal_cancel$"))
+async def vip_appeal_cancel(client, callback: CallbackQuery):
+    await callback.message.edit_text("❌ Appeal cancelled.")
+
+@Client.on_callback_query(filters.regex(r"^vip_appeal_submit_"))
+async def vip_appeal_submit(client, callback: CallbackQuery):
+    parts = callback.data.split("_")
+    order_id = parts[3]
+    reason_type = parts[4]
+    reason = "Mistaken UTR" if reason_type == "utr" else "Mistaken Screenshot"
+    
+    order = await vip_orders.find_one({"order_id": order_id})
+    if not order: return await callback.answer("Order not found!", show_alert=True)
+    
+    admin_text = (
+        f"🚨 **REVERIFICATION APPEAL**\n\n"
+        f"👤 User: {callback.from_user.mention} (`{callback.from_user.id}`)\n"
+        f"💳 Order ID: `{order_id}`\n"
+        f"📦 Plan: {order['plan']}\n"
+        f"💵 Amount: ₹{order['amount']}\n"
+        f"📝 Reason: `{reason}`\n"
+        f"🧾 Original UTR: `{order.get('utr', 'N/A')}`\n"
+    )
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Approve", callback_data=f"vip_approve_{order_id}", style=ButtonStyle.SUCCESS), InlineKeyboardButton("❌ Reject Permanently", callback_data=f"vip_appeal_reject_{order_id}", style=ButtonStyle.DANGER)],
+        [InlineKeyboardButton("💬 Contact User", url=f"tg://openmessage?user_id={callback.from_user.id}", style=ButtonStyle.PRIMARY)]
+    ])
+    
+    await client.send_message(Config.ADMINS[0], admin_text, reply_markup=markup)
+    await callback.message.edit_text("✅ **Appeal Submitted Successfully!**\n\nYour appeal has been sent to the admin. If the review is successful, you will be granted VIP access. Otherwise, the admin will contact you directly via DM.")
+
+@Client.on_callback_query(filters.regex(r"^vip_appeal_reject_") & filters.user(Config.ADMINS))
+async def vip_appeal_reject_final(client, callback: CallbackQuery):
+    order_id = callback.data.split("_")[3]
+    await callback.message.edit_reply_markup(InlineKeyboardMarkup([[InlineKeyboardButton("❌ APPEAL REJECTED", callback_data="noop", style=ButtonStyle.DANGER)]]))
+    order = await vip_orders.find_one({"order_id": order_id})
+    if order:
+        try:
+            await client.send_message(order["user_id"], f"❌ **Appeal Rejected**\n\nYour appeal for Order `{order_id}` has been reviewed and permanently rejected.")
+        except: pass
 
 # ==========================================
 # 🙋‍♂️ USER STATUS CHECK COMMAND
 # ==========================================
-@Client.on_message(filters.command("checkvip"), group=-1)
+@Client.on_message(filters.command("checkvip"))
 async def check_vip_cmd(client, message: Message):
     target = message.from_user.id
     if len(message.command) > 1 and message.from_user.id in Config.ADMINS:
@@ -1187,7 +1243,7 @@ async def check_vip_cmd(client, message: Message):
     await message.reply(text)
     raise StopPropagation
 
-@Client.on_message(filters.command("redeem"), group=-1)
+@Client.on_message(filters.command("redeem"))
 async def user_redeem_coupon(client, message: Message):
     if len(message.command) < 2: return await message.reply("⚠️ Usage: `/redeem <COUPON-CODE>`")
     code = message.command[1].strip().upper()
