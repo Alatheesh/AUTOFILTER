@@ -233,31 +233,38 @@ async def stop_active_index(client: Client, message: Message):
 async def mass_indexer_command(client: Client, message: Message):
     
     if message.reply_to_message:
+        # 1. Instantly send a status message so we know the bot is alive
+        status = await message.reply_text("⏳ **Reading forwarded file...**")
+        
         reply = message.reply_to_message
         target_chat = None
         last_msg_id = None
         
-        # 1. Modern Pyrogram v3 Check
+        # 2. The Ultimate Pyrogram v3 Parser
         if hasattr(reply, "forward_origin") and reply.forward_origin:
             origin = reply.forward_origin
-            if hasattr(origin, "chat") and origin.chat:
+            if getattr(origin, "chat", None):
                 target_chat = origin.chat.id
-            elif hasattr(origin, "sender_chat") and origin.sender_chat:
+            elif getattr(origin, "sender_chat", None):
                 target_chat = origin.sender_chat.id
             last_msg_id = getattr(origin, "message_id", None)
             
-        # 2. Legacy Pyrogram Fallback
-        elif getattr(reply, "forward_from_chat", None):
+        # 3. Legacy Pyrogram Fallback
+        if not target_chat and getattr(reply, "forward_from_chat", None):
             target_chat = reply.forward_from_chat.id
             last_msg_id = getattr(reply, "forward_from_message_id", None)
             
-        # 3. Text Fallback (In case you reply to a message containing just the ID)
-        elif reply.text:
+        # 4. Direct Text Fallback
+        if not target_chat and reply.text:
             target_chat = reply.text.strip()
             
-        # 💥 THE FIX: We only check if target_chat exists. It will no longer fail if the message ID is missing!
+        # 💥 THE FIX: We strictly check if target_chat exists. It no longer fails if the message ID is missing!
         if target_chat is not None:
-            await trigger_indexing_job(client, message, target_chat, known_msg_id=last_msg_id)
+            # We pass the status.id so the bot can update this exact message if it needs to run a deep scan!
+            await trigger_indexing_job(client, message, target_chat, prompt_msg_id=status.id, known_msg_id=last_msg_id)
+            raise StopPropagation
+        else:
+            await status.edit_text("❌ **Could not detect a channel.**\nPlease make sure you are forwarding a file directly from a channel, not a user or hidden account.")
             raise StopPropagation
             
     if len(message.command) > 1:
