@@ -133,7 +133,7 @@ async def process_font_reply(client, message):
     """Triggers when the user replies to the ForceReply prompt."""
     
     # Verify they are replying to our specific font prompt
-    if message.reply_to_message and "Send the text you want to convert to" in message.reply_to_message.text:
+    if message.reply_to_message and message.reply_to_message.text and "Send the text you want to convert to" in message.reply_to_message.text:
         
         try:
             # Safely extract the font name
