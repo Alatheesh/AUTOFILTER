@@ -727,6 +727,10 @@ async def get_stats_home_text_and_buttons():
 
 async def get_worker1_text_and_buttons():
     active_job = await db.get_active_job()
+    
+    # 🚀 NEW: Dynamically count how many channels are queued or processing
+    queue_count = await db.jobs.count_documents({"status": {"$in": ["pending", "processing"]}})
+    
     if active_job:
         target = active_job.get("chat_name", "Unknown Channel")
         scanned = active_job.get("scanned", 0)
@@ -752,7 +756,8 @@ async def get_worker1_text_and_buttons():
 
         text = (
             f"⚙️ **WORKER 1: Mass Channel Indexing**\n"
-            f"🔄 **Status:** `{status_text}`\n\n"
+            f"🔄 **Status:** `{status_text}`\n"
+            f"📡 **Channels in Queue:** `{queue_count}`\n\n"
             f"• **Target Channel:** `{target}`\n"
             f"• **Scanned:** `{scanned:,}` | **Remaining to Scan:** `{remaining:,}`\n"
             f"• **Total Progress:** `{scanned:,}` / `{total_msgs:,}` (`{idx_pct}%`)\n"
@@ -760,13 +765,16 @@ async def get_worker1_text_and_buttons():
             f"📂 **Content Deep-Breakdown:**\n"
             f"• **New Media Saved:** `{saved:,}`\n"
             f"• **Duplicates Skipped:** `{duplicates:,}`\n"
-            f"• **Deleted / Empty Skipped:** `{skipped_empty:,}`"
+            f"• **Deleted / Empty Skipped:** `{skipped_empty:,}`\n\n"
+            f"💡 *Tip: Use `/indexdata` to export all queued job details.*"
         )
     else:
         text = (
             f"⚙️ **WORKER 1: Mass Channel Indexing**\n"
-            f"💤 **Status:** `Idle (Queue Empty)`\n\n"
-            f"No active mass channel indexing tasks are currently running in the background queue."
+            f"💤 **Status:** `Idle (Queue Empty)`\n"
+            f"📡 **Channels in Queue:** `0`\n\n"
+            f"No active mass channel indexing tasks are currently running in the background queue.\n\n"
+            f"💡 *Tip: Use `/indexdata` to export all queued job details.*"
         )
 
     buttons = [
