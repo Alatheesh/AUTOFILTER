@@ -374,7 +374,8 @@ async def vip_paid_callback(client, callback: CallbackQuery):
         markup = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Yes, I Already Paid", callback_data=f"vip_recover_{order_id}", style=ButtonStyle.SUCCESS)], [InlineKeyboardButton("🔄 Create New Order", callback_data="vip_reorder", style=ButtonStyle.PRIMARY)]])
         return await callback.message.edit_text("⚠️ **Your payment order has expired.**\n\nDid you already complete the payment before it expired?", reply_markup=markup)
 
-    USER_STATES[callback.fromuser.id] = {"action": "wait_utr", "order_id": order_id, "recovery": False}
+    # 🚀 THE FIX: Corrected fromuser to from_user
+    USER_STATES[callback.from_user.id] = {"action": "wait_utr", "order_id": order_id, "recovery": False}
     await callback.message.edit_text("📝 **Please send the 12-Digit UPI Reference Number (UTR) or a Screenshot of the payment.**")
 
 @Client.on_callback_query(filters.regex(r"^vip_recover_"))
@@ -1101,6 +1102,41 @@ async def catch_payment_proof(client, message: Message):
             USER_STATES.pop(message.from_user.id, None)
             raise StopPropagation
 
+    # 🚀 HERE IT IS: The new Appeal Proof block
+    if action == "wait_appeal_proof":
+        try:
+            order_id = state["order_id"]
+            reason = state["reason"]
+            order = await vip_orders.find_one({"order_id": order_id})
+            new_utr = message.text if message.text else "New Screenshot Provided"
+            
+            await update_order_state(order_id, "Appeal Submitted", {"appeal_utr": new_utr, "appeal_reason": reason})
+            
+            await message.reply("✅ **Appeal Submitted Successfully!**\n\nYour corrected details have been sent to the admin. If the review is successful, you will be granted VIP access. Otherwise, the admin will contact you directly via DM.")
+            
+            admin_text = (
+                f"🚨 **REVERIFICATION APPEAL**\n\n"
+                f"👤 User: {message.from_user.mention} (`{message.from_user.id}`)\n"
+                f"💳 Order ID: `{order_id}`\n"
+                f"📦 Plan: {order['plan']}\n"
+                f"💵 Amount: ₹{order['amount']}\n"
+                f"📝 Reason: `{reason}`\n"
+                f"🧾 Old UTR: `{order.get('utr', 'N/A')}`\n"
+                f"🆕 **New Proof/UTR:** `{new_utr}`\n"
+            )
+            markup = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Approve", callback_data=f"vip_approve_{order_id}", style=ButtonStyle.SUCCESS), InlineKeyboardButton("❌ Reject Permanently", callback_data=f"vip_appeal_reject_{order_id}", style=ButtonStyle.DANGER)],
+                [InlineKeyboardButton("💬 Contact User", url=f"tg://openmessage?user_id={message.from_user.id}", style=ButtonStyle.PRIMARY)]
+            ])
+            
+            if message.photo: await client.send_photo(Config.ADMINS[0], message.photo.file_id, caption=admin_text, reply_markup=markup)
+            else: await client.send_message(Config.ADMINS[0], admin_text, reply_markup=markup)
+            
+        except Exception as e:
+            await message.reply(f"❌ **Error Submitting Appeal:** {e}")
+        finally:
+            USER_STATES.pop(message.from_user.id, None)
+            raise StopPropagation
 # ==========================================
 # 👑 ADMIN REVIEW LOGIC
 # ==========================================
@@ -1142,8 +1178,8 @@ async def admin_reject(client, callback: CallbackQuery):
 async def vip_appeal_init(client, callback: CallbackQuery):
     order_id = callback.data.split("_")[3]
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Mistaken UTR", callback_data=f"vip_appeal_submit_{order_id}_utr", style=ButtonStyle.PRIMARY)],
-        [InlineKeyboardButton("Mistaken Screenshot", callback_data=f"vip_appeal_submit_{order_id}_screenshot", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("Mistaken UTR", callback_data=f"vip_appeal_reason_{order_id}_utr", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("Mistaken Screenshot", callback_data=f"vip_appeal_reason_{order_id}_screenshot", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton("❌ Cancel", callback_data="vip_appeal_cancel", style=ButtonStyle.DANGER)]
     ])
     await callback.message.edit_text("📝 **VIP Payment Appeal**\n\nPlease select the reason for your appeal:", reply_markup=markup)
@@ -1152,8 +1188,9 @@ async def vip_appeal_init(client, callback: CallbackQuery):
 async def vip_appeal_cancel(client, callback: CallbackQuery):
     await callback.message.edit_text("❌ Appeal cancelled.")
 
-@Client.on_callback_query(filters.regex(r"^vip_appeal_submit_"))
-async def vip_appeal_submit(client, callback: CallbackQuery):
+# 🚀 NEW: Catch the reason and ask for the new proof!
+@Client.on_callback_query(filters.regex(r"^vip_appeal_reason_"))
+async def vip_appeal_reason(client, callback: CallbackQuery):
     parts = callback.data.split("_")
     order_id = parts[3]
     reason_type = parts[4]
@@ -1162,22 +1199,10 @@ async def vip_appeal_submit(client, callback: CallbackQuery):
     order = await vip_orders.find_one({"order_id": order_id})
     if not order: return await callback.answer("Order not found!", show_alert=True)
     
-    admin_text = (
-        f"🚨 **REVERIFICATION APPEAL**\n\n"
-        f"👤 User: {callback.from_user.mention} (`{callback.from_user.id}`)\n"
-        f"💳 Order ID: `{order_id}`\n"
-        f"📦 Plan: {order['plan']}\n"
-        f"💵 Amount: ₹{order['amount']}\n"
-        f"📝 Reason: `{reason}`\n"
-        f"🧾 Original UTR: `{order.get('utr', 'N/A')}`\n"
-    )
-    markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Approve", callback_data=f"vip_approve_{order_id}", style=ButtonStyle.SUCCESS), InlineKeyboardButton("❌ Reject Permanently", callback_data=f"vip_appeal_reject_{order_id}", style=ButtonStyle.DANGER)],
-        [InlineKeyboardButton("💬 Contact User", url=f"tg://openmessage?user_id={callback.from_user.id}", style=ButtonStyle.PRIMARY)]
-    ])
+    # Put the user into the appeal state to catch their next message
+    USER_STATES[callback.from_user.id] = {"action": "wait_appeal_proof", "order_id": order_id, "reason": reason}
     
-    await client.send_message(Config.ADMINS[0], admin_text, reply_markup=markup)
-    await callback.message.edit_text("✅ **Appeal Submitted Successfully!**\n\nYour appeal has been sent to the admin. If the review is successful, you will be granted VIP access. Otherwise, the admin will contact you directly via DM.")
+    await callback.message.edit_text(f"📝 **Appeal Reason:** `{reason}`\n\nPlease send the **correct 12-Digit UTR** or a **new valid screenshot** now to submit your appeal.")
 
 @Client.on_callback_query(filters.regex(r"^vip_appeal_reject_") & filters.user(Config.ADMINS))
 async def vip_appeal_reject_final(client, callback: CallbackQuery):
