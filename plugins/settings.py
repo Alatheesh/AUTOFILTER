@@ -786,18 +786,26 @@ async def get_worker1_text_and_buttons():
     return text, InlineKeyboardMarkup(buttons)
 
 async def get_worker2_text_and_buttons():
+    from plugins.background_worker import is_fast_mode_active, is_recheck_mode_active
+    
     db_stats = await db.global_stats()
     total_files = db_stats.get('total_files', 0)
-    indexed_meta = db_stats.get('indexed_metadata', 0)
-    pending_meta = total_files - indexed_meta
     
+    pending_meta = 0
     corrupted_count = 0
+    
+    # 🚀 Accurately query the exact numbers directly from shards
     for coll in db.collections:
-        corrupted_count += await coll.count_documents({"language": "unknown"})
+        pending_meta += await coll.count_documents({"language": "pending"})
+        corrupted_count += await coll.count_documents({"language": {"$in": ["unknown", "corrupted"]}})
 
+    indexed_meta = total_files - pending_meta - corrupted_count
+    
     meta_eta_seconds = pending_meta * 5.5 
     meta_eta_string = format_eta(meta_eta_seconds)
-    meta_pct = (indexed_meta / total_files * 100) if total_files > 0 else 100
+    meta_pct = ((total_files - pending_meta) / total_files * 100) if total_files > 0 else 100
+
+    recheck_str = "🟢 Active (Yields to new files)" if is_recheck_mode_active() else "🔴 Inactive"
 
     text = (
         f"⚙️ **WORKER 2: Language & Metadata Extraction**\n"
@@ -806,16 +814,21 @@ async def get_worker2_text_and_buttons():
         f"• **Corrupted / Skipped:** `{corrupted_count:,}` files\n"
         f"• **Current Progress:** `{meta_pct:.1f}%` complete\n"
         f"• **Pending Migration Queue:** `{pending_meta:,}` files left\n"
+        f"• **Skipped Recheck Engine:** `{recheck_str}`\n"
         f"• **Estimated Completion Time (ETA):** `{meta_eta_string}`\n\n"
-        f"💡 *Note: This background process routes with a safety buffer delay to avoid hitting Telegram flood limits.*"
+        f"💡 *Note: The Recheck Engine safely scans failed files and will auto-pause if new pending files arrive.*"
     )
 
     fast_status = "⚡ Fast Mode: ON" if is_fast_mode_active() else "🐢 Fast Mode: OFF"
+    recheck_btn = "⏹ Stop Recheck" if is_recheck_mode_active() else "🔄 Recheck Skipped"
 
     buttons = [
         [
             InlineKeyboardButton(fast_status, callback_data="stats_toggle_fastmode"),
             InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w2")
+        ],
+        [
+            InlineKeyboardButton(recheck_btn, callback_data="stats_toggle_recheck")
         ],
         [
             InlineKeyboardButton("🔙 Back", callback_data="stats_home")
@@ -863,6 +876,29 @@ async def stats_callback_handler(client: Client, callback: CallbackQuery):
             new_state = toggle_fast_mode()
             status_msg = "Fast Mode Activated! ⚡" if new_state else "Returned to Normal Speed 🐢"
             await callback.answer(status_msg, show_alert=False)
+            
+            text, markup = await get_worker2_text_and_buttons()
+            return await callback.message.edit_text(text, reply_markup=markup)
+
+        # 🚀 THE NEW RECHECK BUTTON LOGIC IS SAFELY INJECTED HERE
+        if action == "stats_toggle_recheck":
+            from plugins.background_worker import is_recheck_mode_active, start_recheck_mode, stop_recheck_mode
+            
+            if is_recheck_mode_active():
+                stop_recheck_mode()
+                await callback.answer("⏹ Recheck mode stopped.", show_alert=False)
+            else:
+                # 🛑 RULE ENFORCEMENT: Check for pending files across all shards
+                pending_count = 0
+                for coll in db.collections:
+                    pending_count += await coll.count_documents({"language": "pending"})
+                
+                if pending_count > 0:
+                    return await callback.answer(f"⚠️ Cannot start recheck!\n\nThere are still {pending_count} unskipped (pending) files currently processing. Let them finish first.", show_alert=True)
+                
+                # If clean, start the engine!
+                start_recheck_mode()
+                await callback.answer("🔄 Recheck mode activated! Worker 2 is now scanning skipped/corrupted files.", show_alert=True)
             
             text, markup = await get_worker2_text_and_buttons()
             return await callback.message.edit_text(text, reply_markup=markup)
