@@ -1,4 +1,5 @@
 import os
+import time
 import asyncio
 import logging
 import aiofiles
@@ -16,22 +17,37 @@ logger = logging.getLogger(__name__)
 FAST_MODE_ACTIVE = False 
 
 def is_fast_mode_active():
-    """Returns the current state of the Fast Mode."""
-    global FAST_MODE_ACTIVE
     return FAST_MODE_ACTIVE
 
 def toggle_fast_mode():
-    """Flips the Fast Mode state and returns the new state."""
     global FAST_MODE_ACTIVE
     FAST_MODE_ACTIVE = not FAST_MODE_ACTIVE
     return FAST_MODE_ACTIVE
 
-# A clean, scalable dictionary of languages and their MKV abbreviations
+# ==========================================
+# 🔄 RECHECK ENGINE (For Skipped/Corrupted)
+# ==========================================
+RECHECK_MODE_ACTIVE = False
+RECHECK_SESSION_ID = 0
+
+def is_recheck_mode_active():
+    return RECHECK_MODE_ACTIVE
+
+def start_recheck_mode():
+    global RECHECK_MODE_ACTIVE, RECHECK_SESSION_ID
+    RECHECK_MODE_ACTIVE = True
+    RECHECK_SESSION_ID = int(time.time()) # Creates a unique session lock!
+
+def stop_recheck_mode():
+    global RECHECK_MODE_ACTIVE
+    RECHECK_MODE_ACTIVE = False
+
+# A massive, comprehensive dictionary of global media languages and their MKV abbreviations
 LANGUAGE_MAP = {
+    # 🇮🇳 Indian & South Asian
     "tamil": ["tamil", "'ta'", "'tam'"],
     "telugu": ["telugu", "'te'", "'tel'"],
     "hindi": ["hindi", "'hi'", "'hin'"],
-    "english": ["english", "'en'", "'eng'"],
     "malayalam": ["malayalam", "'ml'", "'mal'"],
     "kannada": ["kannada", "'kn'", "'kan'"],
     "bengali": ["bengali", "'bn'", "'ben'"],
@@ -40,19 +56,68 @@ LANGUAGE_MAP = {
     "punjabi": ["punjabi", "'pa'", "'pan'"],
     "urdu": ["urdu", "'ur'", "'urd'"],
     "odia": ["odia", "oriya", "'or'", "'ori'"],
-    "japanese": ["japanese", "'ja'", "'jpn'"],
-    "korean": ["korean", "'ko'", "'kor'"],
-    "chinese": ["chinese", "mandarin", "cantonese", "'zh'", "'chi'", "'zho'"],
-    "french": ["french", "'fr'", "'fre'", "'fra'"],
+    "assamese": ["assamese", "'as'", "'asm'"],
+    "bhojpuri": ["bhojpuri", "'bho'"],
+    "sindhi": ["sindhi", "'sd'", "'snd'"],
+    "nepali": ["nepali", "'ne'", "'nep'"],
+    "sinhala": ["sinhala", "sinhalese", "'si'", "'sin'"],
+    "pashto": ["pashto", "'ps'", "'pus'"],
+
+    # 🌐 Core International
+    "english": ["english", "'en'", "'eng'"],
     "spanish": ["spanish", "'es'", "'spa'"],
+    "french": ["french", "'fr'", "'fre'", "'fra'"],
     "german": ["german", "'de'", "'ger'", "'deu'"],
     "russian": ["russian", "'ru'", "'rus'"],
-    "arabic": ["arabic", "'ar'", "'ara'"]
+    "portuguese": ["portuguese", "'pt'", "'por'"],
+    "italian": ["italian", "'it'", "'ita'"],
+
+    # ⛩️ East Asian & Southeast Asian (Anime, K-Drama, Regional Cinema)
+    "japanese": ["japanese", "'ja'", "'jpn'"],
+    "korean": ["korean", "'ko'", "'kor'"],
+    "chinese": ["chinese", "mandarin", "cantonese", "'zh'", "'chi'", "'zho'", "'yue'", "'cmn'"],
+    "indonesian": ["indonesian", "'id'", "'ind'"],
+    "malay": ["malay", "'ms'", "'may'", "'msa'"],
+    "thai": ["thai", "'th'", "'tha'"],
+    "vietnamese": ["vietnamese", "'vi'", "'vie'"],
+    "tagalog": ["tagalog", "filipino", "'tl'", "'tgl'", "'fil'"],
+    "burmese": ["burmese", "'my'", "'mya'", "'bur'"],
+    "khmer": ["khmer", "cambodian", "'km'", "'khm'"],
+
+    # 🌍 Middle Eastern & African
+    "arabic": ["arabic", "'ar'", "'ara'"],
+    "turkish": ["turkish", "'tr'", "'tur'"],
+    "persian": ["persian", "farsi", "'fa'", "'per'", "'fas'"],
+    "hebrew": ["hebrew", "'he'", "'heb'"],
+    "kurdish": ["kurdish", "'ku'", "'kur'"],
+    "swahili": ["swahili", "'sw'", "'swa'"],
+    "amharic": ["amharic", "'am'", "'amh'"],
+    "afrikaans": ["afrikaans", "'af'", "'afr'"],
+
+    # 🇪🇺 Expanded European (Nordic, Eastern Europe, etc.)
+    "dutch": ["dutch", "flemish", "'nl'", "'dut'", "'nld'"],
+    "polish": ["polish", "'pl'", "'pol'"],
+    "ukrainian": ["ukrainian", "'uk'", "'ukr'"],
+    "greek": ["greek", "'el'", "'gre'", "'ell'"],
+    "swedish": ["swedish", "'sv'", "'swe'"],
+    "norwegian": ["norwegian", "'no'", "'nor'", "'nob'", "'nno'"],
+    "danish": ["danish", "'da'", "'dan'"],
+    "finnish": ["finnish", "'fi'", "'fin'"],
+    "czech": ["czech", "'cs'", "'cze'", "'ces'"],
+    "hungarian": ["hungarian", "'hu'", "'hun'"],
+    "romanian": ["romanian", "'ro'", "'rum'", "'ron'"],
+    "slovak": ["slovak", "'sk'", "'slo'", "'slk'"],
+    "croatian": ["croatian", "'hr'", "'hrv'"],
+    "serbian": ["serbian", "'sr'", "'srp'"],
+    "bulgarian": ["bulgarian", "'bg'", "'bul'"],
+
+    # 🏛️ Miscellaneous & Classic
+    "latin": ["latin", "'la'", "'lat'"],
+    "esperanto": ["esperanto", "'eo'", "'epo'"]
 }
 
 async def extract_language_micro_chunk(client: Client, file_id: str, unique_id: str) -> tuple[str, str]:
-    """Streams a 2MB chunk and extracts both Audio and Subtitle tracks."""
-    chunk_limit = 2 * 1024 * 1024  # 2MB limits bandwidth usage safely
+    chunk_limit = 2 * 1024 * 1024  
     temp_path = f"temp_{unique_id}.mkv"
     downloaded = 0
 
@@ -71,12 +136,26 @@ async def extract_language_micro_chunk(client: Client, file_id: str, unique_id: 
 
         for track in media_info.tracks:
             if track.track_type == "Audio":
+                if getattr(track, 'other_language', None):
+                    lang = track.other_language[0].lower()
+                    if lang != 'und': audio_found.add(lang)
+                elif getattr(track, 'language', None):
+                    lang = track.language.lower()
+                    if lang != 'und': audio_found.add(lang)
+
                 track_data = str(track.to_data()).lower()
                 for lang, keywords in LANGUAGE_MAP.items():
                     if any(keyword in track_data for keyword in keywords):
                         audio_found.add(lang)
 
             elif track.track_type == "Text":
+                if getattr(track, 'other_language', None):
+                    lang = track.other_language[0].lower()
+                    if lang != 'und': subs_found.add(lang)
+                elif getattr(track, 'language', None):
+                    lang = track.language.lower()
+                    if lang != 'und': subs_found.add(lang)
+
                 track_data = str(track.to_data()).lower()
                 for lang, keywords in LANGUAGE_MAP.items():
                     if any(keyword in track_data for keyword in keywords):
@@ -100,7 +179,7 @@ async def extract_language_micro_chunk(client: Client, file_id: str, unique_id: 
                 pass
 
 async def start_background_language_indexer(client: Client):
-    """The 24/7 invisible loop that processes files one by one."""
+    global RECHECK_MODE_ACTIVE
     logger.info("🟢 Background Metadata Worker Started!")
 
     while True:
@@ -108,12 +187,31 @@ async def start_background_language_indexer(client: Client):
             target_file = None
             target_collection = None
 
+            # 🚀 PRIORITY 1: Always check for NEW pending files first!
             for coll in db.collections:
                 doc = await coll.find_one({"language": "pending"})
                 if doc:
                     target_file = doc
                     target_collection = coll
                     break
+
+            # 🔄 PRIORITY 2: If no pending files, check the Skipped Queue (If Recheck is ON)
+            if not target_file and RECHECK_MODE_ACTIVE:
+                for coll in db.collections:
+                    # Find a skipped file that hasn't been checked in THIS specific session
+                    doc = await coll.find_one({
+                        "language": {"$in": ["unknown", "corrupted"]},
+                        "recheck_session": {"$ne": RECHECK_SESSION_ID}
+                    })
+                    if doc:
+                        target_file = doc
+                        target_collection = coll
+                        break
+                
+                # If we searched all shards and found nothing, the recheck is completely done!
+                if not target_file:
+                    RECHECK_MODE_ACTIVE = False
+                    logger.info("✅ Recheck session completed! All skipped files scanned.")
 
             if not target_file:
                 await asyncio.sleep(60)
@@ -135,15 +233,21 @@ async def start_background_language_indexer(client: Client):
                 await asyncio.sleep(fw.value)
                 continue
 
+            # 📝 Prepare Database Update
+            update_data = {
+                "language": audio_langs,
+                "subtitle": sub_langs
+            }
+            
+            # If we are in Recheck Mode, lock this file so we don't scan it again this session
+            if RECHECK_MODE_ACTIVE and target_file.get("language") in ["unknown", "corrupted"]:
+                update_data["recheck_session"] = RECHECK_SESSION_ID
+
             await target_collection.update_one(
                 {"_id": target_file["_id"]},
-                {"$set": {
-                    "language": audio_langs,
-                    "subtitle": sub_langs
-                }}
+                {"$set": update_data}
             )
 
-            # 🛡️ DYNAMIC SAFETY TIMER
             sleep_time = 1.0 if FAST_MODE_ACTIVE else 3.0
             await asyncio.sleep(sleep_time)
 
