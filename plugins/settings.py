@@ -4,7 +4,7 @@ import json
 import time
 import datetime
 from pyrogram import Client, filters, ContinuePropagation, StopPropagation
-from pyrogram.enums import ChatType
+from pyrogram.enums import ChatType, ButtonStyle
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from config import Config
 from database.multi_db import db
@@ -204,12 +204,18 @@ async def settings_router(client: Client, message: Message):
             return await message.reply_text("🛑 **Access Denied:** Only the Primary Connector who linked this group can change its settings.")
 
         mode = g_sett.get("search_mode", "let_members_choose")
+        c_mode = g_sett.get("color_mode", "let_members_choose") # 🎨 NEW
         buttons = [
             [InlineKeyboardButton("🛡️ Moderation Rules Hub", callback_data=f"set_mod_local_{message.chat.id}")],
             [InlineKeyboardButton("📝 File Caption Settings", callback_data=f"set_caption_local_{message.chat.id}")],
             [InlineKeyboardButton(text=f"{'✅' if mode=='force_default' else '❌'} Force Default", callback_data=f"gset_mode_force_default_{message.chat.id}"),
              InlineKeyboardButton(text=f"{'✅' if mode=='force_interactive' else '❌'} Force Interactive", callback_data=f"gset_mode_force_interactive_{message.chat.id}")],
-            [InlineKeyboardButton(text=f"{'✅' if mode=='let_members_choose' else '❌'} Let Members Choose", callback_data=f"gset_mode_let_members_choose_{message.chat.id}")]
+            [InlineKeyboardButton(text=f"{'✅' if mode=='let_members_choose' else '❌'} Let Members Choose Layout", callback_data=f"gset_mode_let_members_choose_{message.chat.id}")],
+            
+            # 🎨 NEW: Group-Level Color Overrides
+            [InlineKeyboardButton(text=f"{'✅' if c_mode=='force_on' else '❌'} Force Colors ON", callback_data=f"gset_color_force_on_{message.chat.id}"),
+             InlineKeyboardButton(text=f"{'✅' if c_mode=='force_off' else '❌'} Force Colors OFF", callback_data=f"gset_color_force_off_{message.chat.id}")],
+            [InlineKeyboardButton(text=f"{'✅' if c_mode=='let_members_choose' else '❌'} Let Members Choose Colors", callback_data=f"gset_color_let_members_choose_{message.chat.id}")]
         ]
         await message.reply_text(f"🛠️ **Group Settings Menu:** `{message.chat.title}`\nConfigure settings and moderation limits for this group:", reply_markup=InlineKeyboardMarkup(buttons))
         raise StopPropagation
@@ -250,8 +256,10 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
     if data == "tier_user_home":
         u_sett = await db.get_user_settings(user_id)
         m = u_sett.get("search_mode", "default")
+        c = u_sett.get("color_mode", False) # 🎨 NEW
         buttons = [
-            [InlineKeyboardButton(text=f"{'✅' if m=='default' else '❌'} Default Mode", callback_data="uset_mode_default"), InlineKeyboardButton(text=f"{'✅' if m=='interactive' else '❌'} Interactive Mode", callback_data="uset_mode_interactive")]
+            [InlineKeyboardButton(text=f"{'✅' if m=='default' else '❌'} Default Mode", callback_data="uset_mode_default"), InlineKeyboardButton(text=f"{'✅' if m=='interactive' else '❌'} Interactive Mode", callback_data="uset_mode_interactive")],
+            [InlineKeyboardButton(text=f"{'✅' if c else '❌'} Colorful Buttons UI", callback_data="uset_toggle_color")] # 🎨 NEW
         ]
         if m == "interactive": buttons.append([InlineKeyboardButton(text="⚙️ Configure File Size & Language", callback_data="uset_interactive_menu")])
         buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="tier_root_fallback")])
@@ -264,6 +272,12 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
     if data == "uset_mode_interactive":
         await db.update_user_setting(user_id, "search_mode", "interactive")
         query.data = "uset_interactive_menu"; return await menus_callback_handler(client, query)
+
+    # 🎨 NEW: Handler for Personal Color Toggle
+    if data == "uset_toggle_color":
+        u_sett = await db.get_user_settings(user_id)
+        await db.update_user_setting(user_id, "color_mode", not u_sett.get("color_mode", False))
+        query.data = "tier_user_home"; return await menus_callback_handler(client, query)
 
     if data == "uset_interactive_menu":
         u_sett = await db.get_user_settings(user_id)
@@ -295,10 +309,14 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         g_sett = await db.get_group_settings(c_id)
         if g_sett.get("connected_by") != user_id and not is_creator(user_id): return await query.answer("Access Denied.", show_alert=True)
         mode = g_sett.get("search_mode", "let_members_choose")
+        c_mode = g_sett.get("color_mode", "let_members_choose") # 🎨 NEW
         buttons = [
             [InlineKeyboardButton("🛡️ Moderation Rules Hub", callback_data=f"set_mod_local_{c_id}")],
             [InlineKeyboardButton(text=f"{'✅' if mode=='force_default' else '❌'} Force Default", callback_data=f"gset_mode_force_default_{c_id}"), InlineKeyboardButton(text=f"{'✅' if mode=='force_interactive' else '❌'} Force Interactive", callback_data=f"gset_mode_force_interactive_{c_id}")],
-            [InlineKeyboardButton(text=f"{'✅' if mode=='let_members_choose' else '❌'} Let Members Choose", callback_data=f"gset_mode_let_members_choose_{c_id}")]
+            [InlineKeyboardButton(text=f"{'✅' if mode=='let_members_choose' else '❌'} Let Members Choose Layout", callback_data=f"gset_mode_let_members_choose_{c_id}")],
+            # 🎨 NEW COLOR OVERRIDES
+            [InlineKeyboardButton(text=f"{'✅' if c_mode=='force_on' else '❌'} Force Colors ON", callback_data=f"gset_color_force_on_{c_id}"), InlineKeyboardButton(text=f"{'✅' if c_mode=='force_off' else '❌'} Force Colors OFF", callback_data=f"gset_color_force_off_{c_id}")],
+            [InlineKeyboardButton(text=f"{'✅' if c_mode=='let_members_choose' else '❌'} Let Members Choose Colors", callback_data=f"gset_color_let_members_choose_{c_id}")]
         ]
         if mode == "force_interactive": buttons.append([InlineKeyboardButton(text="⚙️ Configure Group Size & Language", callback_data=f"gset_interactive_menu_{c_id}")])
         buttons.append([InlineKeyboardButton(text="🔙 Back to List", callback_data="tier_group_list")])
@@ -308,6 +326,16 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         parts = data.split("_"); target_mode = f"{parts[2]}_{parts[3]}" if parts[3] in ["default", "interactive"] else f"{parts[2]}_{parts[3]}_{parts[4]}"; chat_id = int(parts[-1])
         await db.update_group_setting(chat_id, "search_mode", target_mode); await query.answer("Group layout policy updated successfully.")
         query.data = f"gset_interactive_menu_{chat_id}" if target_mode == "force_interactive" else f"tier_gmanage_{chat_id}"; return await menus_callback_handler(client, query)
+
+    # 🎨 NEW: Handler for Group Color Override Clicks
+    if data.startswith("gset_color_"):
+        parts = data.split("_")
+        chat_id = int(parts[-1])
+        target_mode = "_".join(parts[2:-1]) # Extrapolates "force_on", "force_off", or "let_members_choose"
+        await db.update_group_setting(chat_id, "color_mode", target_mode)
+        await query.answer("Group color policy updated successfully.")
+        query.data = f"tier_gmanage_{chat_id}"
+        return await menus_callback_handler(client, query)
 
     if data.startswith("gset_interactive_menu_"):
         c_id = int(data.split("_")[3])
