@@ -207,18 +207,18 @@ async def settings_router(client: Client, message: Message):
         c_mode = g_sett.get("color_mode", "let_members_choose")
         
         # 🔄 Cycle Logic for Layout
-        if mode == "let_members_choose": mode_btn = InlineKeyboardButton("Layout: Let Members Choose 🔄", callback_data=f"gset_mode_force_default_{message.chat.id}")
-        elif mode == "force_default": mode_btn = InlineKeyboardButton("Layout: Forced Default 🔄", callback_data=f"gset_mode_force_interactive_{message.chat.id}")
-        else: mode_btn = InlineKeyboardButton("Layout: Forced Interactive 🔄", callback_data=f"gset_mode_let_members_choose_{message.chat.id}")
+        if mode == "let_members_choose": mode_btn = InlineKeyboardButton("Layout: Let Members Choose 🔄", callback_data=f"gset_mode_force_default_{message.chat.id}", style=ButtonStyle.PRIMARY)
+        elif mode == "force_default": mode_btn = InlineKeyboardButton("Layout: Forced Default 🔄", callback_data=f"gset_mode_force_interactive_{message.chat.id}", style=ButtonStyle.PRIMARY)
+        else: mode_btn = InlineKeyboardButton("Layout: Forced Interactive 🔄", callback_data=f"gset_mode_let_members_choose_{message.chat.id}", style=ButtonStyle.PRIMARY)
 
         # 🎨 Cycle Logic for Colors
-        if c_mode == "let_members_choose": color_btn = InlineKeyboardButton("Colors: Let Members Choose 🔄", callback_data=f"gset_color_force_on_{message.chat.id}")
-        elif c_mode == "force_on": color_btn = InlineKeyboardButton("Colors: Forced ON 🔄", callback_data=f"gset_color_force_off_{message.chat.id}")
-        else: color_btn = InlineKeyboardButton("Colors: Forced OFF 🔄", callback_data=f"gset_color_let_members_choose_{message.chat.id}")
+        if c_mode == "let_members_choose": color_btn = InlineKeyboardButton("Colors: Let Members Choose 🔄", callback_data=f"gset_color_force_on_{message.chat.id}", style=ButtonStyle.PRIMARY)
+        elif c_mode == "force_on": color_btn = InlineKeyboardButton("Colors: Forced ON 🔄", callback_data=f"gset_color_force_off_{message.chat.id}", style=ButtonStyle.PRIMARY)
+        else: color_btn = InlineKeyboardButton("Colors: Forced OFF 🔄", callback_data=f"gset_color_let_members_choose_{message.chat.id}", style=ButtonStyle.PRIMARY)
 
         buttons = [
-            [InlineKeyboardButton("🛡️ Moderation Rules Hub", callback_data=f"set_mod_local_{message.chat.id}")],
-            [InlineKeyboardButton("📝 File Caption Settings", callback_data=f"set_caption_{message.chat.id}")], # 🚀 FIXED: Removed 'local_'
+            [InlineKeyboardButton("🛡️ Moderation Rules Hub", callback_data=f"set_mod_local_{message.chat.id}", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("📝 File Caption Settings", callback_data=f"set_caption_{message.chat.id}", style=ButtonStyle.PRIMARY)],
             [mode_btn],
             [color_btn]
         ]
@@ -226,11 +226,13 @@ async def settings_router(client: Client, message: Message):
         raise StopPropagation
 
     else:
-        keyboard = [[InlineKeyboardButton(text="👤 Personal Search Settings", callback_data="tier_user_home")]]
-        if await db.get_connected_groups(user_id): keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list")])
+        keyboard = [[InlineKeyboardButton(text="👤 Personal Search Settings", callback_data="tier_user_home", style=ButtonStyle.PRIMARY)]]
+        if await db.get_connected_groups(user_id): keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list", style=ButtonStyle.PRIMARY)])
         if is_creator(user_id):
-            keyboard.append([InlineKeyboardButton("📊 User Stats Dashboard", callback_data="ui_userstats")])
-            keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="set_home")])
+            keyboard.append([InlineKeyboardButton("📊 User Stats Dashboard", callback_data="ui_userstats", style=ButtonStyle.PRIMARY)])
+            keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="set_home", style=ButtonStyle.SUCCESS)])
+            
+        keyboard.append([InlineKeyboardButton("🔙 Back to Features", callback_data="ui_features", style=ButtonStyle.DANGER)])
             
         await message.reply_text("🎛️ **Central Command Settings Hub:**\nSelect the access layer tier you wish to inspect or modify:", reply_markup=InlineKeyboardMarkup(keyboard))
         raise StopPropagation
@@ -239,13 +241,13 @@ async def settings_router(client: Client, message: Message):
 async def admin_direct_command(client: Client, message: Message):
     text = "👑 **Bot Creator Control Panel**\n\nSelect a master module to configure:"
     buttons = [
-        [InlineKeyboardButton("🔗 Shortener Settings", callback_data="set_shortener")],
-        [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests")],
-        [InlineKeyboardButton("🕵️‍♂️ Inside Settings", callback_data="set_inside")], 
-        [InlineKeyboardButton("🗑 Search & Auto-Delete Settings", callback_data="set_autodelete")], # <-- RENAMED 
-        [InlineKeyboardButton("📝 Global File Caption", callback_data="set_caption_global")], 
-        [InlineKeyboardButton("🛡️ Global Moderation Hub", callback_data="set_mod_global")],
-        [InlineKeyboardButton("🔙 Exit", callback_data="tier_root_fallback")]
+        [InlineKeyboardButton("🔗 Shortener Settings", callback_data="set_shortener", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("🕵️‍♂️ Inside Settings", callback_data="set_inside", style=ButtonStyle.PRIMARY)], 
+        [InlineKeyboardButton("🗑 Search & Auto-Delete Settings", callback_data="set_autodelete", style=ButtonStyle.PRIMARY)], 
+        [InlineKeyboardButton("📝 Global File Caption", callback_data="set_caption_global", style=ButtonStyle.PRIMARY)], 
+        [InlineKeyboardButton("🛡️ Global Moderation Hub", callback_data="set_mod_global", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("🔙 Exit", callback_data="tier_root_fallback", style=ButtonStyle.DANGER)]
     ]
     await message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
     raise StopPropagation
@@ -263,11 +265,11 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         m = u_sett.get("search_mode", "default")
         c = u_sett.get("color_mode", False) # 🎨 NEW
         buttons = [
-            [InlineKeyboardButton(text=f"{'✅' if m=='default' else '❌'} Default Mode", callback_data="uset_mode_default"), InlineKeyboardButton(text=f"{'✅' if m=='interactive' else '❌'} Interactive Mode", callback_data="uset_mode_interactive")],
-            [InlineKeyboardButton(text=f"{'✅' if c else '❌'} Colorful Buttons UI", callback_data="uset_toggle_color")] # 🎨 NEW
+            [InlineKeyboardButton(text=f"{'✅' if m=='default' else '❌'} Default Mode", callback_data="uset_mode_default", style=ButtonStyle.PRIMARY), InlineKeyboardButton(text=f"{'✅' if m=='interactive' else '❌'} Interactive Mode", callback_data="uset_mode_interactive", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton(text=f"{'✅' if c else '❌'} Colorful Buttons UI", callback_data="uset_toggle_color", style=ButtonStyle.SUCCESS)]
         ]
-        if m == "interactive": buttons.append([InlineKeyboardButton(text="⚙️ Configure File Size & Language", callback_data="uset_interactive_menu")])
-        buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="tier_root_fallback")])
+        if m == "interactive": buttons.append([InlineKeyboardButton(text="⚙️ Configure File Size & Language", callback_data="uset_interactive_menu", style=ButtonStyle.PRIMARY)])
+        buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="tier_root_fallback", style=ButtonStyle.DANGER)])
         return await query.message.edit_text("👤 **Personal Display Preferences:**\nChoose how output records populate on your workspace screen:", reply_markup=InlineKeyboardMarkup(buttons))
 
     if data == "uset_mode_default":
@@ -288,12 +290,12 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         u_sett = await db.get_user_settings(user_id)
         s, l = u_sett.get("size", "all"), u_sett.get("language", "all")
         buttons = [
-            [InlineKeyboardButton(f"{'✅ ' if s=='small' else ''}< 500 MB", callback_data="uset_s_small"), InlineKeyboardButton(f"{'✅ ' if s=='medium' else ''}500 MB - 1 GB", callback_data="uset_s_medium")],
-            [InlineKeyboardButton(f"{'✅ ' if s=='large' else ''}1 GB - 2 GB", callback_data="uset_s_large"), InlineKeyboardButton(f"{'✅ ' if s=='xlarge' else ''}> 2 GB", callback_data="uset_s_xlarge")],
-            [InlineKeyboardButton(f"{'✅ ' if s=='all' else ''}Any File Size", callback_data="uset_s_all")],
-            [InlineKeyboardButton(f"{'✅ ' if l=='tamil' else ''}Tamil", callback_data="uset_l_tamil"), InlineKeyboardButton(f"{'✅ ' if l=='telugu' else ''}Telugu", callback_data="uset_l_telugu"), InlineKeyboardButton(f"{'✅ ' if l=='hindi' else ''}Hindi", callback_data="uset_l_hindi")],
-            [InlineKeyboardButton(f"{'✅ ' if l=='all' else ''}Any Language", callback_data="uset_l_all")],
-            [InlineKeyboardButton("🔙 Save & Return", callback_data="tier_user_home")]
+            [InlineKeyboardButton(f"{'✅ ' if s=='small' else ''}< 500 MB", callback_data="uset_s_small", style=ButtonStyle.PRIMARY), InlineKeyboardButton(f"{'✅ ' if s=='medium' else ''}500 MB - 1 GB", callback_data="uset_s_medium", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton(f"{'✅ ' if s=='large' else ''}1 GB - 2 GB", callback_data="uset_s_large", style=ButtonStyle.PRIMARY), InlineKeyboardButton(f"{'✅ ' if s=='xlarge' else ''}> 2 GB", callback_data="uset_s_xlarge", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton(f"{'✅ ' if s=='all' else ''}Any File Size", callback_data="uset_s_all", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton(f"{'✅ ' if l=='tamil' else ''}Tamil", callback_data="uset_l_tamil", style=ButtonStyle.PRIMARY), InlineKeyboardButton(f"{'✅ ' if l=='telugu' else ''}Telugu", callback_data="uset_l_telugu", style=ButtonStyle.PRIMARY), InlineKeyboardButton(f"{'✅ ' if l=='hindi' else ''}Hindi", callback_data="uset_l_hindi", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton(f"{'✅ ' if l=='all' else ''}Any Language", callback_data="uset_l_all", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("🔙 Save & Return", callback_data="tier_user_home", style=ButtonStyle.SUCCESS)]
         ]
         return await query.message.edit_text("✨ **Interactive Mode Filter Settings**", reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -305,8 +307,8 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
     if data == "tier_group_list":
         managed = await db.get_connected_groups(user_id)
         if not managed: return await query.answer("No linked administration nodes found.", show_alert=True)
-        buttons = [[InlineKeyboardButton(text=f"⚙️ {g.get('title', 'Chat ID: ' + str(g['chat_id']))}", callback_data=f"tier_gmanage_{g['chat_id']}")] for g in managed]
-        buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="tier_root_fallback")])
+        buttons = [[InlineKeyboardButton(text=f"⚙️ {g.get('title', 'Chat ID: ' + str(g['chat_id']))}", callback_data=f"tier_gmanage_{g['chat_id']}", style=ButtonStyle.PRIMARY)] for g in managed]
+        buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="tier_root_fallback", style=ButtonStyle.DANGER)])
         return await query.message.edit_text("🛡️ **Administered Groups Portal**", reply_markup=InlineKeyboardMarkup(buttons))
 
     if data.startswith("tier_gmanage_"):
@@ -318,23 +320,23 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         c_mode = g_sett.get("color_mode", "let_members_choose")
         
         # 🔄 Cycle Logic for Layout
-        if mode == "let_members_choose": mode_btn = InlineKeyboardButton("Layout: Let Members Choose 🔄", callback_data=f"gset_mode_force_default_{c_id}")
-        elif mode == "force_default": mode_btn = InlineKeyboardButton("Layout: Forced Default 🔄", callback_data=f"gset_mode_force_interactive_{c_id}")
-        else: mode_btn = InlineKeyboardButton("Layout: Forced Interactive 🔄", callback_data=f"gset_mode_let_members_choose_{c_id}")
+        if mode == "let_members_choose": mode_btn = InlineKeyboardButton("Layout: Let Members Choose 🔄", callback_data=f"gset_mode_force_default_{c_id}", style=ButtonStyle.PRIMARY)
+        elif mode == "force_default": mode_btn = InlineKeyboardButton("Layout: Forced Default 🔄", callback_data=f"gset_mode_force_interactive_{c_id}", style=ButtonStyle.PRIMARY)
+        else: mode_btn = InlineKeyboardButton("Layout: Forced Interactive 🔄", callback_data=f"gset_mode_let_members_choose_{c_id}", style=ButtonStyle.PRIMARY)
 
         # 🎨 Cycle Logic for Colors
-        if c_mode == "let_members_choose": color_btn = InlineKeyboardButton("Colors: Let Members Choose 🔄", callback_data=f"gset_color_force_on_{c_id}")
-        elif c_mode == "force_on": color_btn = InlineKeyboardButton("Colors: Forced ON 🔄", callback_data=f"gset_color_force_off_{c_id}")
-        else: color_btn = InlineKeyboardButton("Colors: Forced OFF 🔄", callback_data=f"gset_color_let_members_choose_{c_id}")
+        if c_mode == "let_members_choose": color_btn = InlineKeyboardButton("Colors: Let Members Choose 🔄", callback_data=f"gset_color_force_on_{c_id}", style=ButtonStyle.PRIMARY)
+        elif c_mode == "force_on": color_btn = InlineKeyboardButton("Colors: Forced ON 🔄", callback_data=f"gset_color_force_off_{c_id}", style=ButtonStyle.PRIMARY)
+        else: color_btn = InlineKeyboardButton("Colors: Forced OFF 🔄", callback_data=f"gset_color_let_members_choose_{c_id}", style=ButtonStyle.PRIMARY)
 
         buttons = [
-            [InlineKeyboardButton("🛡️ Moderation Rules Hub", callback_data=f"set_mod_local_{c_id}")],
-            [InlineKeyboardButton("📝 File Caption Settings", callback_data=f"set_caption_{c_id}")], # 🚀 ADDED: Missing button restored!
+            [InlineKeyboardButton("🛡️ Moderation Rules Hub", callback_data=f"set_mod_local_{c_id}", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("📝 File Caption Settings", callback_data=f"set_caption_{c_id}", style=ButtonStyle.PRIMARY)],
             [mode_btn],
             [color_btn]
         ]
-        if mode == "force_interactive": buttons.append([InlineKeyboardButton("⚙️ Configure Group Size & Language", callback_data=f"gset_interactive_menu_{c_id}")])
-        buttons.append([InlineKeyboardButton("🔙 Back to List", callback_data="tier_group_list")])
+        if mode == "force_interactive": buttons.append([InlineKeyboardButton("⚙️ Configure Group Size & Language", callback_data=f"gset_interactive_menu_{c_id}", style=ButtonStyle.PRIMARY)])
+        buttons.append([InlineKeyboardButton("🔙 Back to List", callback_data="tier_group_list", style=ButtonStyle.DANGER)])
         
         try:
             return await query.message.edit_text(f"🛠️ **Remote Group Matrix Interface**", reply_markup=InlineKeyboardMarkup(buttons))
@@ -372,12 +374,12 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         g_sett = await db.get_group_settings(c_id)
         s, l = g_sett.get("size_lock", "all"), g_sett.get("language_lock", "all")
         buttons = [
-            [InlineKeyboardButton(f"{'✅ ' if s=='small' else ''}< 500 MB", callback_data=f"gset_s_small_{c_id}"), InlineKeyboardButton(f"{'✅ ' if s=='medium' else ''}500 MB - 1 GB", callback_data=f"gset_s_medium_{c_id}")],
-            [InlineKeyboardButton(f"{'✅ ' if s=='large' else ''}1 GB - 2 GB", callback_data=f"gset_s_large_{c_id}"), InlineKeyboardButton(f"{'✅ ' if s=='xlarge' else ''}> 2 GB", callback_data=f"gset_s_xlarge_{c_id}")],
-            [InlineKeyboardButton(f"{'✅ ' if s=='all' else ''}Any File Size", callback_data=f"gset_s_all_{c_id}")],
-            [InlineKeyboardButton(f"{'✅ ' if l=='tamil' else ''}Tamil", callback_data=f"gset_l_tamil_{c_id}"), InlineKeyboardButton(f"{'✅ ' if l=='telugu' else ''}Telugu", callback_data=f"gset_l_telugu_{c_id}"), InlineKeyboardButton(f"{'✅ ' if l=='hindi' else ''}Hindi", callback_data=f"gset_l_hindi_{c_id}")],
-            [InlineKeyboardButton(f"{'✅ ' if l=='all' else ''}Any Language", callback_data=f"gset_l_all_{c_id}")],
-            [InlineKeyboardButton("🔙 Save & Return", callback_data=f"tier_gmanage_{c_id}")]
+            [InlineKeyboardButton(f"{'✅ ' if s=='small' else ''}< 500 MB", callback_data=f"gset_s_small_{c_id}", style=ButtonStyle.PRIMARY), InlineKeyboardButton(f"{'✅ ' if s=='medium' else ''}500 MB - 1 GB", callback_data=f"gset_s_medium_{c_id}", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton(f"{'✅ ' if s=='large' else ''}1 GB - 2 GB", callback_data=f"gset_s_large_{c_id}", style=ButtonStyle.PRIMARY), InlineKeyboardButton(f"{'✅ ' if s=='xlarge' else ''}> 2 GB", callback_data=f"gset_s_xlarge_{c_id}", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton(f"{'✅ ' if s=='all' else ''}Any File Size", callback_data=f"gset_s_all_{c_id}", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton(f"{'✅ ' if l=='tamil' else ''}Tamil", callback_data=f"gset_l_tamil_{c_id}", style=ButtonStyle.PRIMARY), InlineKeyboardButton(f"{'✅ ' if l=='telugu' else ''}Telugu", callback_data=f"gset_l_telugu_{c_id}", style=ButtonStyle.PRIMARY), InlineKeyboardButton(f"{'✅ ' if l=='hindi' else ''}Hindi", callback_data=f"gset_l_hindi_{c_id}", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton(f"{'✅ ' if l=='all' else ''}Any Language", callback_data=f"gset_l_all_{c_id}", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("🔙 Save & Return", callback_data=f"tier_gmanage_{c_id}", style=ButtonStyle.SUCCESS)]
         ]
         return await query.message.edit_text("✨ **Group Interactive Filters**", reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -387,13 +389,13 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         await db.update_group_setting(int(data.split("_")[3]), "language_lock", data.split("_")[2]); query.data = f"gset_interactive_menu_{data.split('_')[3]}"; return await menus_callback_handler(client, query)
 
     if data == "tier_root_fallback":
-        keyboard = [[InlineKeyboardButton(text="👤 Personal Search Settings", callback_data="tier_user_home")]]
-        if await db.get_connected_groups(user_id): keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list")])
+        keyboard = [[InlineKeyboardButton(text="👤 Personal Search Settings", callback_data="tier_user_home", style=ButtonStyle.PRIMARY)]]
+        if await db.get_connected_groups(user_id): keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list", style=ButtonStyle.PRIMARY)])
         if is_creator(user_id):
-            keyboard.append([InlineKeyboardButton("📊 User Stats Dashboard", callback_data="ui_userstats")])
-            keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="set_home")])
+            keyboard.append([InlineKeyboardButton("📊 User Stats Dashboard", callback_data="ui_userstats", style=ButtonStyle.PRIMARY)])
+            keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="set_home", style=ButtonStyle.SUCCESS)])
             
-        keyboard.append([InlineKeyboardButton("🔙 Back to Features", callback_data="ui_features")])
+        keyboard.append([InlineKeyboardButton("🔙 Back to Features", callback_data="ui_features", style=ButtonStyle.DANGER)])
         
         return await query.message.edit_text("🎛️ **Central Command Settings Hub**", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -411,13 +413,13 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
     if action == "set_home":
         text = "👑 **Bot Creator Control Panel**\n\nSelect a master module to configure:"
         buttons = [
-            [InlineKeyboardButton("🔗 Shortener Settings", callback_data="set_shortener")],
-            [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests")],
-            [InlineKeyboardButton("🕵️‍♂️ Inside Settings", callback_data="set_inside")], 
-            [InlineKeyboardButton("🗑 Search & Auto-Delete Settings", callback_data="set_autodelete")], # <-- RENAMED
-            [InlineKeyboardButton("📝 Global File Caption", callback_data="set_caption_global")], 
-            [InlineKeyboardButton("🛡️ Global Moderation Hub", callback_data="set_mod_global")],
-            [InlineKeyboardButton("🔙 Exit", callback_data="tier_root_fallback")]
+            [InlineKeyboardButton("🔗 Shortener Settings", callback_data="set_shortener", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("📝 Request Feature", callback_data="set_requests", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("🕵️‍♂️ Inside Settings", callback_data="set_inside", style=ButtonStyle.PRIMARY)], 
+            [InlineKeyboardButton("🗑 Search & Auto-Delete Settings", callback_data="set_autodelete", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("📝 Global File Caption", callback_data="set_caption_global", style=ButtonStyle.PRIMARY)], 
+            [InlineKeyboardButton("🛡️ Global Moderation Hub", callback_data="set_mod_global", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("🔙 Exit", callback_data="tier_root_fallback", style=ButtonStyle.DANGER)]
         ]
         await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -430,9 +432,9 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
 
         text = f"🛡️ **{'GLOBAL' if scope=='global' else 'LOCAL'} MODERATION HUB**\n\nSelect a punishment module to configure:"
         buttons = [
-            [InlineKeyboardButton("🔇 Auto-Mute Rules", callback_data=f"mod_menu_automute_{scope}_{chat_id}")],
-            [InlineKeyboardButton("🚫 Auto-Ban Rules", callback_data=f"mod_menu_autoban_{scope}_{chat_id}")],
-            [InlineKeyboardButton("🔙 Back", callback_data=back_btn)]
+            [InlineKeyboardButton("🔇 Auto-Mute Rules", callback_data=f"mod_menu_automute_{scope}_{chat_id}", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("🚫 Auto-Ban Rules", callback_data=f"mod_menu_autoban_{scope}_{chat_id}", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("🔙 Back", callback_data=back_btn, style=ButtonStyle.DANGER)]
         ]
         await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -447,12 +449,12 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
 
         text = f"🔇 **AUTO-MUTE CONFIGURATION**\n\nConfigure triggers that will automatically issue warnings. Reaching the Warns Limit triggers an Auto-Mute."
         buttons = [
-            [InlineKeyboardButton(f"Auto-Mute Engine: {'🟢 ON' if am_en else '🔴 OFF'}", callback_data=f"mod_toggle_automute_{scope}_{chat_id}")],
-            [InlineKeyboardButton(f"🔗 Track Links: {'🟢 ON' if link_en else '🔴 OFF'}", callback_data=f"mod_toggle_antilink_{scope}_{chat_id}")],
-            [InlineKeyboardButton(f"🤬 Track Bad Words: {'🟢 ON' if bw_en else '🔴 OFF'}", callback_data=f"mod_toggle_badwords_{scope}_{chat_id}")],
-            [InlineKeyboardButton("📝 Edit Bad Words Database", callback_data=f"mod_edit_badwords_{scope}_{chat_id}")],
-            [InlineKeyboardButton(f"⚠️ Warns Limit: {warn_lim}", callback_data=f"mod_edit_warnlimit_{scope}_{chat_id}")],
-            [InlineKeyboardButton("🔙 Back", callback_data=f"set_mod_{scope}_{chat_id}")]
+            [InlineKeyboardButton(f"Auto-Mute Engine: {'🟢 ON' if am_en else '🔴 OFF'}", callback_data=f"mod_toggle_automute_{scope}_{chat_id}", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton(f"🔗 Track Links: {'🟢 ON' if link_en else '🔴 OFF'}", callback_data=f"mod_toggle_antilink_{scope}_{chat_id}", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton(f"🤬 Track Bad Words: {'🟢 ON' if bw_en else '🔴 OFF'}", callback_data=f"mod_toggle_badwords_{scope}_{chat_id}", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("📝 Edit Bad Words Database", callback_data=f"mod_edit_badwords_{scope}_{chat_id}", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton(f"⚠️ Warns Limit: {warn_lim}", callback_data=f"mod_edit_warnlimit_{scope}_{chat_id}", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("🔙 Back", callback_data=f"set_mod_{scope}_{chat_id}", style=ButtonStyle.DANGER)]
         ]
         await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -465,9 +467,9 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
 
         text = f"🚫 **AUTO-BAN CONFIGURATION**\n\nAutomatically ban users who continually break the rules and accumulate too many Mutes."
         buttons = [
-            [InlineKeyboardButton(f"Auto-Ban Engine: {'🟢 ON' if ab_en else '🔴 OFF'}", callback_data=f"mod_toggle_autoban_{scope}_{chat_id}")],
-            [InlineKeyboardButton(f"🔇 Mutes Limit: {mute_lim}", callback_data=f"mod_edit_mutelimit_{scope}_{chat_id}")],
-            [InlineKeyboardButton("🔙 Back", callback_data=f"set_mod_{scope}_{chat_id}")]
+            [InlineKeyboardButton(f"Auto-Ban Engine: {'🟢 ON' if ab_en else '🔴 OFF'}", callback_data=f"mod_toggle_autoban_{scope}_{chat_id}", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton(f"🔇 Mutes Limit: {mute_lim}", callback_data=f"mod_edit_mutelimit_{scope}_{chat_id}", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("🔙 Back", callback_data=f"set_mod_{scope}_{chat_id}", style=ButtonStyle.DANGER)]
         ]
         await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -517,11 +519,11 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
             f"Use the buttons below to modify the task verification flow:"
         )
         buttons = [
-            [InlineKeyboardButton(f"Toggle Feature {'OFF' if 'ON' in status else 'ON'}", callback_data="inside_toggle")],
-            [InlineKeyboardButton("📝 Edit Words", callback_data="inside_words"), InlineKeyboardButton("⏱ Edit Times", callback_data="inside_times")],
-            [InlineKeyboardButton("📢 Edit Channels", callback_data="inside_channels")],
-            [InlineKeyboardButton("📍 Edit Placements", callback_data="set_placements")],
-            [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="set_home")]
+            [InlineKeyboardButton(f"Toggle Feature {'OFF' if 'ON' in status else 'ON'}", callback_data="inside_toggle", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("📝 Edit Words", callback_data="inside_words", style=ButtonStyle.PRIMARY), InlineKeyboardButton("⏱ Edit Times", callback_data="inside_times", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("📢 Edit Channels", callback_data="inside_channels", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("📍 Edit Placements", callback_data="set_placements", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="set_home", style=ButtonStyle.DANGER)]
         ]
         await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -555,9 +557,9 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
             "Select where the verification lock should be enforced. You can enable multiple at the same time!"
         )
         buttons = [
-            [InlineKeyboardButton(f"{m_status} Movie Downloads", callback_data="toggle_place_movie")],
-            [InlineKeyboardButton(f"{w_status} Welcome Menu (/start)", callback_data="toggle_place_welcome")],
-            [InlineKeyboardButton("🔙 Back", callback_data="set_inside")]
+            [InlineKeyboardButton(f"{m_status} Movie Downloads", callback_data="toggle_place_movie", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton(f"{w_status} Welcome Menu (/start)", callback_data="toggle_place_welcome", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("🔙 Back", callback_data="set_inside", style=ButtonStyle.DANGER)]
         ]
         await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -580,9 +582,9 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
 
         text = f"🔗 **Shortener Configurations**\n\n**Status:** {status}\n**Current URL Template:** `{url}`\n**Current API Key:** `{api}`\n\n📖 **Auto-Setup:** Send `/setshort <your_full_link>` directly in the chat to auto-configure!"
         buttons = [
-            [InlineKeyboardButton(f"Toggle Shortener {'OFF' if 'ON' in status else 'ON'}", callback_data="set_toggle")],
-            [InlineKeyboardButton("✏️ Change API Key", callback_data="set_api"), InlineKeyboardButton("✏️ Change Link", callback_data="set_url")],
-            [InlineKeyboardButton("🔙 Back", callback_data="set_home")]
+            [InlineKeyboardButton(f"Toggle Shortener {'OFF' if 'ON' in status else 'ON'}", callback_data="set_toggle", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("✏️ Change API Key", callback_data="set_api", style=ButtonStyle.PRIMARY), InlineKeyboardButton("✏️ Change Link", callback_data="set_url", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("🔙 Back", callback_data="set_home", style=ButtonStyle.DANGER)]
         ]
         await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -632,10 +634,10 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
             f"🔍 **Search Filter Deletion:** {m_status} `({m_time} mins)`"
         )
         buttons = [
-            [InlineKeyboardButton(f"Files: {f_status}", callback_data="toggle_file_del"), InlineKeyboardButton(f"Filters: {m_status}", callback_data="toggle_filter_del")],
-            [InlineKeyboardButton("⏱ Set File Time", callback_data="time_file_del"), InlineKeyboardButton("⏱ Set Filter Time", callback_data="time_filter_del")],
-            [InlineKeyboardButton(f"🌟 Multi-Search Engine: {ms_status}", callback_data="toggle_multisearch")],
-            [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="set_home")]
+            [InlineKeyboardButton(f"Files: {f_status}", callback_data="toggle_file_del", style=ButtonStyle.PRIMARY), InlineKeyboardButton(f"Filters: {m_status}", callback_data="toggle_filter_del", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("⏱ Set File Time", callback_data="time_file_del", style=ButtonStyle.PRIMARY), InlineKeyboardButton("⏱ Set Filter Time", callback_data="time_filter_del", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton(f"🌟 Multi-Search Engine: {ms_status}", callback_data="toggle_multisearch", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="set_home", style=ButtonStyle.DANGER)]
         ]
         await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -686,13 +688,13 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         else: text += "\n\n🟡 **Status:** Using Default/Fallback Caption"
         
         buttons = [
-            [InlineKeyboardButton("✏️ Change Caption", callback_data=f"edit_caption_{scope}")],
-            [InlineKeyboardButton("📖 Caption Guide", callback_data=f"guide_caption_{scope}")]
+            [InlineKeyboardButton("✏️ Change Caption", callback_data=f"edit_caption_{scope}", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("📖 Caption Guide", callback_data=f"guide_caption_{scope}", style=ButtonStyle.PRIMARY)]
         ]
         if has_custom:
-            buttons.insert(1, [InlineKeyboardButton("🗑 Delete Custom Caption", callback_data=f"del_caption_{scope}")])
+            buttons.insert(1, [InlineKeyboardButton("🗑 Delete Custom Caption", callback_data=f"del_caption_{scope}", style=ButtonStyle.DANGER)])
             
-        buttons.append([InlineKeyboardButton("🔙 Back", callback_data=back_btn)])
+        buttons.append([InlineKeyboardButton("🔙 Back", callback_data=back_btn, style=ButtonStyle.DANGER)])
         await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
         
     elif action.startswith("edit_caption_"):
@@ -780,7 +782,11 @@ async def get_stats_home_text_and_buttons():
     db_stats = await db.global_stats()
     shards_text = "".join([f"• **Shard {idx + 1}**: `{count:,}` files\n" for idx, count in enumerate(db_stats.get("shard_distribution", []))])
     text = f"📊 **Advanced System Status Dashboard**\n\n⏱️ **Bot Uptime:** `{format_uptime(time.time() - START_TIME)}`\n🗂️ **Total Indexed Files:** `{db_stats.get('total_files', 0):,}`\n\n💾 **Storage Analytics:**\n• **Space Used:** `{format_bytes(db_stats.get('total_size_bytes', 0))}`\n• **Space Remaining:** `{format_bytes(db_stats.get('space_left_bytes', 0))}`\n\n🖲️ **Shard Distribution:**\n{shards_text}"
-    buttons = [[InlineKeyboardButton("⚙️ Worker 1: Indexing", callback_data="stats_worker1"), InlineKeyboardButton("⚙️ Worker 2: Metadata", callback_data="stats_worker2")], [InlineKeyboardButton("⚙️ Worker 3: Broadcast Engine", callback_data="stats_worker3_home")], [InlineKeyboardButton("🔄 Refresh Data", callback_data="stats_refresh_home")]]
+    buttons = [
+        [InlineKeyboardButton("⚙️ Worker 1: Indexing", callback_data="stats_worker1", style=ButtonStyle.PRIMARY), InlineKeyboardButton("⚙️ Worker 2: Metadata", callback_data="stats_worker2", style=ButtonStyle.PRIMARY)], 
+        [InlineKeyboardButton("⚙️ Worker 3: Broadcast Engine", callback_data="stats_worker3_home", style=ButtonStyle.PRIMARY)], 
+        [InlineKeyboardButton("🔄 Refresh Data", callback_data="stats_refresh_home", style=ButtonStyle.SUCCESS)]
+    ]
     return text, InlineKeyboardMarkup(buttons)
 
 async def get_worker1_text_and_buttons():
@@ -837,8 +843,8 @@ async def get_worker1_text_and_buttons():
 
     buttons = [
         [
-            InlineKeyboardButton("🔙 Back", callback_data="stats_home"),
-            InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w1")
+            InlineKeyboardButton("🔙 Back", callback_data="stats_home", style=ButtonStyle.DANGER),
+            InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w1", style=ButtonStyle.SUCCESS)
         ]
     ]
     return text, InlineKeyboardMarkup(buttons)
@@ -882,14 +888,14 @@ async def get_worker2_text_and_buttons():
 
     buttons = [
         [
-            InlineKeyboardButton(fast_status, callback_data="stats_toggle_fastmode"),
-            InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w2")
+            InlineKeyboardButton(fast_status, callback_data="stats_toggle_fastmode", style=ButtonStyle.PRIMARY),
+            InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w2", style=ButtonStyle.SUCCESS)
         ],
         [
-            InlineKeyboardButton(recheck_btn, callback_data="stats_toggle_recheck")
+            InlineKeyboardButton(recheck_btn, callback_data="stats_toggle_recheck", style=ButtonStyle.PRIMARY)
         ],
         [
-            InlineKeyboardButton("🔙 Back", callback_data="stats_home")
+            InlineKeyboardButton("🔙 Back", callback_data="stats_home", style=ButtonStyle.DANGER)
         ]
     ]
     return text, InlineKeyboardMarkup(buttons)
@@ -898,25 +904,59 @@ async def get_worker3_home_text_and_buttons():
     pending_count = await db.scheduled_broadcasts.count_documents({"status": "pending"})
     vault_count = await db.broadcast_logs.count_documents({"timestamp": {"$gte": time.time() - (48 * 3600)}})
     text = f"⚙️ **WORKER 3: Broadcast & Scheduler Engine**\n🔄 **Status:** `Active & Monitoring`\n\n• **Pending Scheduled Jobs:** `{pending_count}`\n• **Messages in 48H Vault:** `{vault_count}`"
-    return text, InlineKeyboardMarkup([[InlineKeyboardButton("📅 Scheduled Queue", callback_data="stats_worker3_sched"), InlineKeyboardButton("📡 Recent Batches", callback_data="stats_worker3_recent")], [InlineKeyboardButton("🔙 Back", callback_data="stats_home"), InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w3_home")]])
+    
+    buttons = [
+        [
+            InlineKeyboardButton("📅 Scheduled Queue", callback_data="stats_worker3_sched", style=ButtonStyle.PRIMARY), 
+            InlineKeyboardButton("📡 Recent Batches", callback_data="stats_worker3_recent", style=ButtonStyle.PRIMARY)
+        ], 
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="stats_home", style=ButtonStyle.DANGER), 
+            InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w3_home", style=ButtonStyle.SUCCESS)
+        ]
+    ]
+    return text, InlineKeyboardMarkup(buttons)
+
 
 async def get_worker3_sched_text_and_buttons():
     schedules = await db.scheduled_broadcasts.find({"status": "pending"}).sort("run_at", 1).limit(5).to_list(length=5)
     text = f"📅 **SCHEDULED BROADCAST QUEUE**\n\n**Total Pending Jobs:** `{await db.scheduled_broadcasts.count_documents({'status': 'pending'})}`\n\n"
-    if not schedules: text += "No broadcasts are currently scheduled."
+    
+    if not schedules: 
+        text += "No broadcasts are currently scheduled."
     else:
-        for s in schedules: text += f"• `{s['batch_id']}` - ⏳ `{datetime.datetime.fromtimestamp(s['run_at'], datetime.timezone(datetime.timedelta(hours=5, minutes=30))).strftime('%Y-%m-%d %I:%M %p')}`\n"
-    return text, InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="stats_worker3_home"), InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w3_sched")]])
+        for s in schedules: 
+            text += f"• `{s['batch_id']}` - ⏳ `{datetime.datetime.fromtimestamp(s['run_at'], datetime.timezone(datetime.timedelta(hours=5, minutes=30))).strftime('%Y-%m-%d %I:%M %p')}`\n"
+            
+    buttons = [
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="stats_worker3_home", style=ButtonStyle.DANGER), 
+            InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w3_sched", style=ButtonStyle.SUCCESS)
+        ]
+    ]
+    return text, InlineKeyboardMarkup(buttons)
+
 
 async def get_worker3_recent_text_and_buttons():
     text = f"📡 **RECENT BROADCAST BATCHES (48H Vault)**\n\n"
     has_batches = False
+    
     async for batch in await db.get_recent_batches():
         has_batches, b_id = True, batch["_id"]
         eng = await db.get_batch_engagement(b_id)
         text += f"• **{b_id}**: `{batch['count']} sent` | 💬 `{eng['replies']} replies` | 🔄 `{eng['followups']} follows`\n"
-    if not has_batches: text += "No broadcasts sent in the last 48 hours."
-    return text, InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="stats_worker3_home"), InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w3_recent")]])
+        
+    if not has_batches: 
+        text += "No broadcasts sent in the last 48 hours."
+        
+    buttons = [
+        [
+            InlineKeyboardButton("🔙 Back", callback_data="stats_worker3_home", style=ButtonStyle.DANGER), 
+            InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w3_recent", style=ButtonStyle.SUCCESS)
+        ]
+    ]
+    return text, InlineKeyboardMarkup(buttons)
+
 
 @Client.on_message(filters.command("stats") & filters.user(Config.ADMINS))
 async def bot_stats_dashboard(client: Client, message: Message):
