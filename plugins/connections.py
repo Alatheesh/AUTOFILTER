@@ -3,7 +3,7 @@ import random
 import time
 import logging
 from pyrogram import Client, filters, ContinuePropagation, StopPropagation
-from pyrogram.enums import ChatType, ChatMemberStatus, ChatMembersFilter
+from pyrogram.enums import ChatType, ChatMemberStatus, ChatMembersFilter, ButtonStyle
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from database.multi_db import db
 from config import Config
@@ -169,7 +169,7 @@ async def connect_group_command(client: Client, message: Message):
                 "🔗 **Connection Setup**\n\n"
                 "Please send the **Group ID** or **Username** you want to connect to the bot database.\n\n"
                 "*(Or click Cancel to abort)*",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_connection_flow")]])
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_connection_flow", style=ButtonStyle.DANGER)]])
             )
             WAITING_FOR_CONNECTION[user_id] = {"action": "connect", "message_id": prompt.id, "timestamp": time.time()}
             return
@@ -190,7 +190,7 @@ async def disconnect_group_command(client: Client, message: Message):
                 "🔌 **Disconnection Setup**\n\n"
                 "Please send the **Group ID** or **Username** you wish to disconnect.\n\n"
                 "*(Or click Cancel to abort)*",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_connection_flow")]])
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_connection_flow", style=ButtonStyle.DANGER)]])
             )
             WAITING_FOR_CONNECTION[user_id] = {"action": "disconnect", "message_id": prompt.id, "timestamp": time.time()}
             return
