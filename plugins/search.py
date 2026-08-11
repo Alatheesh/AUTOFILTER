@@ -315,7 +315,9 @@ async def auto_filter(client: Client, message: Message):
         
         buttons = []
         for i, (m_name, files) in enumerate(found_movies):
-            buttons.append([style_btn(color_mode, ButtonStyle.PRIMARY, text=f"{m_name} ({len(files)})", callback_data=f"bms_sel_{BOT_SESSION_TOKEN}_{session_id}_{i}_0_{user_id}")])
+            # 🎨 RAINBOW COLORS FOR BULK SEARCH RESULTS
+            rnd_color = random.choice([ButtonStyle.PRIMARY, ButtonStyle.SUCCESS, ButtonStyle.DANGER])
+            buttons.append([style_btn(color_mode, rnd_color, text=f"{m_name} ({len(files)})", callback_data=f"bms_sel_{BOT_SESSION_TOKEN}_{session_id}_{i}_0_{user_id}")])
             
         MULTI_SEARCH_CACHE[session_id] = {
             "timestamp": time.time(), "user_id": user_id, "found": found_movies,
@@ -372,7 +374,9 @@ async def auto_filter(client: Client, message: Message):
         btn_list = []
         if suggestions:
             for s in suggestions: 
-                btn_list.append([style_btn(color_mode, ButtonStyle.PRIMARY, text=f"🎬 {s[:40]}", callback_data=f"fuzzy_{s[:40]}")])
+                # 🎨 RAINBOW COLORS FOR SUGGESTIONS
+                rnd_color = random.choice([ButtonStyle.PRIMARY, ButtonStyle.SUCCESS, ButtonStyle.DANGER])
+                btn_list.append([style_btn(color_mode, rnd_color, text=f"🎬 {s[:40]}", callback_data=f"fuzzy_{s[:40]}")])
         
         if req_enabled:
             btn_list.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🔔 Request this Movie", callback_data=f"req_{BOT_SESSION_TOKEN}_{user_id}_{query[:30]}")])
@@ -420,10 +424,13 @@ async def auto_filter(client: Client, message: Message):
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
+        # 🎨 RAINBOW COLORS FOR FILES
+        rnd_color = random.choice([ButtonStyle.PRIMARY, ButtonStyle.SUCCESS, ButtonStyle.DANGER])
+        
         if shortener_on: 
-            buttons.append([style_btn(color_mode, ButtonStyle.PRIMARY, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
+            buttons.append([style_btn(color_mode, rnd_color, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
         else: 
-            buttons.append([style_btn(color_mode, ButtonStyle.PRIMARY, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{BOT_SESSION_TOKEN}_{user_id}_{db_id}")])
+            buttons.append([style_btn(color_mode, rnd_color, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{BOT_SESSION_TOKEN}_{user_id}_{db_id}")])
     
     buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
     
@@ -431,7 +438,7 @@ async def auto_filter(client: Client, message: Message):
         total_pages = math.ceil(len(filtered_results) / 10)
         buttons.append([
             style_btn(color_mode, ButtonStyle.PRIMARY, text="◀️ Prev", callback_data=f"prev_{BOT_SESSION_TOKEN}_{user_id}_0_{query}"),
-            style_btn(color_mode, ButtonStyle.SECONDARY, text=f"Page 1 of {total_pages}", callback_data="pages_info"),
+            style_btn(color_mode, ButtonStyle.PRIMARY, text=f"Page 1 of {total_pages}", callback_data="pages_info"),
             style_btn(color_mode, ButtonStyle.PRIMARY, text="Next ▶️", callback_data=f"next_{BOT_SESSION_TOKEN}_{user_id}_1_{query}")
         ])
     
@@ -495,12 +502,26 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
     
     from plugins.vip_system import DEFAULT_PLANS, FREE_USER_LIMITS
     user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
+    chat_type = callback.message.chat.type
+    
     active_plan = await db.get_active_vip_plan(user_id)
     user_limits = DEFAULT_PLANS.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan else FREE_USER_LIMITS
     
     metadata = await fetch_imdb_tmdb(movie_name)
     settings = await db.get_settings()
-    color_mode = settings.get("color_mode", False) # 🎨 Determines colors
+    
+    # 🎨 RESOLVING COLOR MODE HIERARCHY
+    u_sett = await db.get_user_settings(user_id)
+    g_sett = await db.get_group_settings(chat_id) if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP] else {}
+    
+    g_color = g_sett.get("color_mode", "let_members_choose")
+    if g_color == "force_on": 
+        color_mode = True
+    elif g_color == "force_off": 
+        color_mode = False
+    else: 
+        color_mode = u_sett.get("color_mode", False)
     
     has_bypass = user_limits.get("shortlink_bypass", False)
     if not has_bypass: has_bypass = await db.has_active_verification_pass(user_id)
@@ -508,7 +529,6 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
     
     results = files[page * 10 : (page + 1) * 10]
     buttons = []
-    chat_type = callback.message.chat.type
     
     if settings.get("bulk_enabled", True):
         bulk_limit = user_limits.get("bulk_select_limit", 10)
@@ -533,8 +553,11 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
-        if shortener_on: buttons.append([style_btn(color_mode, ButtonStyle.PRIMARY, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
-        else: buttons.append([style_btn(color_mode, ButtonStyle.PRIMARY, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{BOT_SESSION_TOKEN}_{user_id}_{db_id}")])
+        # 🎨 RAINBOW COLORS FOR FILES
+        rnd_color = random.choice([ButtonStyle.PRIMARY, ButtonStyle.SUCCESS, ButtonStyle.DANGER])
+        
+        if shortener_on: buttons.append([style_btn(color_mode, rnd_color, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
+        else: buttons.append([style_btn(color_mode, rnd_color, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{BOT_SESSION_TOKEN}_{user_id}_{db_id}")])
     
     buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
     
@@ -542,7 +565,7 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
         total_pages = math.ceil(len(files) / 10)
         nav_buttons = []
         if page > 0: nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="◀️ Prev", callback_data=f"bms_sel_{BOT_SESSION_TOKEN}_{session_id}_{movie_idx}_{page - 1}_{user_id}"))
-        nav_buttons.append(style_btn(color_mode, ButtonStyle.SECONDARY, text=f"Page {page + 1} of {total_pages}", callback_data="pages_info"))
+        nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text=f"Page {page + 1} of {total_pages}", callback_data="pages_info"))
         if len(files) > (page + 1) * 10: nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="Next ▶️", callback_data=f"bms_sel_{BOT_SESSION_TOKEN}_{session_id}_{movie_idx}_{page + 1}_{user_id}"))
         buttons.append(nav_buttons)
 
@@ -623,7 +646,18 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
         
     buttons = []
     settings = await db.get_settings()
-    color_mode = settings.get("color_mode", False) # 🎨 Determines colors
+    
+    # 🎨 RESOLVING COLOR MODE HIERARCHY
+    u_sett = await db.get_user_settings(user_id)
+    g_sett = await db.get_group_settings(chat_id) if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP] else {}
+    
+    g_color = g_sett.get("color_mode", "let_members_choose")
+    if g_color == "force_on": 
+        color_mode = True
+    elif g_color == "force_off": 
+        color_mode = False
+    else: 
+        color_mode = u_sett.get("color_mode", False)
     
     from plugins.vip_system import DEFAULT_PLANS, FREE_USER_LIMITS
     active_plan = await db.get_active_vip_plan(user_id)
@@ -656,15 +690,18 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
-        if shortener_on: buttons.append([style_btn(color_mode, ButtonStyle.PRIMARY, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
-        else: buttons.append([style_btn(color_mode, ButtonStyle.PRIMARY, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{BOT_SESSION_TOKEN}_{user_id}_{db_id}")])
+        # 🎨 RAINBOW COLORS FOR FILES
+        rnd_color = random.choice([ButtonStyle.PRIMARY, ButtonStyle.SUCCESS, ButtonStyle.DANGER])
+        
+        if shortener_on: buttons.append([style_btn(color_mode, rnd_color, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
+        else: buttons.append([style_btn(color_mode, rnd_color, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{BOT_SESSION_TOKEN}_{user_id}_{db_id}")])
     
     buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
     
     total_pages = math.ceil(len(filtered_results) / 10)
     nav_buttons = []
     if page > 0: nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="◀️ Prev", callback_data=f"prev_{BOT_SESSION_TOKEN}_{user_id}_{page - 1}_{base_query}"))
-    nav_buttons.append(style_btn(color_mode, ButtonStyle.SECONDARY, text=f"Page {page + 1} of {total_pages}", callback_data="pages_info"))
+    nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text=f"Page {page + 1} of {total_pages}", callback_data="pages_info"))
     if len(filtered_results) > (page + 1) * 10: nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="Next ▶️", callback_data=f"next_{BOT_SESSION_TOKEN}_{user_id}_{page + 1}_{base_query}"))
     buttons.append(nav_buttons)
     
@@ -680,7 +717,10 @@ async def inline_search(client: Client, query: InlineQuery):
         return await query.answer([])
 
     settings = await db.get_settings()
-    color_mode = settings.get("color_mode", False)
+    
+    # Ensure color_mode is correctly pulled for inline queries
+    u_sett = await db.get_user_settings(user_id)
+    color_mode = u_sett.get("color_mode", False)
 
     is_joined = await check_double_fsub(client, user_id)
     if not is_joined:
