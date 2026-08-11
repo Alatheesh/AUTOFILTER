@@ -1019,3 +1019,32 @@ async def stats_callback_handler(client: Client, callback: CallbackQuery):
         await callback.message.edit_text(text, reply_markup=markup)
     except Exception: 
         await callback.answer("⚠️ Processing sync issue. Try running /stats again.", show_alert=True)
+
+# ==========================================
+# 📊 USER STATS CALLBACK HANDLER
+# ==========================================
+@Client.on_callback_query(filters.regex("^ui_userstats$") & filters.user(Config.ADMINS))
+async def on_ui_userstats(client: Client, callback: CallbackQuery):
+    total_users = await db.users.count_documents({})
+    total_muted = await db.punishments.count_documents({"type": "mute"})
+    total_banned = await db.punishments.count_documents({"type": "ban"})
+    
+    stats_text = (
+        f"📊 **Bot User Statistics**\n\n"
+        f"👥 Total Users: `{total_users}`\n"
+        f"🟢 Active Users: `{total_users - total_banned}`\n"
+        f"🔇 Total Muted: `{total_muted}`\n"
+        f"🚫 Total Banned: `{total_banned}`\n\n"
+        f"⚙️ **Admin Shortcuts:**\n"
+        f"`/mute <id> [time] [reason]`\n"
+        f"`/ban <id> [reason]`"
+    )
+    
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="tier_root_fallback", style=ButtonStyle.DANGER)]])
+    
+    try:
+        await callback.message.edit_text(stats_text, reply_markup=markup)
+        await callback.answer()
+    except Exception as e:
+        await callback.answer("⚠️ Error loading stats.", show_alert=True)
+        logger.error(f"User Stats UI Error: {e}")
