@@ -6,6 +6,7 @@ import random
 import urllib.parse
 from pyrogram import Client, filters, ContinuePropagation, StopPropagation
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.enums import ButtonStyle
 from config import Config
 from database.multi_db import db  # 🚀 Added database import for Permanent History!
 
@@ -103,7 +104,10 @@ async def plot_command(client: Client, message: Message):
         "🍿 **Movie Plot Fetcher**\n\n"
         "What movie or series would you like to know about?\n"
         "*(Please reply with the title, or click Cancel)*",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_plot_flow")]])
+        reply_markup=InlineKeyboardMarkup([
+            # 🔴 DANGER RED for canceling the action (Original Layout)
+            [InlineKeyboardButton("❌ Cancel", callback_data="cancel_plot_flow", style=ButtonStyle.DANGER)]
+        ])
     )
     
     PLOT_STATE[message.from_user.id] = {
