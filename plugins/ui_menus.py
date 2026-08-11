@@ -231,8 +231,8 @@ async def callback_ui_router(client: Client, callback: CallbackQuery):
     user_id = callback.from_user.id
     bot_me = await client.get_me()
     
-    # 🏠 MAIN MENU
-    if target == "back":
+    # 🏠 MAIN MENU & FEATURES OVERRIDE (Fixes the "Back to Features" Button!)
+    if target in ["back", "features"]:
         await callback.message.edit_text(text=START_TEXT.format(bot_name=bot_me.first_name), reply_markup=get_start_markup(bot_me.username, user_id), link_preview_options=LinkPreviewOptions(is_disabled=True))
         
     # 📂 CATEGORY HUBS
@@ -277,20 +277,40 @@ async def callback_ui_router(client: Client, callback: CallbackQuery):
         )
         await callback.message.edit_text(text=stats_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Profile", callback_data="ui_profile_menu", style=ButtonStyle.DANGER)]]))
         
+    # 📊 ADMIN USER STATS (Fixes the User Stats Dashboard Button!)
+    elif target == "userstats" and user_id in Config.ADMINS:
+        total_users = await db.users.count_documents({})
+        total_muted = await db.punishments.count_documents({"type": "mute"})
+        total_banned = await db.punishments.count_documents({"type": "ban"})
+        
+        stats_text = (
+            f"📊 **Bot User Statistics**\n\n"
+            f"👥 Total Users: `{total_users}`\n"
+            f"🟢 Active Users: `{total_users - total_banned}`\n"
+            f"🔇 Total Muted: `{total_muted}`\n"
+            f"🚫 Total Banned: `{total_banned}`\n\n"
+            f"⚙️ **Admin Shortcuts:**\n"
+            f"`/mute <id> [time] [reason]`\n"
+            f"`/ban <id> [reason]`"
+        )
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Settings", callback_data="ui_settings_menu", style=ButtonStyle.DANGER)]])
+        await callback.message.edit_text(stats_text, reply_markup=markup)
+
     elif target == "settings_menu":
         keyboard = [[InlineKeyboardButton(text="👤 Personal Search Settings", callback_data="tier_user_home", style=ButtonStyle.PRIMARY)]]
         if await db.get_connected_groups(user_id):
             keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list", style=ButtonStyle.PRIMARY)])
         if user_id in Config.ADMINS:
             keyboard.append([InlineKeyboardButton("📊 System Stats Dashboard", callback_data="stats_home", style=ButtonStyle.PRIMARY)])
-            keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="set_home", style=ButtonStyle.PRIMARY)])
+            keyboard.append([InlineKeyboardButton("📈 User Stats Dashboard", callback_data="ui_userstats", style=ButtonStyle.PRIMARY)])
+            keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="set_home", style=ButtonStyle.SUCCESS)])
             
         keyboard.append([InlineKeyboardButton("🔙 Back to Main Menu", callback_data="ui_back", style=ButtonStyle.DANGER)])
         
         settings_text = "🎛️ **Central Command Settings Hub:**\nSelect the access layer tier you wish to inspect or modify:"
         await callback.message.edit_text(text=settings_text, reply_markup=InlineKeyboardMarkup(keyboard))
         
-    # 🔌 SEAMLESS BRIDGES TO YOUR EXISTING CODE (NO DELETIONS!)
+    # 🔌 SEAMLESS BRIDGES TO YOUR EXISTING CODE
     elif target == "history":
         callback.message.from_user = callback.from_user
         callback.message.text = "/history"
