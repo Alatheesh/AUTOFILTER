@@ -10,7 +10,7 @@ import hashlib
 import asyncio
 import uuid
 from pyrogram import Client, filters, StopPropagation
-from pyrogram.enums import ChatType
+from pyrogram.enums import ChatType, ButtonStyle  # 🚀 Added ButtonStyle
 from pyrogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton, Message, 
     InlineQuery, InlineQueryResultArticle, InputTextMessageContent, 
@@ -24,6 +24,18 @@ from plugins.moderation import SCRAPER_TRACKER
 from plugins.search_filters import get_filter_settings, apply_search_filters, SIZE_MAP
 
 logger = logging.getLogger(__name__)
+
+# ==========================================
+# 🎨 DYNAMIC BUTTON STYLER (Crash-Proof)
+# ==========================================
+def style_btn(color_mode: bool, style_enum, **kwargs):
+    """
+    Safely injects Telegram Premium colors into buttons ONLY if color_mode is True.
+    Prevents parameter errors and keeps the core logic untouched.
+    """
+    if color_mode and style_enum:
+        kwargs["style"] = style_enum
+    return InlineKeyboardButton(**kwargs)
 
 # ==========================================
 # 🔐 SESSION SECURITY TOKEN (Restart Kill-Switch)
@@ -213,7 +225,9 @@ async def auto_filter(client: Client, message: Message):
 
     chat_type = getattr(message.chat, "type", ChatType.PRIVATE)
     resolved_mode, resolved_lang, resolved_size = await get_filter_settings(user_id, chat_id, chat_type)
+    
     settings = await db.get_settings()
+    color_mode = settings.get("color_mode", False) # 🎨 Determines if colors show up!
     
     from plugins.vip_system import get_all_plans, FREE_USER_LIMITS
     active_plan = await db.get_active_vip_plan(user_id)
@@ -236,11 +250,9 @@ async def auto_filter(client: Client, message: Message):
     )
         
     if len(unique_movies) > 1:
-        # 🚀 MASTER TOGGLE CHECK
         if not settings.get("multi_search_enabled", True):
             return await message.reply_text("⚠️ **Due to a technical issue, Multi-Search is temporarily paused for everyone. Please wait and stay with us, we will make Multi-Search faster as soon as possible!**")
 
-        # VIP LIMIT CHECK
         multi_limit = user_limits.get("multi_search_limit", 1)
         if multi_limit == 0: return await message.reply_text("❌ Multi-movie search is currently disabled for your tier.")
         if len(unique_movies) > multi_limit:
@@ -287,14 +299,13 @@ async def auto_filter(client: Client, message: Message):
         total_time = time.time() - start_time
         summary_text = build_bulk_summary_text(found_movies, not_found_movies, total_time)
         
-        # 🚀 INJECT AUTO-DELETE INTIMATION INTO THE SUMMARY
         if settings.get("filter_delete_enabled", False):
             m_time = settings.get("filter_delete_time", 5)
             summary_text += f"\n\n⏳ *Note: This message auto-deletes in {m_time} minutes.*"
         
         buttons = []
         for i, (m_name, files) in enumerate(found_movies):
-            buttons.append([InlineKeyboardButton(f"{m_name} ({len(files)})", callback_data=f"bms_sel_{BOT_SESSION_TOKEN}_{session_id}_{i}_0_{user_id}")])
+            buttons.append([style_btn(color_mode, ButtonStyle.PRIMARY, text=f"{m_name} ({len(files)})", callback_data=f"bms_sel_{BOT_SESSION_TOKEN}_{session_id}_{i}_0_{user_id}")])
             
         MULTI_SEARCH_CACHE[session_id] = {
             "timestamp": time.time(), "user_id": user_id, "found": found_movies,
@@ -351,13 +362,13 @@ async def auto_filter(client: Client, message: Message):
         btn_list = []
         if suggestions:
             for s in suggestions: 
-                btn_list.append([InlineKeyboardButton(f"🎬 {s[:40]}", callback_data=f"fuzzy_{s[:40]}")])
+                btn_list.append([style_btn(color_mode, ButtonStyle.PRIMARY, text=f"🎬 {s[:40]}", callback_data=f"fuzzy_{s[:40]}")])
         
         if req_enabled:
-            btn_list.append([InlineKeyboardButton("🔔 Request this Movie", callback_data=f"req_{BOT_SESSION_TOKEN}_{user_id}_{query[:30]}")])
+            btn_list.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🔔 Request this Movie", callback_data=f"req_{BOT_SESSION_TOKEN}_{user_id}_{query[:30]}")])
             
         if suggestions:
-            btn_list.append([InlineKeyboardButton("❌ Cancel", callback_data="close_data")])
+            btn_list.append([style_btn(color_mode, ButtonStyle.DANGER, text="❌ Cancel", callback_data="close_data")])
             text = f"❌ **No exact match found for '{query}'.**\n\n*Did you mean to search for one of these?*"
         else:
             if req_enabled: text = f"😔 **No exact matches found for '{query}'.**"
@@ -391,27 +402,27 @@ async def auto_filter(client: Client, message: Message):
                 if time.time() - BULK_CACHE[k][0] > BULK_CACHE_TTL: del BULK_CACHE[k]
 
             if chat_type == ChatType.PRIVATE:
-                buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)})", web_app=WebAppInfo(url=web_app_url))])
+                buttons.insert(0, [style_btn(color_mode, ButtonStyle.SUCCESS, text=f"☑️ Select Multiple Movies ({len(web_app_results)})", web_app=WebAppInfo(url=web_app_url))])
             else:
                 bot_url = f"https://t.me/{client.me.username}?start=bapp_{short_id}"
-                buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)})", url=bot_url)])
+                buttons.insert(0, [style_btn(color_mode, ButtonStyle.SUCCESS, text=f"☑️ Select Multiple Movies ({len(web_app_results)})", url=bot_url)])
 
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
         if shortener_on: 
-            buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
+            buttons.append([style_btn(color_mode, ButtonStyle.PRIMARY, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
         else: 
-            buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{BOT_SESSION_TOKEN}_{user_id}_{db_id}")])
+            buttons.append([style_btn(color_mode, ButtonStyle.PRIMARY, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{BOT_SESSION_TOKEN}_{user_id}_{db_id}")])
     
-    buttons.append([InlineKeyboardButton(text="🤝 Help Us!", callback_data="help_us_menu")])
+    buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
     
     if len(filtered_results) > 10:
         total_pages = math.ceil(len(filtered_results) / 10)
         buttons.append([
-            InlineKeyboardButton(text="◀️ Prev", callback_data=f"prev_{BOT_SESSION_TOKEN}_{user_id}_0_{query}"),
-            InlineKeyboardButton(text=f"Page 1 of {total_pages}", callback_data="pages_info"),
-            InlineKeyboardButton(text="Next ▶️", callback_data=f"next_{BOT_SESSION_TOKEN}_{user_id}_1_{query}")
+            style_btn(color_mode, ButtonStyle.PRIMARY, text="◀️ Prev", callback_data=f"prev_{BOT_SESSION_TOKEN}_{user_id}_0_{query}"),
+            style_btn(color_mode, ButtonStyle.SECONDARY, text=f"Page 1 of {total_pages}", callback_data="pages_info"),
+            style_btn(color_mode, ButtonStyle.PRIMARY, text="Next ▶️", callback_data=f"next_{BOT_SESSION_TOKEN}_{user_id}_1_{query}")
         ])
     
     filter_notice = ""
@@ -479,6 +490,7 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
     
     metadata = await fetch_imdb_tmdb(movie_name)
     settings = await db.get_settings()
+    color_mode = settings.get("color_mode", False) # 🎨 Determines colors
     
     has_bypass = user_limits.get("shortlink_bypass", False)
     if not has_bypass: has_bypass = await db.has_active_verification_pass(user_id)
@@ -503,28 +515,28 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
                 if time.time() - BULK_CACHE[k][0] > BULK_CACHE_TTL: del BULK_CACHE[k]
 
             if chat_type == ChatType.PRIVATE:
-                buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)})", web_app=WebAppInfo(url=web_app_url))])
+                buttons.insert(0, [style_btn(color_mode, ButtonStyle.SUCCESS, text=f"☑️ Select Multiple Movies ({len(web_app_results)})", web_app=WebAppInfo(url=web_app_url))])
             else:
                 bot_url = f"https://t.me/{client.me.username}?start=bapp_{short_id}"
-                buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)})", url=bot_url)])
+                buttons.insert(0, [style_btn(color_mode, ButtonStyle.SUCCESS, text=f"☑️ Select Multiple Movies ({len(web_app_results)})", url=bot_url)])
 
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
-        if shortener_on: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
-        else: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{BOT_SESSION_TOKEN}_{user_id}_{db_id}")])
+        if shortener_on: buttons.append([style_btn(color_mode, ButtonStyle.PRIMARY, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
+        else: buttons.append([style_btn(color_mode, ButtonStyle.PRIMARY, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{BOT_SESSION_TOKEN}_{user_id}_{db_id}")])
     
-    buttons.append([InlineKeyboardButton(text="🤝 Help Us!", callback_data="help_us_menu")])
+    buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
     
     if len(files) > 10:
         total_pages = math.ceil(len(files) / 10)
         nav_buttons = []
-        if page > 0: nav_buttons.append(InlineKeyboardButton(text="◀️ Prev", callback_data=f"bms_sel_{BOT_SESSION_TOKEN}_{session_id}_{movie_idx}_{page - 1}_{user_id}"))
-        nav_buttons.append(InlineKeyboardButton(text=f"Page {page + 1} of {total_pages}", callback_data="pages_info"))
-        if len(files) > (page + 1) * 10: nav_buttons.append(InlineKeyboardButton(text="Next ▶️", callback_data=f"bms_sel_{BOT_SESSION_TOKEN}_{session_id}_{movie_idx}_{page + 1}_{user_id}"))
+        if page > 0: nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="◀️ Prev", callback_data=f"bms_sel_{BOT_SESSION_TOKEN}_{session_id}_{movie_idx}_{page - 1}_{user_id}"))
+        nav_buttons.append(style_btn(color_mode, ButtonStyle.SECONDARY, text=f"Page {page + 1} of {total_pages}", callback_data="pages_info"))
+        if len(files) > (page + 1) * 10: nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="Next ▶️", callback_data=f"bms_sel_{BOT_SESSION_TOKEN}_{session_id}_{movie_idx}_{page + 1}_{user_id}"))
         buttons.append(nav_buttons)
 
-    buttons.append([InlineKeyboardButton("⬅ Back to Movie List", callback_data=f"bms_back_{BOT_SESSION_TOKEN}_{user_id}_{session_id}")])
+    buttons.append([style_btn(color_mode, ButtonStyle.DANGER, text="⬅ Back to Movie List", callback_data=f"bms_back_{BOT_SESSION_TOKEN}_{user_id}_{session_id}")])
     
     caption = (
         f"🎬 **{metadata['title']}** ({metadata['release_date'][:4]})\n"
@@ -601,6 +613,7 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
         
     buttons = []
     settings = await db.get_settings()
+    color_mode = settings.get("color_mode", False) # 🎨 Determines colors
     
     from plugins.vip_system import DEFAULT_PLANS, FREE_USER_LIMITS
     active_plan = await db.get_active_vip_plan(user_id)
@@ -625,24 +638,24 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
                 if time.time() - BULK_CACHE[k][0] > BULK_CACHE_TTL: del BULK_CACHE[k]
 
             if chat_type == ChatType.PRIVATE:
-                buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)})", web_app=WebAppInfo(url=web_app_url))])
+                buttons.insert(0, [style_btn(color_mode, ButtonStyle.SUCCESS, text=f"☑️ Select Multiple Movies ({len(web_app_results)})", web_app=WebAppInfo(url=web_app_url))])
             else:
                 bot_url = f"https://t.me/{client.me.username}?start=bapp_{short_id}"
-                buttons.insert(0, [InlineKeyboardButton(text=f"☑️ Select Multiple Movies ({len(web_app_results)})", url=bot_url)])
+                buttons.insert(0, [style_btn(color_mode, ButtonStyle.SUCCESS, text=f"☑️ Select Multiple Movies ({len(web_app_results)})", url=bot_url)])
 
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
-        if shortener_on: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
-        else: buttons.append([InlineKeyboardButton(text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{BOT_SESSION_TOKEN}_{user_id}_{db_id}")])
+        if shortener_on: buttons.append([style_btn(color_mode, ButtonStyle.PRIMARY, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
+        else: buttons.append([style_btn(color_mode, ButtonStyle.PRIMARY, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{BOT_SESSION_TOKEN}_{user_id}_{db_id}")])
     
-    buttons.append([InlineKeyboardButton(text="🤝 Help Us!", callback_data="help_us_menu")])
+    buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
     
     total_pages = math.ceil(len(filtered_results) / 10)
     nav_buttons = []
-    if page > 0: nav_buttons.append(InlineKeyboardButton(text="◀️ Prev", callback_data=f"prev_{BOT_SESSION_TOKEN}_{user_id}_{page - 1}_{base_query}"))
-    nav_buttons.append(InlineKeyboardButton(text=f"Page {page + 1} of {total_pages}", callback_data="pages_info"))
-    if len(filtered_results) > (page + 1) * 10: nav_buttons.append(InlineKeyboardButton(text="Next ▶️", callback_data=f"next_{BOT_SESSION_TOKEN}_{user_id}_{page + 1}_{base_query}"))
+    if page > 0: nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="◀️ Prev", callback_data=f"prev_{BOT_SESSION_TOKEN}_{user_id}_{page - 1}_{base_query}"))
+    nav_buttons.append(style_btn(color_mode, ButtonStyle.SECONDARY, text=f"Page {page + 1} of {total_pages}", callback_data="pages_info"))
+    if len(filtered_results) > (page + 1) * 10: nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="Next ▶️", callback_data=f"next_{BOT_SESSION_TOKEN}_{user_id}_{page + 1}_{base_query}"))
     buttons.append(nav_buttons)
     
     await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
@@ -656,6 +669,9 @@ async def inline_search(client: Client, query: InlineQuery):
     if len(search_query) < 3: 
         return await query.answer([])
 
+    settings = await db.get_settings()
+    color_mode = settings.get("color_mode", False)
+
     is_joined = await check_double_fsub(client, user_id)
     if not is_joined:
         buttons = []
@@ -665,9 +681,9 @@ async def inline_search(client: Client, query: InlineQuery):
                 invite_link = chat.invite_link if chat.invite_link else await client.export_chat_invite_link(channel)
             except Exception: 
                 invite_link = "https://t.me/telegram"
-            buttons.append([InlineKeyboardButton(text=f"Join Channel #{idx}", url=invite_link)])
+            buttons.append([style_btn(color_mode, ButtonStyle.PRIMARY, text=f"Join Channel #{idx}", url=invite_link)])
         
-        buttons.append([InlineKeyboardButton(text="🔄 Try Again", switch_inline_query_current_chat=search_query)])
+        buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🔄 Try Again", switch_inline_query_current_chat=search_query)])
         
         join_article = InlineQueryResultArticle(
             id="fsub_warning",
