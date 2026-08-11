@@ -227,7 +227,17 @@ async def auto_filter(client: Client, message: Message):
     resolved_mode, resolved_lang, resolved_size = await get_filter_settings(user_id, chat_id, chat_type)
     
     settings = await db.get_settings()
-    color_mode = settings.get("color_mode", False) # 🎨 Determines if colors show up!
+    # 🎨 RESOLVING COLOR MODE HIERARCHY
+    u_sett = await db.get_user_settings(user_id)
+    g_sett = await db.get_group_settings(chat_id) if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP] else {}
+    
+    g_color = g_sett.get("color_mode", "let_members_choose")
+    if g_color == "force_on": 
+        color_mode = True
+    elif g_color == "force_off": 
+        color_mode = False
+    else: 
+        color_mode = u_sett.get("color_mode", False)
     
     from plugins.vip_system import get_all_plans, FREE_USER_LIMITS
     active_plan = await db.get_active_vip_plan(user_id)
