@@ -181,7 +181,7 @@ async def admin_input_catcher(client: Client, message: Message):
         else:
             chat_id = int(scope)
             await db.set_custom_caption(chat_id, user_input, is_global=False)
-            back_callback = f"set_caption_local_{chat_id}"
+            back_callback = f"set_caption_{chat_id}" # 🚀 FIXED: Removed 'local_'
             
         await finish_input(f"✅ **Custom Caption Saved!**\n\nPreview:\n{user_input}", back_callback)
             
@@ -218,7 +218,7 @@ async def settings_router(client: Client, message: Message):
 
         buttons = [
             [InlineKeyboardButton("🛡️ Moderation Rules Hub", callback_data=f"set_mod_local_{message.chat.id}")],
-            [InlineKeyboardButton("📝 File Caption Settings", callback_data=f"set_caption_local_{message.chat.id}")],
+            [InlineKeyboardButton("📝 File Caption Settings", callback_data=f"set_caption_{message.chat.id}")], # 🚀 FIXED: Removed 'local_'
             [mode_btn],
             [color_btn]
         ]
@@ -329,6 +329,7 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
 
         buttons = [
             [InlineKeyboardButton("🛡️ Moderation Rules Hub", callback_data=f"set_mod_local_{c_id}")],
+            [InlineKeyboardButton("📝 File Caption Settings", callback_data=f"set_caption_{c_id}")], # 🚀 ADDED: Missing button restored!
             [mode_btn],
             [color_btn]
         ]
