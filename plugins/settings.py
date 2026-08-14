@@ -411,7 +411,7 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
 # ==========================================
 # 👑 CREATOR & MODERATION CALLBACKS
 # ==========================================
-@Client.on_callback_query(filters.regex(r"^(set_home|set_inside|set_shortener|set_requests|set_autodelete|toggle_multisearch|set_mod_|mod_|inside_|time_|toggle_|set_placements|toggle_place_|set_caption_|edit_caption_|del_caption_|guide_caption_)"))
+@Client.on_callback_query(filters.regex(r"^(set_home|set_inside|set_shortener|set_requests|set_autodelete|toggle_multisearch|set_mod_|mod_|inside_|time_|toggle_|set_placements|toggle_place_|set_caption_|edit_caption_|del_caption_|guide_caption_|set_toggle|set_api|set_url)"))
 async def settings_callbacks(client: Client, callback: CallbackQuery):
     action = callback.data
     user_id = callback.from_user.id
