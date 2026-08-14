@@ -154,9 +154,9 @@ async def auto_filter(client: Client, message: Message):
         
         if p_scope == "global" and message.chat.type != ChatType.PRIVATE:
             bot_me = await client.get_me()
-            btn = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Appeal in PM", url=f"https://t.me/{bot_me.username}?start=appeal_{p_type}")]])
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Appeal in PM", url=f"https://t.me/{bot_me.username}?start=appeal_{p_type}", style=ButtonStyle.PRIMARY)]])
         else:
-            btn = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Appeal", callback_data=f"appeal_{p_scope}_{p_type}")]])
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Appeal", callback_data=f"appeal_{p_scope}_{p_type}", style=ButtonStyle.PRIMARY)]])
             
         return await message.reply_text(lock_msg, reply_markup=btn)
 
