@@ -295,8 +295,11 @@ async def show_vip_plan_details(client: Client, callback: CallbackQuery):
 
     selected_plan = plans[plan_key]
     user_id = callback.from_user.id
-    user_plan_id = await db.get_active_vip_plan(user_id)
+    user_plan_name = await db.get_active_vip_plan(user_id)
     user_doc = await vip_users.find_one({"user_id": user_id})
+    
+    # 🚀 THE FIX: Convert Database Name to Plan Key
+    user_plan_id = next((k for k, v in plans.items() if v["name"] == user_plan_name), None)
     
     current_time = datetime.datetime.now()
     expiry_date = user_doc.get("expiry") if user_doc else None
@@ -1224,9 +1227,12 @@ async def check_vip_cmd(client, message: Message):
         try: target = int(message.command[1])
         except: pass
 
-    active_plan_id = await db.get_active_vip_plan(target)
+    active_plan_name = await db.get_active_vip_plan(target)
     user_doc = await vip_users.find_one({"user_id": target})
     plans = await get_all_plans() 
+    
+    # 🚀 THE FIX: Convert "🥇 Gold" to "gold"
+    active_plan_id = next((k for k, v in plans.items() if v["name"] == active_plan_name), None)
     
     plan_name = "Free User"
     limits = FREE_USER_LIMITS
