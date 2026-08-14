@@ -228,6 +228,7 @@ def render_interactive_mode(results, filtered_results, metadata, user_id, bot_us
 
 
 # --- 3. HYPERTEXT (TEXT-LINK) MODE LAYOUT ---
+# --- 3. HYPERTEXT (TEXT-LINK) MODE LAYOUT ---
 def render_hypertext_mode(results, filtered_results, metadata, user_id, bot_username, session_token, query, page, total_pages, shortener_on, color_mode, bulk_btn, chat_type, settings):
     text = f"🍿 <u>**{metadata['title']} ({metadata['release_date'][:4]})**</u>\n"
     text += f"⭐️ **Rating:** `{metadata['rating']}` | 🗣 `{metadata['language']}`\n\n"
@@ -241,9 +242,15 @@ def render_hypertext_mode(results, filtered_results, metadata, user_id, bot_user
         text += f"📁 <a href='{link}'>[{f_size}] {f_title}</a>\n\n"
 
     buttons = []
+    
+    # 1. Bulk WebApp Button (Top Row)
     if bulk_btn:
         buttons.append([bulk_btn])
 
+    # 2. Help Us Button (Middle Row - 🚀 Added to match other modes!)
+    buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
+
+    # 3. Pagination Navigation (Bottom Row)
     if len(filtered_results) > 10:
         nav_buttons = []
         if page > 0:
