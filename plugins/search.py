@@ -182,10 +182,13 @@ async def auto_filter(client: Client, message: Message):
     else: 
         color_mode = u_sett.get("color_mode", False)
     
+    # 🚀 THE FIX: PLAN MAPPING FOR MAIN SEARCH
     from plugins.vip_system import get_all_plans, FREE_USER_LIMITS
-    active_plan = await db.get_active_vip_plan(user_id)
+    active_plan_name = await db.get_active_vip_plan(user_id)
     plans = await get_all_plans()
-    user_limits = plans.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan and active_plan in plans else FREE_USER_LIMITS
+    
+    active_plan_key = next((k for k, v in plans.items() if v["name"] == active_plan_name), None)
+    user_limits = plans.get(active_plan_key, {}).get("limits", FREE_USER_LIMITS) if active_plan_key else FREE_USER_LIMITS
     
     # ==========================================
     # 🌟 MULTI-MOVIE BULK SEARCH LOGIC
@@ -347,7 +350,7 @@ async def auto_filter(client: Client, message: Message):
         data_url = await upload_json_payload(webapp_data)
         
         if data_url:
-            is_vip = True if active_plan else False
+            is_vip = True if active_plan_key else False  # 🚀 THE FIX: Prevents NameError crash!
             web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url, bulk_limit, is_vip)
             BULK_CACHE[short_id] = (time.time(), web_app_results, web_app_url)
             for k in list(BULK_CACHE.keys()):
@@ -409,13 +412,17 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
     if page == 0: await callback.answer(f"Fetching details for {movie_name}...", show_alert=False)
     else: await callback.answer()
     
-    from plugins.vip_system import DEFAULT_PLANS, FREE_USER_LIMITS
+    # 🚀 THE FIX: PLAN MAPPING FOR BULK SELECT MENU
+    from plugins.vip_system import get_all_plans, FREE_USER_LIMITS
     user_id = callback.from_user.id
     chat_id = callback.message.chat.id
     chat_type = callback.message.chat.type
     
-    active_plan = await db.get_active_vip_plan(user_id)
-    user_limits = DEFAULT_PLANS.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan else FREE_USER_LIMITS
+    active_plan_name = await db.get_active_vip_plan(user_id)
+    plans = await get_all_plans()
+    
+    active_plan_key = next((k for k, v in plans.items() if v["name"] == active_plan_name), None)
+    user_limits = plans.get(active_plan_key, {}).get("limits", FREE_USER_LIMITS) if active_plan_key else FREE_USER_LIMITS
     
     metadata = await fetch_imdb_tmdb(movie_name)
     settings = await db.get_settings()
@@ -443,7 +450,7 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
         
         data_url = await upload_json_payload(webapp_data)
         if data_url:
-            is_vip = True if active_plan else False
+            is_vip = True if active_plan_key else False # 🚀 THE FIX: Prevents NameError crash!
             web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url, bulk_limit, is_vip)
             BULK_CACHE[short_id] = (time.time(), web_app_results, web_app_url)
             for k in list(BULK_CACHE.keys()):
@@ -556,9 +563,13 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     elif g_color == "force_off": color_mode = False
     else: color_mode = u_sett.get("color_mode", False)
     
-    from plugins.vip_system import DEFAULT_PLANS, FREE_USER_LIMITS
-    active_plan = await db.get_active_vip_plan(user_id)
-    user_limits = DEFAULT_PLANS.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan else FREE_USER_LIMITS
+    # 🚀 THE FIX: PLAN MAPPING FOR PAGINATION MENU
+    from plugins.vip_system import get_all_plans, FREE_USER_LIMITS
+    active_plan_name = await db.get_active_vip_plan(user_id)
+    plans = await get_all_plans()
+    
+    active_plan_key = next((k for k, v in plans.items() if v["name"] == active_plan_name), None)
+    user_limits = plans.get(active_plan_key, {}).get("limits", FREE_USER_LIMITS) if active_plan_key else FREE_USER_LIMITS
     
     has_bypass = user_limits.get("shortlink_bypass", False)
     if not has_bypass: has_bypass = await db.has_active_verification_pass(user_id)
@@ -573,7 +584,7 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
         data_url = await upload_json_payload(webapp_data)
         
         if data_url:
-            is_vip = True if active_plan else False
+            is_vip = True if active_plan_key else False # 🚀 THE FIX: Prevents NameError crash!
             web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url, bulk_limit, is_vip)
             BULK_CACHE[short_id] = (time.time(), web_app_results, web_app_url)
             for k in list(BULK_CACHE.keys()):
