@@ -325,11 +325,11 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         mode = g_sett.get("search_mode", "let_members_choose")
         c_mode = g_sett.get("color_mode", "let_members_choose")
         
-        # 🔄 Cycle Logic for Layout
-        if mode == "let_members_choose": mode_btn = InlineKeyboardButton("Layout: Let Members Choose 🔄", callback_data=f"gset_mode_force_default_{message.chat.id}", style=ButtonStyle.PRIMARY)
-        elif mode == "force_default": mode_btn = InlineKeyboardButton("Layout: Forced Default 🔄", callback_data=f"gset_mode_force_interactive_{message.chat.id}", style=ButtonStyle.PRIMARY)
-        elif mode == "force_interactive": mode_btn = InlineKeyboardButton("Layout: Forced Interactive 🔄", callback_data=f"gset_mode_force_hypertext_{message.chat.id}", style=ButtonStyle.PRIMARY)
-        else: mode_btn = InlineKeyboardButton("Layout: Forced HyperText 🔄", callback_data=f"gset_mode_let_members_choose_{message.chat.id}", style=ButtonStyle.PRIMARY)
+        # 🔄 Cycle Logic for Layout (CALLBACK VERSION)
+        if mode == "let_members_choose": mode_btn = InlineKeyboardButton("Layout: Let Members Choose 🔄", callback_data=f"gset_mode_force_default_{c_id}", style=ButtonStyle.PRIMARY)
+        elif mode == "force_default": mode_btn = InlineKeyboardButton("Layout: Forced Default 🔄", callback_data=f"gset_mode_force_interactive_{c_id}", style=ButtonStyle.PRIMARY)
+        elif mode == "force_interactive": mode_btn = InlineKeyboardButton("Layout: Forced Interactive 🔄", callback_data=f"gset_mode_force_hypertext_{c_id}", style=ButtonStyle.PRIMARY)
+        else: mode_btn = InlineKeyboardButton("Layout: Forced HyperText 🔄", callback_data=f"gset_mode_let_members_choose_{c_id}", style=ButtonStyle.PRIMARY)
 
         # 🎨 Cycle Logic for Colors
         if c_mode == "let_members_choose": color_btn = InlineKeyboardButton("Colors: Let Members Choose 🔄", callback_data=f"gset_color_force_on_{c_id}", style=ButtonStyle.PRIMARY)
