@@ -4,13 +4,12 @@ import time
 import random
 import logging
 import aiohttp
-import json
 import urllib.parse
 import hashlib
 import asyncio
 import uuid
 from pyrogram import Client, filters, StopPropagation
-from pyrogram.enums import ChatType, ButtonStyle  # 🚀 Added ButtonStyle
+from pyrogram.enums import ChatType, ButtonStyle
 from pyrogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton, Message, 
     InlineQuery, InlineQueryResultArticle, InputTextMessageContent, 
@@ -21,21 +20,13 @@ from plugins.monetization import check_double_fsub
 from database.multi_db import db
 from config import Config
 from plugins.moderation import SCRAPER_TRACKER
-from plugins.search_filters import get_filter_settings, apply_search_filters, SIZE_MAP
+from plugins.search_filters import (
+    get_filter_settings, apply_search_filters, SIZE_MAP,
+    style_btn, format_size, upload_json_payload, build_safe_webapp_url,
+    send_search_display, update_pagination_display
+)
 
 logger = logging.getLogger(__name__)
-
-# ==========================================
-# 🎨 DYNAMIC BUTTON STYLER (Crash-Proof)
-# ==========================================
-def style_btn(color_mode: bool, style_enum, **kwargs):
-    """
-    Safely injects Telegram Premium colors into buttons ONLY if color_mode is True.
-    Prevents parameter errors and keeps the core logic untouched.
-    """
-    if color_mode and style_enum:
-        kwargs["style"] = style_enum
-    return InlineKeyboardButton(**kwargs)
 
 # ==========================================
 # 🔐 SESSION SECURITY TOKEN (Restart Kill-Switch)
@@ -60,22 +51,7 @@ SEARCH_STICKERS = [
     "CAACAgIAAxkBAAERavlqNXreh03oKow7UUFuKzMlU85awAACnRcAArwzqEn0nAMmwtD6cTwE"
 ]
 BULK_BANNER = "https://telegra.ph/file/f8b495d98fd4d89c99150.jpg"
-
 LANG_MAP = {"en": "English", "hi": "Hindi", "ta": "Tamil", "te": "Telugu", "ml": "Malayalam", "kn": "Kannada", "ja": "Japanese", "ko": "Korean", "es": "Spanish", "fr": "French"}
-
-def levenshtein_distance(s1: str, s2: str) -> int:
-    if len(s1) < len(s2): return levenshtein_distance(s2, s1)
-    if len(s2) == 0: return len(s1)
-    previous_row = range(len(s2) + 1)
-    for i, c1 in enumerate(s1):
-        current_row = [i + 1]
-        for j, c2 in enumerate(s2):
-            insertions = previous_row[j + 1] + 1
-            deletions = current_row[j] + 1
-            substitutions = previous_row[j] + (c1 != c2)
-            current_row.append(min(insertions, deletions, substitutions))
-        previous_row = current_row
-    return previous_row[-1]
 
 async def fetch_imdb_tmdb(query: str) -> dict:
     tmdb_keys = getattr(Config, "TMDB_API_KEYS", [])
@@ -103,13 +79,11 @@ async def fetch_imdb_tmdb(query: str) -> dict:
                             media_results = [r for r in data["results"] if r.get("media_type") in ["movie", "tv"]]
                             if media_results:
                                 item = media_results[0]
-                                
                                 title = item.get("title") or item.get("name") or query.title()
                                 release_date = item.get("release_date") or item.get("first_air_date") or "Unknown Date"
                                 lang_code = item.get("original_language", "en")
                                 lang_full = LANG_MAP.get(lang_code, lang_code.upper())
                                 rating = round(item.get('vote_average', 0), 1)
-                                
                                 poster_url = f"https://image.tmdb.org/t/p/w500{item.get('poster_path')}" if item.get("poster_path") else default_meta["poster"]
                                 
                                 return {
@@ -123,38 +97,6 @@ async def fetch_imdb_tmdb(query: str) -> dict:
                                 }
         except Exception: continue
     return default_meta
-
-def format_size(size_bytes):
-    if size_bytes == 0: return "0B"
-    size_name = ("B", "KB", "MB", "GB", "TB")
-    i = int(math.floor(math.log(size_bytes, 1024)))
-    p = math.pow(1024, i)
-    s = round(size_bytes / p, 2)
-    return f"{s} {size_name[i]}"
-
-async def upload_json_payload(data_list):
-    json_string = json.dumps(data_list)
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post("https://api.npoint.io/", json=data_list, timeout=8) as resp:
-                if resp.status == 200: return f"https://api.npoint.io/{(await resp.json())['id']}"
-    except Exception: pass
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post("https://dpaste.com/api/v2/", data={"content": json_string, "syntax": "json"}, timeout=8) as resp:
-                if resp.status in [200, 201]:
-                    url = (await resp.text()).strip()
-                    if url.startswith("http"): return f"{url}.txt"
-    except Exception: pass
-    return None
-
-def build_safe_webapp_url(client_username, short_id, data_url, user_limit, is_vip=False):
-    base_link = getattr(Config, "BULK_LINK", "https://yourusername.github.io/autofilter-web/").strip()
-    if not base_link.startswith("http"): base_link = f"https://{base_link}"
-    safe_url = urllib.parse.quote(data_url)
-    bot_username = client_username or "Bot"
-    tier = "premium" if is_vip else "free"
-    return f"{base_link}?bot={bot_username}&id={short_id}&limit={user_limit}&tier={tier}&url={safe_url}"
 
 def get_progress_bar(current, total):
     percent = current / total if total > 0 else 0
@@ -227,6 +169,7 @@ async def auto_filter(client: Client, message: Message):
     resolved_mode, resolved_lang, resolved_size = await get_filter_settings(user_id, chat_id, chat_type)
     
     settings = await db.get_settings()
+    
     # 🎨 RESOLVING COLOR MODE HIERARCHY
     u_sett = await db.get_user_settings(user_id)
     g_sett = await db.get_group_settings(chat_id) if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP] else {}
@@ -315,7 +258,6 @@ async def auto_filter(client: Client, message: Message):
         
         buttons = []
         for i, (m_name, files) in enumerate(found_movies):
-            # 🎨 RAINBOW COLORS FOR BULK SEARCH RESULTS
             rnd_color = random.choice([ButtonStyle.PRIMARY, ButtonStyle.SUCCESS, ButtonStyle.DANGER])
             buttons.append([style_btn(color_mode, rnd_color, text=f"{m_name} ({len(files)})", callback_data=f"bms_sel_{BOT_SESSION_TOKEN}_{session_id}_{i}_0_{user_id}")])
             
@@ -337,7 +279,7 @@ async def auto_filter(client: Client, message: Message):
         return
 
     # ==========================================
-    # 🌟 NORMAL SINGLE SEARCH LOGIC
+    # 🌟 SINGLE SEARCH LOGIC
     # ==========================================
     loading_msg = None
     try: loading_msg = await message.reply_sticker(random.choice(SEARCH_STICKERS))
@@ -360,9 +302,8 @@ async def auto_filter(client: Client, message: Message):
         QUERY_CACHE[cache_key] = (current_time, raw_results)
 
     filtered_results = apply_search_filters(raw_results, resolved_mode, resolved_lang, resolved_size)
-    results = filtered_results[:10]
     
-    if not results:
+    if not filtered_results:
         if loading_msg:
             try: await loading_msg.delete()
             except Exception: pass
@@ -374,7 +315,6 @@ async def auto_filter(client: Client, message: Message):
         btn_list = []
         if suggestions:
             for s in suggestions: 
-                # 🎨 RAINBOW COLORS FOR SUGGESTIONS
                 rnd_color = random.choice([ButtonStyle.PRIMARY, ButtonStyle.SUCCESS, ButtonStyle.DANGER])
                 btn_list.append([style_btn(color_mode, rnd_color, text=f"🎬 {s[:40]}", callback_data=f"fuzzy_{s[:40]}")])
         
@@ -393,87 +333,56 @@ async def auto_filter(client: Client, message: Message):
         return
 
     metadata = await fetch_imdb_tmdb(query)
-    buttons = []
     
     has_bypass = user_limits.get("shortlink_bypass", False)
     if not has_bypass: has_bypass = await db.has_active_verification_pass(user_id)
     shortener_on = settings.get("shortener_enabled", False) and not has_bypass
 
+    bulk_btn = None
     if settings.get("bulk_enabled", True):
         bulk_limit = user_limits.get("bulk_select_limit", 10)
         web_app_results = filtered_results[:10000] 
         short_id = hashlib.md5(f"{user_id}_{query}_{time.time()}".encode()).hexdigest()[:8]
         webapp_data = [f"{f.get('title', 'Unknown')}|{format_size(f.get('size', 0))}" for f in web_app_results]
-        
         data_url = await upload_json_payload(webapp_data)
         
         if data_url:
             is_vip = True if active_plan else False
             web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url, bulk_limit, is_vip)
-            
             BULK_CACHE[short_id] = (time.time(), web_app_results, web_app_url)
             for k in list(BULK_CACHE.keys()):
                 if time.time() - BULK_CACHE[k][0] > BULK_CACHE_TTL: del BULK_CACHE[k]
 
             if chat_type == ChatType.PRIVATE:
-                buttons.insert(0, [style_btn(color_mode, ButtonStyle.SUCCESS, text=f"☑️ Select Multiple Movies ({len(web_app_results)})", web_app=WebAppInfo(url=web_app_url))])
+                bulk_btn = style_btn(color_mode, ButtonStyle.SUCCESS, text=f"☑️ Select Multiple Movies ({len(web_app_results)})", web_app=WebAppInfo(url=web_app_url))
             else:
                 bot_url = f"https://t.me/{client.me.username}?start=bapp_{short_id}"
-                buttons.insert(0, [style_btn(color_mode, ButtonStyle.SUCCESS, text=f"☑️ Select Multiple Movies ({len(web_app_results)})", url=bot_url)])
+                bulk_btn = style_btn(color_mode, ButtonStyle.SUCCESS, text=f"☑️ Select Multiple Movies ({len(web_app_results)})", url=bot_url)
 
-    for file in results:
-        db_id = str(file.get("_id", ""))
-        f_size = format_size(file.get('size', 0))
-        # 🎨 RAINBOW COLORS FOR FILES
-        rnd_color = random.choice([ButtonStyle.PRIMARY, ButtonStyle.SUCCESS, ButtonStyle.DANGER])
-        
-        if shortener_on: 
-            buttons.append([style_btn(color_mode, rnd_color, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
-        else: 
-            buttons.append([style_btn(color_mode, rnd_color, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{BOT_SESSION_TOKEN}_{user_id}_{db_id}")])
-    
-    buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
-    
-    if len(filtered_results) > 10:
-        total_pages = math.ceil(len(filtered_results) / 10)
-        buttons.append([
-            style_btn(color_mode, ButtonStyle.PRIMARY, text="◀️ Prev", callback_data=f"prev_{BOT_SESSION_TOKEN}_{user_id}_0_{query}"),
-            style_btn(color_mode, ButtonStyle.PRIMARY, text=f"Page 1 of {total_pages}", callback_data="pages_info"),
-            style_btn(color_mode, ButtonStyle.PRIMARY, text="Next ▶️", callback_data=f"next_{BOT_SESSION_TOKEN}_{user_id}_1_{query}")
-        ])
-    
-    filter_notice = ""
-    if resolved_mode == "interactive" and (resolved_lang != "all" or resolved_size != "all"):
-        filter_notice = f"\n✨ **Filters Applied:** Size: `{resolved_size.upper()}` | Audio: `{resolved_lang.upper()}`"
-
-    if settings.get("filter_delete_enabled", False):
-        m_time = settings.get("filter_delete_time", 5)
-        filter_notice += f"\n\n⏳ *Note: This message auto-deletes in {m_time} minutes.*"
-
-    pm_notice = ""
-    if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-        pm_notice = "\n\n*(Click a file to receive it securely in your Private Messages)*"
-
-    caption = (
-        f"🎬 **{metadata['title']}** ({metadata['release_date'][:4]})\n"
-        f"⭐️ **Rating:** `{metadata['rating']}`\n"
-        f"🗣 **Language:** `{metadata['language']}`\n"
-        f"🎭 **Type:** `{metadata['genre']}`\n\n"
-        f"📝 **Synopsis:**\n_{metadata['plot']}_\n\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"🔍 **Found:** `{len(filtered_results)}` matching files.{filter_notice}{pm_notice}"
-    )
-    
     if loading_msg:
         try: await loading_msg.delete()
         except Exception: pass
-        
-    try: msg = await message.reply_photo(photo=metadata["poster"], caption=caption, reply_markup=InlineKeyboardMarkup(buttons), reply_parameters=ReplyParameters(message_id=message.id))
-    except Exception: msg = await client.send_message(chat_id, caption, reply_markup=InlineKeyboardMarkup(buttons))
 
-    if settings.get("filter_delete_enabled", False):
-        from plugins.advanced import trigger_ghost_self_destruct
-        trigger_ghost_self_destruct(client, chat_id, msg.id, settings.get("filter_delete_time", 5) * 60)
+    # 🚀 DELEGATE RENDERING & DEPLOYMENT DIRECTLY TO THE SEARCH FILTERS ENGINE
+    await send_search_display(
+        client=client,
+        chat_id=chat_id,
+        message_id=message.id,
+        mode=resolved_mode,
+        filtered_results=filtered_results,
+        metadata=metadata,
+        user_id=user_id,
+        session_token=BOT_SESSION_TOKEN,
+        query=query,
+        page=0,
+        shortener_on=shortener_on,
+        color_mode=color_mode,
+        bulk_btn=bulk_btn,
+        chat_type=chat_type,
+        resolved_lang=resolved_lang,
+        resolved_size=resolved_size,
+        settings=settings
+    )
 
 # ==========================================
 # 🌟 MULTI-SEARCH CALLBACKS
@@ -511,17 +420,13 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
     metadata = await fetch_imdb_tmdb(movie_name)
     settings = await db.get_settings()
     
-    # 🎨 RESOLVING COLOR MODE HIERARCHY
     u_sett = await db.get_user_settings(user_id)
     g_sett = await db.get_group_settings(chat_id) if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP] else {}
     
     g_color = g_sett.get("color_mode", "let_members_choose")
-    if g_color == "force_on": 
-        color_mode = True
-    elif g_color == "force_off": 
-        color_mode = False
-    else: 
-        color_mode = u_sett.get("color_mode", False)
+    if g_color == "force_on": color_mode = True
+    elif g_color == "force_off": color_mode = False
+    else: color_mode = u_sett.get("color_mode", False)
     
     has_bypass = user_limits.get("shortlink_bypass", False)
     if not has_bypass: has_bypass = await db.has_active_verification_pass(user_id)
@@ -553,7 +458,6 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
-        # 🎨 RAINBOW COLORS FOR FILES
         rnd_color = random.choice([ButtonStyle.PRIMARY, ButtonStyle.SUCCESS, ButtonStyle.DANGER])
         
         if shortener_on: buttons.append([style_btn(color_mode, rnd_color, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
@@ -640,24 +544,17 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     if not raw_results and " " in base_query: raw_results = await db.search_files(base_query.replace(" ", ""), skip=0, limit=10000, exact=False)
     
     filtered_results = apply_search_filters(raw_results, resolved_mode, resolved_lang, resolved_size)
-    
-    results = filtered_results[page * 10 : (page + 1) * 10]
-    if not results: return await callback.answer("⚠️ No more pages available matching your filters!", show_alert=True)
+    if not filtered_results: return await callback.answer("⚠️ No more files available matching your filters!", show_alert=True)
         
-    buttons = []
     settings = await db.get_settings()
     
-    # 🎨 RESOLVING COLOR MODE HIERARCHY
     u_sett = await db.get_user_settings(user_id)
     g_sett = await db.get_group_settings(chat_id) if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP] else {}
     
     g_color = g_sett.get("color_mode", "let_members_choose")
-    if g_color == "force_on": 
-        color_mode = True
-    elif g_color == "force_off": 
-        color_mode = False
-    else: 
-        color_mode = u_sett.get("color_mode", False)
+    if g_color == "force_on": color_mode = True
+    elif g_color == "force_off": color_mode = False
+    else: color_mode = u_sett.get("color_mode", False)
     
     from plugins.vip_system import DEFAULT_PLANS, FREE_USER_LIMITS
     active_plan = await db.get_active_vip_plan(user_id)
@@ -667,13 +564,14 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     if not has_bypass: has_bypass = await db.has_active_verification_pass(user_id)
     shortener_on = settings.get("shortener_enabled", False) and not has_bypass
 
+    bulk_btn = None
     if settings.get("bulk_enabled", True):
         bulk_limit = user_limits.get("bulk_select_limit", 10)
         web_app_results = filtered_results[:10000]
         short_id = hashlib.md5(f"{user_id}_{base_query}_{time.time()}".encode()).hexdigest()[:8]
         webapp_data = [f"{f.get('title', 'Unknown')}|{format_size(f.get('size', 0))}" for f in web_app_results]
-        
         data_url = await upload_json_payload(webapp_data)
+        
         if data_url:
             is_vip = True if active_plan else False
             web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url, bulk_limit, is_vip)
@@ -682,31 +580,32 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
                 if time.time() - BULK_CACHE[k][0] > BULK_CACHE_TTL: del BULK_CACHE[k]
 
             if chat_type == ChatType.PRIVATE:
-                buttons.insert(0, [style_btn(color_mode, ButtonStyle.SUCCESS, text=f"☑️ Select Multiple Movies ({len(web_app_results)})", web_app=WebAppInfo(url=web_app_url))])
+                bulk_btn = style_btn(color_mode, ButtonStyle.SUCCESS, text=f"☑️ Select Multiple Movies ({len(web_app_results)})", web_app=WebAppInfo(url=web_app_url))
             else:
                 bot_url = f"https://t.me/{client.me.username}?start=bapp_{short_id}"
-                buttons.insert(0, [style_btn(color_mode, ButtonStyle.SUCCESS, text=f"☑️ Select Multiple Movies ({len(web_app_results)})", url=bot_url)])
+                bulk_btn = style_btn(color_mode, ButtonStyle.SUCCESS, text=f"☑️ Select Multiple Movies ({len(web_app_results)})", url=bot_url)
 
-    for file in results:
-        db_id = str(file.get("_id", ""))
-        f_size = format_size(file.get('size', 0))
-        # 🎨 RAINBOW COLORS FOR FILES
-        rnd_color = random.choice([ButtonStyle.PRIMARY, ButtonStyle.SUCCESS, ButtonStyle.DANGER])
-        
-        if shortener_on: buttons.append([style_btn(color_mode, rnd_color, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
-        else: buttons.append([style_btn(color_mode, rnd_color, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{BOT_SESSION_TOKEN}_{user_id}_{db_id}")])
-    
-    buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
-    
-    total_pages = math.ceil(len(filtered_results) / 10)
-    nav_buttons = []
-    if page > 0: nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="◀️ Prev", callback_data=f"prev_{BOT_SESSION_TOKEN}_{user_id}_{page - 1}_{base_query}"))
-    nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text=f"Page {page + 1} of {total_pages}", callback_data="pages_info"))
-    if len(filtered_results) > (page + 1) * 10: nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="Next ▶️", callback_data=f"next_{BOT_SESSION_TOKEN}_{user_id}_{page + 1}_{base_query}"))
-    buttons.append(nav_buttons)
-    
-    await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
-    await callback.answer()
+    metadata = await fetch_imdb_tmdb(base_query)
+
+    # 🚀 DELEGATE PAGINATION VIEW UPDATE TO THE ENGINE
+    await update_pagination_display(
+        client=client,
+        callback=callback,
+        mode=resolved_mode,
+        filtered_results=filtered_results,
+        metadata=metadata,
+        user_id=user_id,
+        session_token=BOT_SESSION_TOKEN,
+        base_query=base_query,
+        page=page,
+        shortener_on=shortener_on,
+        color_mode=color_mode,
+        bulk_btn=bulk_btn,
+        chat_type=chat_type,
+        resolved_lang=resolved_lang,
+        resolved_size=resolved_size,
+        settings=settings
+    )
 
 @Client.on_inline_query()
 async def inline_search(client: Client, query: InlineQuery):
@@ -717,8 +616,6 @@ async def inline_search(client: Client, query: InlineQuery):
         return await query.answer([])
 
     settings = await db.get_settings()
-    
-    # Ensure color_mode is correctly pulled for inline queries
     u_sett = await db.get_user_settings(user_id)
     color_mode = u_sett.get("color_mode", False)
 
