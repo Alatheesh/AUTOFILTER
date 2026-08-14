@@ -182,12 +182,18 @@ async def auto_filter(client: Client, message: Message):
     else: 
         color_mode = u_sett.get("color_mode", False)
     
-    # 🚀 THE FIX: PLAN MAPPING FOR MAIN SEARCH
     from plugins.vip_system import get_all_plans, FREE_USER_LIMITS
-    active_plan_name = await db.get_active_vip_plan(user_id)
+    raw_plan_data = await db.get_active_vip_plan(user_id)
     plans = await get_all_plans()
     
-    active_plan_key = next((k for k, v in plans.items() if v["name"] == active_plan_name), None)
+    # 🚀 ULTIMATE FAIL-SAFE MAPPING
+    active_plan_key = None
+    if raw_plan_data:
+        if raw_plan_data in plans:
+            active_plan_key = raw_plan_data
+        else:
+            active_plan_key = next((k for k, v in plans.items() if v.get("name", "").strip() == raw_plan_data.strip()), None)
+            
     user_limits = plans.get(active_plan_key, {}).get("limits", FREE_USER_LIMITS) if active_plan_key else FREE_USER_LIMITS
     
     # ==========================================
@@ -418,10 +424,17 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
     chat_id = callback.message.chat.id
     chat_type = callback.message.chat.type
     
-    active_plan_name = await db.get_active_vip_plan(user_id)
+    raw_plan_data = await db.get_active_vip_plan(user_id)
     plans = await get_all_plans()
     
-    active_plan_key = next((k for k, v in plans.items() if v["name"] == active_plan_name), None)
+    # 🚀 ULTIMATE FAIL-SAFE MAPPING
+    active_plan_key = None
+    if raw_plan_data:
+        if raw_plan_data in plans:
+            active_plan_key = raw_plan_data
+        else:
+            active_plan_key = next((k for k, v in plans.items() if v.get("name", "").strip() == raw_plan_data.strip()), None)
+            
     user_limits = plans.get(active_plan_key, {}).get("limits", FREE_USER_LIMITS) if active_plan_key else FREE_USER_LIMITS
     
     metadata = await fetch_imdb_tmdb(movie_name)
@@ -563,12 +576,18 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     elif g_color == "force_off": color_mode = False
     else: color_mode = u_sett.get("color_mode", False)
     
-    # 🚀 THE FIX: PLAN MAPPING FOR PAGINATION MENU
     from plugins.vip_system import get_all_plans, FREE_USER_LIMITS
-    active_plan_name = await db.get_active_vip_plan(user_id)
+    raw_plan_data = await db.get_active_vip_plan(user_id)
     plans = await get_all_plans()
     
-    active_plan_key = next((k for k, v in plans.items() if v["name"] == active_plan_name), None)
+    # 🚀 ULTIMATE FAIL-SAFE MAPPING
+    active_plan_key = None
+    if raw_plan_data:
+        if raw_plan_data in plans:
+            active_plan_key = raw_plan_data
+        else:
+            active_plan_key = next((k for k, v in plans.items() if v.get("name", "").strip() == raw_plan_data.strip()), None)
+            
     user_limits = plans.get(active_plan_key, {}).get("limits", FREE_USER_LIMITS) if active_plan_key else FREE_USER_LIMITS
     
     has_bypass = user_limits.get("shortlink_bypass", False)
