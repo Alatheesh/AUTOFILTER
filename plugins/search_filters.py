@@ -61,13 +61,18 @@ async def upload_json_payload(data_list):
     except Exception: pass
     return None
 
-def build_safe_webapp_url(client_username, short_id, data_url, user_limit, is_vip=False):
+def build_safe_webapp_url(client_username, short_id, data_url, user_limit, is_vip=False, plan_name="Free Tier", expiry_str="N/A"):
     base_link = getattr(Config, "BULK_LINK", "https://yourusername.github.io/autofilter-web/").strip()
     if not base_link.startswith("http"): base_link = f"https://{base_link}"
     safe_url = urllib.parse.quote(data_url)
     bot_username = client_username or "Bot"
     tier = "premium" if is_vip else "free"
-    return f"{base_link}?bot={bot_username}&id={short_id}&limit={user_limit}&tier={tier}&url={safe_url}"
+    
+    # 🚀 THE FIX: Safely encode the plan and expiry so spaces/special characters don't break the URL
+    safe_plan = urllib.parse.quote(str(plan_name))
+    safe_exp = urllib.parse.quote(str(expiry_str))
+    
+    return f"{base_link}?bot={bot_username}&id={short_id}&limit={user_limit}&tier={tier}&plan={safe_plan}&exp={safe_exp}&url={safe_url}"
 
 # ==========================================
 # ⚙️ MODE & FILTER CONFLICT RESOLUTION
