@@ -210,12 +210,17 @@ async def handle_bulk_delivery(client: Client, message: Message):
             # 🛑 VIP BACKEND SECURITY CHECK 
             try:
                 from plugins.vip_system import get_all_plans, FREE_USER_LIMITS
-                active_plan_name = await db.get_active_vip_plan(user_id)
+                raw_plan_data = await db.get_active_vip_plan(user_id)
                 plans = await get_all_plans()
                 
-                # 🚀 THE FIX: Map "🥇 Gold" back to "gold" to fetch the correct limits
-                active_plan_key = next((k for k, v in plans.items() if v["name"] == active_plan_name), None)
-                
+                # 🚀 ULTIMATE FAIL-SAFE MAPPING
+                active_plan_key = None
+                if raw_plan_data:
+                    if raw_plan_data in plans:
+                        active_plan_key = raw_plan_data
+                    else:
+                        active_plan_key = next((k for k, v in plans.items() if v.get("name", "").strip() == raw_plan_data.strip()), None)
+                        
                 user_limits = plans.get(active_plan_key, {}).get("limits", FREE_USER_LIMITS) if active_plan_key else FREE_USER_LIMITS
                 bulk_limit = user_limits.get("bulk_select_limit", 10)
             except Exception:
