@@ -389,3 +389,91 @@ async def update_pagination_display(
     except Exception:
         pass
     await callback.answer()
+
+async def update_bulk_display(
+    client: Client,
+    callback: CallbackQuery,
+    mode: str,
+    results: list,
+    filtered_results: list,
+    metadata: dict,
+    user_id: int,
+    session_token: str,
+    session_id: str,
+    movie_idx: int,
+    page: int,
+    shortener_on: bool,
+    color_mode: bool,
+    bulk_btn,
+    chat_type,
+    settings: dict
+):
+    """
+    Renders the Bulk Movie Select view, respecting the user's layout mode.
+    """
+    from pyrogram.types import InputMediaPhoto  # Safe localized import
+    
+    buttons = []
+    if bulk_btn:
+        buttons.append([bulk_btn])
+
+    caption = ""
+    is_text_only = False
+
+    if mode == "hypertext":
+        caption = f"🍿 <u>**{metadata['title']} ({metadata['release_date'][:4]})**</u>\n"
+        caption += f"⭐️ **Rating:** `{metadata['rating']}` | 🗣 `{metadata['language']}`\n\n"
+        caption += "👇 **Click a link to receive your file:**\n\n"
+        
+        for file in results:
+            db_id = str(file.get("_id", ""))
+            f_size = format_size(file.get('size', 0))
+            f_title = file.get('title', 'Unknown File')
+            link = f"https://t.me/{client.me.username}?start=getfile_{db_id}"
+            caption += f"📁 <a href='{link}'>[{f_size}] {f_title}</a>\n\n"
+            
+        caption += f"━━━━━━━━━━━━━━━━━━\n🔍 **Found:** `{len(filtered_results)}` matching files."
+        is_text_only = True
+    else:
+        caption = (
+            f"🎬 **{metadata['title']}** ({metadata['release_date'][:4]})\n"
+            f"⭐️ **Rating:** `{metadata['rating']}`\n"
+            f"🗣 **Language:** `{metadata['language']}`\n"
+            f"🎭 **Type:** `{metadata['genre']}`\n\n"
+            f"📝 **Synopsis:**\n_{metadata['plot']}_\n\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"🔍 **Found:** `{len(filtered_results)}` matching files."
+        )
+        for file in results:
+            db_id = str(file.get("_id", ""))
+            f_size = format_size(file.get('size', 0))
+            rnd_color = random.choice([ButtonStyle.PRIMARY, ButtonStyle.SUCCESS, ButtonStyle.DANGER])
+            
+            if shortener_on: buttons.append([style_btn(color_mode, rnd_color, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
+            else: buttons.append([style_btn(color_mode, rnd_color, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{session_token}_{user_id}_{db_id}")])
+
+    buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
+    
+    total_pages = math.ceil(len(filtered_results) / 10)
+    if len(filtered_results) > 10:
+        nav_buttons = []
+        if page > 0: nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="◀️ Prev", callback_data=f"bms_sel_{session_token}_{session_id}_{movie_idx}_{page - 1}_{user_id}"))
+        nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text=f"Page {page + 1} of {total_pages}", callback_data="pages_info"))
+        if len(filtered_results) > (page + 1) * 10: nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="Next ▶️", callback_data=f"bms_sel_{session_token}_{session_id}_{movie_idx}_{page + 1}_{user_id}"))
+        buttons.append(nav_buttons)
+
+    buttons.append([style_btn(color_mode, ButtonStyle.DANGER, text="⬅ Back to Movie List", callback_data=f"bms_back_{session_token}_{user_id}_{session_id}")])
+    
+    markup = InlineKeyboardMarkup(buttons)
+    
+    try:
+        if is_text_only:
+            await callback.message.edit_text(caption, reply_markup=markup, disable_web_page_preview=True)
+        else:
+            await callback.message.edit_media(InputMediaPhoto(media=metadata["poster"], caption=caption))
+            await callback.message.edit_reply_markup(reply_markup=markup)
+    except Exception as e:
+        try: await callback.message.edit_text(caption, reply_markup=markup, disable_web_page_preview=True)
+        except Exception: pass
+        
+    await callback.answer()
