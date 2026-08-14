@@ -441,6 +441,8 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
     chat_id = callback.message.chat.id
     chat_type = callback.message.chat.type
     
+    resolved_mode, resolved_lang, resolved_size = await get_filter_settings(user_id, chat_id, chat_type)
+    
     raw_plan_data = await db.get_active_vip_plan(user_id)
     plans = await get_all_plans()
     
