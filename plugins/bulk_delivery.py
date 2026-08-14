@@ -6,6 +6,7 @@ import json
 import string
 import random
 from pyrogram import Client, filters
+from pyrogram.enums import ButtonStyle
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 import math
 from pyrogram.errors import FloodWait, UserIsBlocked # 🚀 NEW: Critical safety imports
@@ -71,7 +72,7 @@ async def handle_bulk_delivery(client: Client, message: Message):
 
             app_msg = await message.reply_text(
                 msg_text,
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Launch Web App", web_app=WebAppInfo(url=web_app_url))]])
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚀 Launch Web App", web_app=WebAppInfo(url=web_app_url), style=ButtonStyle.SUCCESS)]])
             )
 
             if del_enabled:
@@ -92,7 +93,7 @@ async def handle_bulk_delivery(client: Client, message: Message):
                         chat = await client.get_chat(channel)
                         invite_link = chat.invite_link if chat.invite_link else await client.export_chat_invite_link(channel)
                     except Exception: invite_link = "https://t.me/llathu63035"
-                    buttons.append([InlineKeyboardButton(text=f"Join Channel #{idx}", url=invite_link)])
+                    buttons.append([InlineKeyboardButton(text=f"Join Channel #{idx}", url=invite_link, style=ButtonStyle.PRIMARY)])
                 return await message.reply_text("🛑 **Lock Warning:**\nYou must join our official channels before downloading bulk files.", reply_markup=InlineKeyboardMarkup(buttons))
 
             settings = await db.get_settings()
@@ -128,7 +129,7 @@ async def handle_bulk_delivery(client: Client, message: Message):
                     if del_enabled: v_req_text += f"\n\n⏳ *Note: This message will automatically delete in {del_time} minutes.*"
 
                     req_msg = await message.reply_text(
-                        v_req_text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Verify Access", url=short_link)]])
+                        v_req_text, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Verify Access", url=short_link, style=ButtonStyle.SUCCESS)]])
                     )
 
                     if del_enabled:
