@@ -24,7 +24,7 @@ from plugins.moderation import SCRAPER_TRACKER
 from plugins.search_filters import (
     get_filter_settings, apply_search_filters, SIZE_MAP,
     style_btn, format_size, upload_json_payload, build_safe_webapp_url,
-    send_search_display, update_pagination_display
+    send_search_display, update_pagination_display, update_bulk_display
 )
 
 logger = logging.getLogger(__name__)
@@ -482,9 +482,7 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
     if not has_bypass: has_bypass = await db.has_active_verification_pass(user_id)
     shortener_on = settings.get("shortener_enabled", False) and not has_bypass
     
-    results = files[page * 10 : (page + 1) * 10]
-    buttons = []
-    
+    bulk_btn = None
     if settings.get("bulk_enabled", True):
         bulk_limit = user_limits.get("bulk_select_limit", 10)
         web_app_results = files[:10000]
@@ -493,78 +491,37 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
         
         data_url = await upload_json_payload(webapp_data)
         if data_url:
-            is_vip = True if active_plan_key else False # 🚀 THE FIX: Prevents NameError crash!
+            is_vip = True if active_plan_key else False 
             web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url, bulk_limit, is_vip, plan_display, expiry_str)
             BULK_CACHE[short_id] = (time.time(), web_app_results, web_app_url)
             for k in list(BULK_CACHE.keys()):
                 if time.time() - BULK_CACHE[k][0] > BULK_CACHE_TTL: del BULK_CACHE[k]
 
             if chat_type == ChatType.PRIVATE:
-                buttons.insert(0, [style_btn(color_mode, ButtonStyle.SUCCESS, text=f"☑️ Select Multiple Movies ({len(web_app_results)})", web_app=WebAppInfo(url=web_app_url))])
+                bulk_btn = style_btn(color_mode, ButtonStyle.SUCCESS, text=f"☑️ Select Multiple Movies ({len(web_app_results)})", web_app=WebAppInfo(url=web_app_url))
             else:
                 bot_url = f"https://t.me/{client.me.username}?start=bapp_{short_id}"
-                buttons.insert(0, [style_btn(color_mode, ButtonStyle.SUCCESS, text=f"☑️ Select Multiple Movies ({len(web_app_results)})", url=bot_url)])
+                bulk_btn = style_btn(color_mode, ButtonStyle.SUCCESS, text=f"☑️ Select Multiple Movies ({len(web_app_results)})", url=bot_url)
 
-    for file in results:
-        db_id = str(file.get("_id", ""))
-        f_size = format_size(file.get('size', 0))
-        rnd_color = random.choice([ButtonStyle.PRIMARY, ButtonStyle.SUCCESS, ButtonStyle.DANGER])
-        
-        if shortener_on: buttons.append([style_btn(color_mode, rnd_color, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
-        else: buttons.append([style_btn(color_mode, rnd_color, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{BOT_SESSION_TOKEN}_{user_id}_{db_id}")])
-    
-    buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
-    
-    if len(files) > 10:
-        total_pages = math.ceil(len(files) / 10)
-        nav_buttons = []
-        if page > 0: nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="◀️ Prev", callback_data=f"bms_sel_{BOT_SESSION_TOKEN}_{session_id}_{movie_idx}_{page - 1}_{user_id}"))
-        nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text=f"Page {page + 1} of {total_pages}", callback_data="pages_info"))
-        if len(files) > (page + 1) * 10: nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="Next ▶️", callback_data=f"bms_sel_{BOT_SESSION_TOKEN}_{session_id}_{movie_idx}_{page + 1}_{user_id}"))
-        buttons.append(nav_buttons)
-
-    buttons.append([style_btn(color_mode, ButtonStyle.DANGER, text="⬅ Back to Movie List", callback_data=f"bms_back_{BOT_SESSION_TOKEN}_{user_id}_{session_id}")])
-    
-    caption = (
-        f"🎬 **{metadata['title']}** ({metadata['release_date'][:4]})\n"
-        f"⭐️ **Rating:** `{metadata['rating']}`\n"
-        f"🗣 **Language:** `{metadata['language']}`\n"
-        f"🎭 **Type:** `{metadata['genre']}`\n\n"
-        f"📝 **Synopsis:**\n_{metadata['plot']}_\n\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"🔍 **Found:** `{len(files)}` matching files."
+    # 🚀 DELEGATE RENDERING TO THE SEARCH FILTERS ENGINE
+    await update_bulk_display(
+        client=client,
+        callback=callback,
+        mode=resolved_mode,
+        results=files[page * 10 : (page + 1) * 10],
+        filtered_results=files,
+        metadata=metadata,
+        user_id=user_id,
+        session_token=BOT_SESSION_TOKEN,
+        session_id=session_id,
+        movie_idx=movie_idx,
+        page=page,
+        shortener_on=shortener_on,
+        color_mode=color_mode,
+        bulk_btn=bulk_btn,
+        chat_type=chat_type,
+        settings=settings
     )
-    
-    try:
-        await callback.message.edit_media(InputMediaPhoto(media=metadata["poster"], caption=caption))
-        await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
-    except Exception as e: 
-        logger.error(f"Failed to edit bulk media: {e}")
-        try: await callback.message.edit_text(caption, reply_markup=InlineKeyboardMarkup(buttons))
-        except Exception: pass
-
-@Client.on_callback_query(filters.regex(r"^bms_back_(.+)_(.+)_(.+)"))
-async def handle_bulk_movie_back(client: Client, callback: CallbackQuery):
-    token = callback.matches[0].group(1)
-    searcher_id = int(callback.matches[0].group(2))
-    session_id = callback.matches[0].group(3)
-    
-    if token != BOT_SESSION_TOKEN:
-        return await callback.answer("⚠️ Session expired due to bot update/restart. Please search again!", show_alert=True)
-    if callback.from_user.id != searcher_id:
-        return await callback.answer("⚠️ This multi-search wasn't requested by you. Please search your own!", show_alert=True)
-        
-    if session_id not in MULTI_SEARCH_CACHE or time.time() - MULTI_SEARCH_CACHE[session_id]["timestamp"] > MULTI_SEARCH_TTL:
-        return await callback.answer("⏳ Session Expired! Please search again.", show_alert=True)
-        
-    session_data = MULTI_SEARCH_CACHE[session_id]
-    
-    try:
-        await callback.message.edit_media(InputMediaPhoto(media=BULK_BANNER, caption=session_data["summary_text"]))
-        await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(session_data["buttons"]))
-    except Exception:
-        try: await callback.message.edit_text(session_data["summary_text"], reply_markup=InlineKeyboardMarkup(session_data["buttons"]))
-        except Exception: pass
         
     await callback.answer()
 
