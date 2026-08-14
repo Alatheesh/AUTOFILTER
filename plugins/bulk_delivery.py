@@ -207,12 +207,16 @@ async def handle_bulk_delivery(client: Client, message: Message):
                     
             if not selected_files: return await message.reply_text("⚠️ No valid files were selected.")
             
-            # 🛑 VIP BACKEND SECURITY CHECK (Fixed to properly read the 50-file limit!)
+            # 🛑 VIP BACKEND SECURITY CHECK 
             try:
                 from plugins.vip_system import get_all_plans, FREE_USER_LIMITS
-                active_plan = await db.get_active_vip_plan(user_id)
+                active_plan_name = await db.get_active_vip_plan(user_id)
                 plans = await get_all_plans()
-                user_limits = plans.get(active_plan, {}).get("limits", FREE_USER_LIMITS) if active_plan and active_plan in plans else FREE_USER_LIMITS
+                
+                # 🚀 THE FIX: Map "🥇 Gold" back to "gold" to fetch the correct limits
+                active_plan_key = next((k for k, v in plans.items() if v["name"] == active_plan_name), None)
+                
+                user_limits = plans.get(active_plan_key, {}).get("limits", FREE_USER_LIMITS) if active_plan_key else FREE_USER_LIMITS
                 bulk_limit = user_limits.get("bulk_select_limit", 10)
             except Exception:
                 # Fallback limit just in case
