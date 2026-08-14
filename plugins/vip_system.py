@@ -209,9 +209,17 @@ async def vip_background_worker(client: Client):
 @Client.on_message(filters.command("buyvip"))
 async def buy_vip_command(client, message):
     user_id = message.from_user.id
-    active_plan_id = await db.get_active_vip_plan(user_id)
+    raw_plan_data = await db.get_active_vip_plan(user_id)
     user_doc = await vip_users.find_one({"user_id": user_id})
     plans = await get_all_plans()
+
+    # 🚀 FAIL-SAFE MAPPING
+    active_plan_id = None
+    if raw_plan_data:
+        if raw_plan_data in plans:
+            active_plan_id = raw_plan_data
+        else:
+            active_plan_id = next((k for k, v in plans.items() if v.get("name", "").strip() == raw_plan_data.strip()), None)
 
     # Generate Top Status Banner
     status_text = "🆓 **Free User**"
@@ -295,11 +303,16 @@ async def show_vip_plan_details(client: Client, callback: CallbackQuery):
 
     selected_plan = plans[plan_key]
     user_id = callback.from_user.id
-    user_plan_name = await db.get_active_vip_plan(user_id)
+    raw_plan_data = await db.get_active_vip_plan(user_id)
     user_doc = await vip_users.find_one({"user_id": user_id})
     
-    # 🚀 THE FIX: Convert Database Name to Plan Key
-    user_plan_id = next((k for k, v in plans.items() if v["name"] == user_plan_name), None)
+    # 🚀 FAIL-SAFE MAPPING
+    user_plan_id = None
+    if raw_plan_data:
+        if raw_plan_data in plans:
+            user_plan_id = raw_plan_data
+        else:
+            user_plan_id = next((k for k, v in plans.items() if v.get("name", "").strip() == raw_plan_data.strip()), None)
     
     current_time = datetime.datetime.now()
     expiry_date = user_doc.get("expiry") if user_doc else None
@@ -1227,13 +1240,18 @@ async def check_vip_cmd(client, message: Message):
         try: target = int(message.command[1])
         except: pass
 
-    active_plan_name = await db.get_active_vip_plan(target)
+    raw_plan_data = await db.get_active_vip_plan(target)
     user_doc = await vip_users.find_one({"user_id": target})
     plans = await get_all_plans() 
     
-    # 🚀 THE FIX: Convert "🥇 Gold" to "gold"
-    active_plan_id = next((k for k, v in plans.items() if v["name"] == active_plan_name), None)
-    
+    # 🚀 ULTIMATE FAIL-SAFE MAPPING (Handles BOTH Keys and Names perfectly)
+    active_plan_id = None
+    if raw_plan_data:
+        if raw_plan_data in plans:
+            active_plan_id = raw_plan_data
+        else:
+            active_plan_id = next((k for k, v in plans.items() if v.get("name", "").strip() == raw_plan_data.strip()), None)
+            
     plan_name = "Free User"
     limits = FREE_USER_LIMITS
     price = "0"
