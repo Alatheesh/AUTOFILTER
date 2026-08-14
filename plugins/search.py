@@ -199,8 +199,10 @@ async def auto_filter(client: Client, message: Message):
 
     # 🚀 NEW: FETCH EXPIRY DATA FOR THE WEBAPP
     import datetime
+    # Grab the beautiful display name straight from the plans dictionary
+    plan_display = plans[active_plan_key]["name"] if active_plan_key else "Free Tier"
     expiry_str = "N/A"
-    plan_display = raw_plan_data if raw_plan_data else "Free Tier"
+    
     user_doc = await db.vip_users.find_one({"user_id": user_id})
     if user_doc and user_doc.get("expiry"):
         exp_date = user_doc.get("expiry")
@@ -371,8 +373,8 @@ async def auto_filter(client: Client, message: Message):
         data_url = await upload_json_payload(webapp_data)
         
         if data_url:
-            is_vip = True if active_plan_key else False  # 🚀 THE FIX: Prevents NameError crash!
-            web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url, bulk_limit, is_vip)
+            is_vip = True if active_plan_key else False
+            web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url, bulk_limit, is_vip, plan_display, expiry_str)
             BULK_CACHE[short_id] = (time.time(), web_app_results, web_app_url)
             for k in list(BULK_CACHE.keys()):
                 if time.time() - BULK_CACHE[k][0] > BULK_CACHE_TTL: del BULK_CACHE[k]
