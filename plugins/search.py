@@ -1,6 +1,7 @@
 import math
 import os
 import time
+import datetime
 import random
 import logging
 import aiohttp
@@ -195,6 +196,20 @@ async def auto_filter(client: Client, message: Message):
             active_plan_key = next((k for k, v in plans.items() if v.get("name", "").strip() == raw_plan_data.strip()), None)
             
     user_limits = plans.get(active_plan_key, {}).get("limits", FREE_USER_LIMITS) if active_plan_key else FREE_USER_LIMITS
+
+    # 🚀 NEW: FETCH EXPIRY DATA FOR THE WEBAPP
+    import datetime
+    expiry_str = "N/A"
+    plan_display = raw_plan_data if raw_plan_data else "Free Tier"
+    user_doc = await db.vip_users.find_one({"user_id": user_id})
+    if user_doc and user_doc.get("expiry"):
+        exp_date = user_doc.get("expiry")
+        now = datetime.datetime.now()
+        if exp_date > now:
+            rem_days = (exp_date - now).days
+            expiry_str = "Lifetime" if rem_days > 36000 else exp_date.strftime('%Y-%m-%d')
+        else:
+            expiry_str = "Expired"
     
     # ==========================================
     # 🌟 MULTI-MOVIE BULK SEARCH LOGIC
@@ -418,7 +433,7 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
     if page == 0: await callback.answer(f"Fetching details for {movie_name}...", show_alert=False)
     else: await callback.answer()
     
-    # 🚀 THE FIX: PLAN MAPPING FOR BULK SELECT MENU
+   # 🚀 THE FIX: PLAN MAPPING FOR BULK SELECT MENU
     from plugins.vip_system import get_all_plans, FREE_USER_LIMITS
     user_id = callback.from_user.id
     chat_id = callback.message.chat.id
@@ -436,6 +451,19 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
             active_plan_key = next((k for k, v in plans.items() if v.get("name", "").strip() == raw_plan_data.strip()), None)
             
     user_limits = plans.get(active_plan_key, {}).get("limits", FREE_USER_LIMITS) if active_plan_key else FREE_USER_LIMITS
+
+    # 🚀 NEW: FETCH EXPIRY DATA FOR THE WEBAPP
+    plan_display = raw_plan_data if raw_plan_data else "Free Tier"
+    expiry_str = "N/A"
+    user_doc = await db.vip_users.find_one({"user_id": user_id})
+    if user_doc and user_doc.get("expiry"):
+        exp_date = user_doc.get("expiry")
+        now = datetime.datetime.now()
+        if exp_date > now:
+            rem_days = (exp_date - now).days
+            expiry_str = "Lifetime" if rem_days > 36000 else exp_date.strftime('%Y-%m-%d')
+        else:
+            expiry_str = "Expired"
     
     metadata = await fetch_imdb_tmdb(movie_name)
     settings = await db.get_settings()
@@ -464,7 +492,7 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
         data_url = await upload_json_payload(webapp_data)
         if data_url:
             is_vip = True if active_plan_key else False # 🚀 THE FIX: Prevents NameError crash!
-            web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url, bulk_limit, is_vip)
+            web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url, bulk_limit, is_vip, plan_display, expiry_str)
             BULK_CACHE[short_id] = (time.time(), web_app_results, web_app_url)
             for k in list(BULK_CACHE.keys()):
                 if time.time() - BULK_CACHE[k][0] > BULK_CACHE_TTL: del BULK_CACHE[k]
@@ -589,6 +617,20 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
             active_plan_key = next((k for k, v in plans.items() if v.get("name", "").strip() == raw_plan_data.strip()), None)
             
     user_limits = plans.get(active_plan_key, {}).get("limits", FREE_USER_LIMITS) if active_plan_key else FREE_USER_LIMITS
+
+    # 🚀 NEW: FETCH EXPIRY DATA FOR THE WEBAPP
+    import datetime
+    expiry_str = "N/A"
+    plan_display = raw_plan_data if raw_plan_data else "Free Tier"
+    user_doc = await db.vip_users.find_one({"user_id": user_id})
+    if user_doc and user_doc.get("expiry"):
+        exp_date = user_doc.get("expiry")
+        now = datetime.datetime.now()
+        if exp_date > now:
+            rem_days = (exp_date - now).days
+            expiry_str = "Lifetime" if rem_days > 36000 else exp_date.strftime('%Y-%m-%d')
+        else:
+            expiry_str = "Expired"
     
     has_bypass = user_limits.get("shortlink_bypass", False)
     if not has_bypass: has_bypass = await db.has_active_verification_pass(user_id)
@@ -604,7 +646,7 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
         
         if data_url:
             is_vip = True if active_plan_key else False # 🚀 THE FIX: Prevents NameError crash!
-            web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url, bulk_limit, is_vip)
+            web_app_url = build_safe_webapp_url(client.me.username, short_id, data_url, bulk_limit, is_vip, plan_display, expiry_str)
             BULK_CACHE[short_id] = (time.time(), web_app_results, web_app_url)
             for k in list(BULK_CACHE.keys()):
                 if time.time() - BULK_CACHE[k][0] > BULK_CACHE_TTL: del BULK_CACHE[k]
