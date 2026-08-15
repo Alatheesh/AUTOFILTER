@@ -874,11 +874,23 @@ async def get_worker2_text_and_buttons():
 
     indexed_meta = total_files - pending_meta - corrupted_count
     
-    meta_eta_seconds = pending_meta * 5.5 
+    is_fast = is_fast_mode_active()
+    is_recheck = is_recheck_mode_active()
+    
+    # 🚀 THE FIX: Dynamic ETA Calculation based on Fast/Normal Mode
+    time_per_file = 2.0 if is_fast else 4.5 
+    
+    # 🚀 THE FIX: Adjust queue size and progress if Recheck Mode is active
+    queue_left = (pending_meta + corrupted_count) if is_recheck else pending_meta
+    
+    meta_eta_seconds = queue_left * time_per_file 
     meta_eta_string = format_eta(meta_eta_seconds)
-    meta_pct = ((total_files - pending_meta) / total_files * 100) if total_files > 0 else 100
+    
+    processed_files = total_files - queue_left
+    meta_pct = (processed_files / total_files * 100) if total_files > 0 else 100
 
-    recheck_str = "🟢 Active (Yields to new files)" if is_recheck_mode_active() else "🔴 Inactive"
+    # 📝 Updated the text label as requested
+    recheck_str = "🟢 Active (Scanning skipped files)" if is_recheck else "🔴 Inactive"
 
     text = (
         f"⚙️ **WORKER 2: Language & Metadata Extraction**\n"
@@ -887,13 +899,13 @@ async def get_worker2_text_and_buttons():
         f"• **Corrupted / Skipped:** `{corrupted_count:,}` files\n"
         f"• **Current Progress:** `{meta_pct:.1f}%` complete\n"
         f"• **Pending Migration Queue:** `{pending_meta:,}` files left\n"
-        f"• **Skipped Recheck Engine:** `{recheck_str}`\n"
+        f"• **Skipped Checking Mode:** `{recheck_str}`\n"
         f"• **Estimated Completion Time (ETA):** `{meta_eta_string}`\n\n"
         f"💡 *Note: The Recheck Engine safely scans failed files and will auto-pause if new pending files arrive.*"
     )
 
-    fast_status = "⚡ Fast Mode: ON" if is_fast_mode_active() else "🐢 Fast Mode: OFF"
-    recheck_btn = "⏹ Stop Recheck" if is_recheck_mode_active() else "🔄 Recheck Skipped"
+    fast_status = "⚡ Fast Mode: ON" if is_fast else "🐢 Fast Mode: OFF"
+    recheck_btn = "⏹ Stop Recheck" if is_recheck else "🔄 Recheck Skipped"
 
     buttons = [
         [
