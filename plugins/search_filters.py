@@ -403,7 +403,7 @@ async def send_search_display(
     g_sett = await db.get_group_settings(chat_id) if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP] else {}
     is_ephemeral_on = g_sett.get("ephemeral_enabled", False)
 
-    # 1. GROUP WITH EPHEMERAL ON
+    # 1. GROUP WITH EPHEMERAL ON (Now sending safely to Private Messages)
     if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP] and is_ephemeral_on:
         async with GROUP_THROTTLE_LOCKS[chat_id]:
             now = time.time()
@@ -411,31 +411,45 @@ async def send_search_display(
             if time_since_last < 3.0:
                 await asyncio.sleep(3.0 - time_since_last)
 
-            # Send ephemeral matrix card to the searcher
+            pm_failed = False
+            
+            # Send the matrix card safely to the user's Private Messages (DMs)
             if is_text_only:
                 try:
                     await client.send_message(
-                        chat_id=chat_id, text=content, reply_markup=markup, 
-                        disable_web_page_preview=True, receiver_user_id=user_id
+                        chat_id=user_id, text=content, reply_markup=markup, 
+                        disable_web_page_preview=True
                     )
-                except Exception: pass
+                except Exception: 
+                    pm_failed = True
             else:
                 try:
                     await client.send_photo(
-                        chat_id=chat_id, photo=metadata["poster"], caption=content, 
-                        reply_markup=markup, receiver_user_id=user_id
+                        chat_id=user_id, photo=metadata["poster"], caption=content, 
+                        reply_markup=markup
                     )
-                except Exception: pass
+                except Exception: 
+                    pm_failed = True
 
             # Send clean public receipt to the group
-            public_text = (
-                f"🎬 **{metadata['title']}**\n"
-                f"✅ Found `{len(filtered_results)}` matching files.\n\n"
-                f"👻 _Results were sent privately to the requester's screen to keep the chat clean!_"
-            )
-            public_markup = InlineKeyboardMarkup([
-                [InlineKeyboardButton("👁️ Show Me Too (VIP)", callback_data=f"fuz_{query[:40]}")]
-            ])
+            if pm_failed:
+                public_text = (
+                    f"🎬 **{metadata['title']}**\n"
+                    f"✅ Found `{len(filtered_results)}` matching files.\n\n"
+                    f"⚠️ **Error:** I tried to send the files privately, but you haven't started me in PM yet!"
+                )
+                public_markup = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🤖 Click Here to Start Me", url=f"https://t.me/{client.me.username}?start=start")]
+                ])
+            else:
+                public_text = (
+                    f"🎬 **{metadata['title']}**\n"
+                    f"✅ Found `{len(filtered_results)}` matching files.\n\n"
+                    f"👻 _Results were sent to your Private Messages to keep the chat clean!_"
+                )
+                public_markup = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("👁️ Show Me Too (VIP)", callback_data=f"fuz_{query[:40]}")]
+                ])
             
             msg = await client.send_message(
                 chat_id=chat_id, text=public_text, reply_markup=public_markup,
