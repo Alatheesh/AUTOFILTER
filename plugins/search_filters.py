@@ -5,6 +5,8 @@ import json
 import urllib.parse
 import hashlib
 import aiohttp
+import asyncio
+from collections import defaultdict
 from pyrogram import Client
 from pyrogram.enums import ChatType, ButtonStyle
 from pyrogram.types import (
@@ -16,6 +18,10 @@ from config import Config
 
 MB = 1024 * 1024
 GB = 1024 * MB
+
+# 🌟 THE ADAPTIVE SPEED CONTROLLER
+GROUP_LAST_SENT = defaultdict(float)
+GROUP_THROTTLE_LOCKS = defaultdict(asyncio.Lock)
 
 # ==========================================
 # 📏 SIZE FILTER MAPPING
@@ -393,22 +399,68 @@ async def send_search_display(
             bulk_btn, chat_type, settings
         )
 
-    if is_text_only:
-        try:
+    # Check if the group has Ephemeral Mode enabled
+    g_sett = await db.get_group_settings(chat_id) if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP] else {}
+    is_ephemeral_on = g_sett.get("ephemeral_enabled", False)
+
+    # 1. GROUP WITH EPHEMERAL ON
+    if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP] and is_ephemeral_on:
+        async with GROUP_THROTTLE_LOCKS[chat_id]:
+            now = time.time()
+            time_since_last = now - GROUP_LAST_SENT[chat_id]
+            if time_since_last < 3.0:
+                await asyncio.sleep(3.0 - time_since_last)
+
+            # Send ephemeral matrix card to the searcher
+            if is_text_only:
+                try:
+                    await client.send_message(
+                        chat_id=chat_id, text=content, reply_markup=markup, 
+                        disable_web_page_preview=True, receiver_user_id=user_id
+                    )
+                except Exception: pass
+            else:
+                try:
+                    await client.send_photo(
+                        chat_id=chat_id, photo=metadata["poster"], caption=content, 
+                        reply_markup=markup, receiver_user_id=user_id
+                    )
+                except Exception: pass
+
+            # Send clean public receipt to the group
+            public_text = (
+                f"🎬 **{metadata['title']}**\n"
+                f"✅ Found `{len(filtered_results)}` matching files.\n\n"
+                f"👻 _Results were sent privately to the requester's screen to keep the chat clean!_"
+            )
+            public_markup = InlineKeyboardMarkup([
+                [InlineKeyboardButton("👁️ Show Me Too (VIP)", callback_data=f"fuz_{query[:40]}")]
+            ])
+            
             msg = await client.send_message(
-                chat_id=chat_id, text=content, reply_markup=markup, 
-                disable_web_page_preview=True, reply_parameters=ReplyParameters(message_id=message_id)
+                chat_id=chat_id, text=public_text, reply_markup=public_markup,
+                reply_parameters=ReplyParameters(message_id=message_id)
             )
-        except Exception:
-            msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup, disable_web_page_preview=True)
+            GROUP_LAST_SENT[chat_id] = time.time()
+
+    # 2. STANDARD PUBLIC GROUP OR PRIVATE MESSAGE
     else:
-        try:
-            msg = await client.send_photo(
-                chat_id=chat_id, photo=metadata["poster"], caption=content, 
-                reply_markup=markup, reply_parameters=ReplyParameters(message_id=message_id)
-            )
-        except Exception:
-            msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup)
+        if is_text_only:
+            try:
+                msg = await client.send_message(
+                    chat_id=chat_id, text=content, reply_markup=markup, 
+                    disable_web_page_preview=True, reply_parameters=ReplyParameters(message_id=message_id)
+                )
+            except Exception:
+                msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup, disable_web_page_preview=True)
+        else:
+            try:
+                msg = await client.send_photo(
+                    chat_id=chat_id, photo=metadata["poster"], caption=content, 
+                    reply_markup=markup, reply_parameters=ReplyParameters(message_id=message_id)
+                )
+            except Exception:
+                msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup)
 
     if settings.get("filter_delete_enabled", False):
         from plugins.advanced import trigger_ghost_self_destruct
