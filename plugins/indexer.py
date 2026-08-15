@@ -63,307 +63,194 @@ async def auto_indexer(client: Client, message: Message):
 # ==========================================
 # 🛠️ HELPER: TRIGGER INDEXING JOB
 # ==========================================
-async def trigger_indexing_job(
-    client: Client,
-    message: Message,
-    target_chat,
-    prompt_msg_id=None,
-    known_msg_id=None
-):
-    """
-    Resolves the target channel and creates the normal indexing job.
-
-    Behavior:
-    - Public channel: indexes directly; bot does NOT need to be an admin.
-    - Private channel: bot MUST be an administrator.
-    - If a file was forwarded from anywhere in the channel, its message ID is
-      used only to identify the correct channel. It is NOT used as the indexing
-      ceiling.
-    - The newest existing message is obtained directly from chat history.
-      Deleted messages/gaps therefore do not require probing.
-    - Database/indexing worker behavior is unchanged.
-    """
-
+async def trigger_indexing_job(client: Client, message: Message, target_chat, prompt_msg_id=None, known_msg_id=None):
+    """Processes the target chat, finds the absolute latest message, and queues the job."""
+    
     extracted_msg_id = None
-
-    # ==========================================
-    # ADVANCED LINK PARSER
-    # ==========================================
+    
+    # 🚀 Advanced Link Parser 
     if isinstance(target_chat, str):
         target_chat = target_chat.strip()
-
         if "t.me/" in target_chat:
             parts = target_chat.split("t.me/")[1].split("?")[0].split("/")
-
             if parts[0] == "c" and len(parts) > 1:
                 target_chat = f"-100{parts[1]}"
-
                 if len(parts) > 2 and parts[2].isdigit():
                     extracted_msg_id = int(parts[2])
-
             else:
                 target_chat = f"@{parts[0]}"
-
                 if len(parts) > 1 and parts[1].isdigit():
                     extracted_msg_id = int(parts[1])
-
-        elif (
-            not target_chat.startswith("@")
-            and not target_chat.replace("-", "").isdigit()
-        ):
+        elif not target_chat.startswith("@") and not target_chat.replace("-", "").isdigit():
             target_chat = f"@{target_chat}"
 
     if extracted_msg_id and not known_msg_id:
         known_msg_id = extracted_msg_id
 
-    try:
-        target_chat = int(target_chat)
-    except (ValueError, TypeError):
-        pass
+    try: target_chat = int(target_chat)
+    except ValueError: pass
 
-    # ==========================================
-    # RESOLVE CHANNEL
-    # ==========================================
     try:
         chat_info = await client.get_chat(target_chat)
-
         target_chat_name = chat_info.title or str(target_chat)
-        target_chat_id = (
-            f"@{chat_info.username}"
-            if chat_info.username
-            else chat_info.id
-        )
-
+        target_chat_id = f"@{chat_info.username}" if chat_info.username else chat_info.id
+            
     except PeerIdInvalid:
         err = (
-            f"❌ **Error: Cannot locate chat `{target_chat}`.**\n\n"
-            f"**For a public channel:**\n"
-            f"• Send its `@username` or public link.\n\n"
-            f"**For a private channel:**\n"
-            f"• Add the bot to the channel as an **Administrator**, "
-            f"then try again."
+            f"❌ **Error: Cannot locate chat `{target_chat}` in memory.**\n\n"
+            f"**The Fix:**\n"
+            f"• If it's a **Public Channel**, please provide its `@username` or link instead of its numeric ID.\n"
+            f"• If it's a **Private Channel**, you MUST either add the bot as an admin OR forward a file from it first!"
         )
-
-        if prompt_msg_id:
-            await client.edit_message_text(
-                message.chat.id,
-                prompt_msg_id,
-                err
-            )
-        else:
-            await message.reply_text(err)
-
+        if prompt_msg_id: await client.edit_message_text(message.chat.id, prompt_msg_id, err)
+        else: await message.reply_text(err)
         return
-
     except Exception as e:
-        logger.error(
-            f"Error resolving target chat {target_chat}: {e}",
-            exc_info=True
-        )
-
-        err = (
-            f"❌ **Error Accessing Chat:** `{target_chat}`\n\n"
-            f"Make sure the channel is valid and accessible.\n"
-            f"Error: `{e}`"
-        )
-
-        if prompt_msg_id:
-            await client.edit_message_text(
-                message.chat.id,
-                prompt_msg_id,
-                err
-            )
-        else:
-            await message.reply_text(err)
-
+        err = f"❌ **Error Accessing Chat:** `{target_chat}`\nMake sure it is a valid public channel, or that the bot is an admin!\n`{e}`"
+        if prompt_msg_id: await client.edit_message_text(message.chat.id, prompt_msg_id, err)
+        else: await message.reply_text(err)
         return
 
-    # ==========================================
-    # PUBLIC vs PRIVATE CHANNEL
-    # ==========================================
-    # Public channel => has a username.
-    # Private channel => no public username.
-    is_private_channel = not bool(chat_info.username)
-
-    if is_private_channel:
+    # 🔒 PRIVATE CHANNEL CHECK — ONLY ADDED FOR PRIVATE CHANNELS.
+    # Public-channel behavior remains exactly as before.
+    if not getattr(chat_info, "username", None):
         try:
             me = await client.get_me()
-
-            member = await client.get_chat_member(
-                target_chat_id,
-                me.id
-            )
-
-            member_status = str(
-                getattr(member, "status", "")
-            ).lower()
+            member = await client.get_chat_member(target_chat_id, me.id)
+            member_status = str(getattr(member, "status", "")).lower()
 
             if member_status not in ("administrator", "owner"):
                 err = (
-                    f"🔒 **Private Channel Detected**\n\n"
-                    f"Channel: `{target_chat_name}`\n\n"
-                    f"The bot must be added to this private channel "
-                    f"as an **Administrator** before indexing can start.\n\n"
-                    f"After making the bot an admin, run `/index` again "
-                    f"or forward a file from the channel and reply `/index`."
+                    f"🔒 **Private Channel**\n\n"
+                    f"`{target_chat_name}` is a private channel.\n\n"
+                    f"Please add the bot as an **Administrator** in the channel "
+                    f"and then try `/index` again."
                 )
-
                 if prompt_msg_id:
                     await client.edit_message_text(
-                        message.chat.id,
-                        prompt_msg_id,
-                        err
+                        message.chat.id, prompt_msg_id, err
                     )
                 else:
                     await message.reply_text(err)
-
                 return
 
         except Exception as e:
             logger.warning(
                 f"Private channel admin check failed for "
-                f"{target_chat_name} ({target_chat_id}): {e}"
+                f"{target_chat_name}: {e}"
             )
-
             err = (
-                f"🔒 **Private Channel Requires Administration**\n\n"
-                f"Channel: `{target_chat_name}`\n\n"
-                f"Please add the bot to this channel as an "
-                f"**Administrator** with permission to access messages, "
-                f"then try `/index` again."
+                f"🔒 **Private Channel**\n\n"
+                f"`{target_chat_name}` is private and the bot could not "
+                f"verify administrator access.\n\n"
+                f"Please add the bot as an **Administrator** and try again."
             )
-
             if prompt_msg_id:
                 await client.edit_message_text(
-                    message.chat.id,
-                    prompt_msg_id,
-                    err
+                    message.chat.id, prompt_msg_id, err
                 )
             else:
                 await message.reply_text(err)
-
             return
 
-    # ==========================================
-    # FIND THE NEWEST EXISTING MESSAGE
-    # ==========================================
-    # IMPORTANT:
-    # `known_msg_id` from a forwarded file is ONLY a reference that
-    # identifies the channel. We intentionally do NOT use it as the
-    # indexing ceiling because the forwarded file may be from the
-    # middle of the channel.
-    #
-    # We ask Telegram for the newest existing message directly.
-    # Deleted messages/gaps do not matter.
     actual_last_msg_id = None
-
+    
+    # 🚀 METHOD A: Standard History Request (Works if bot is Admin)
     try:
-        if prompt_msg_id:
-            await client.edit_message_text(
-                message.chat.id,
-                prompt_msg_id,
-                "🔄 **Finding the latest message in the channel...**"
-            )
-
-        async for latest_message in client.get_chat_history(
-            target_chat_id,
-            limit=1
-        ):
-            if latest_message and not getattr(
-                latest_message,
-                "empty",
-                False
-            ):
-                actual_last_msg_id = latest_message.id
-                break
-
-    except FloodWait as fw:
-        logger.warning(
-            f"FloodWait while finding latest message in "
-            f"{target_chat_name}: {fw.value}s"
-        )
-
-        if prompt_msg_id:
-            await client.edit_message_text(
-                message.chat.id,
-                prompt_msg_id,
-                f"⏳ **Telegram rate limit reached.**\n\n"
-                f"Please try again after `{fw.value}` seconds."
-            )
-        else:
-            await message.reply_text(
-                f"⏳ Telegram rate limit reached. "
-                f"Please try again after `{fw.value}` seconds."
-            )
-
-        return
-
-    except Exception as e:
-        logger.error(
-            f"Failed to find latest message in "
-            f"{target_chat_name}: {e}",
-            exc_info=True
-        )
-
-    # ==========================================
-    # FALLBACK
-    # ==========================================
-    # Only use the forwarded/direct-link message as a fallback if
-    # Telegram did not return chat history. This preserves the old
-    # behavior without making it the normal path.
-    if not actual_last_msg_id and known_msg_id:
-        actual_last_msg_id = known_msg_id
-
+        async for m in client.get_chat_history(target_chat_id, limit=1):
+            actual_last_msg_id = m.id
+            break
+    except Exception:
+        pass 
+        
+    # 🚀 METHOD B: The "Ascending Radar Probe" (WITH GAP JUMPER)
     if not actual_last_msg_id:
-        err = (
-            f"❌ **Cannot find messages in `{target_chat_name}`.**\n\n"
-            f"Please make sure:\n"
-            f"• The public channel is accessible, or\n"
-            f"• The private channel has the bot as an Administrator."
-        )
+        try:
+            if prompt_msg_id: 
+                await client.edit_message_text(message.chat.id, prompt_msg_id, "📡 **Bypassing Security... Probing for the newest post...**")
+            
+            probe_id = known_msg_id if known_msg_id else 1
+            last_good_id = probe_id
+            
+            # 1. Aggressive Jump (+1000) - Tolerates up to 50,000 deleted messages!
+            empty_streak = 0
+            while True:
+                msg = await client.get_messages(target_chat_id, probe_id + 1000)
+                if not msg or getattr(msg, "empty", False):
+                    empty_streak += 1
+                    if empty_streak >= 50: # If we hit 50 empty gaps in a row, it's definitely the end.
+                        break
+                else:
+                    empty_streak = 0
+                    last_good_id = probe_id + 1000
+                probe_id += 1000
+                await asyncio.sleep(0.1) # Safety delay
+            
+            # Revert to highest confirmed ID to start moderate jumps
+            probe_id = last_good_id
+                
+            # 2. Moderate Jump (+100) - Tolerates up to 2,000 deleted messages
+            empty_streak = 0
+            while True:
+                msg = await client.get_messages(target_chat_id, probe_id + 100)
+                if not msg or getattr(msg, "empty", False):
+                    empty_streak += 1
+                    if empty_streak >= 20:
+                        break
+                else:
+                    empty_streak = 0
+                    last_good_id = probe_id + 100
+                probe_id += 100
+                await asyncio.sleep(0.1)
+                
+            probe_id = last_good_id
 
-        if prompt_msg_id:
-            await client.edit_message_text(
-                message.chat.id,
-                prompt_msg_id,
-                err
-            )
+            # 3. Fine Tuning (+10)
+            empty_streak = 0
+            while True:
+                msg = await client.get_messages(target_chat_id, probe_id + 10)
+                if not msg or getattr(msg, "empty", False):
+                    empty_streak += 1
+                    if empty_streak >= 10:
+                        break
+                else:
+                    empty_streak = 0
+                    last_good_id = probe_id + 10
+                probe_id += 10
+                await asyncio.sleep(0.1)
+
+            # Set ceiling to highest verified ID + safety buffer
+            actual_last_msg_id = last_good_id + 50 
+            
+        except Exception as e:
+            logger.error(f"Ascending Radar Probe failed: {e}")
+            pass
+
+    # FALLBACK
+    if not actual_last_msg_id:
+        if known_msg_id:
+            actual_last_msg_id = known_msg_id
         else:
-            await message.reply_text(err)
+            err = (
+                "❌ **Telegram Security Block:** I cannot scan this channel from the outside.\n\n"
+                "**How to Fix This:**\n"
+                "1️⃣ Add me to the channel as an Admin, OR\n"
+                "2️⃣ **Forward the absolute newest file** from the channel to me, OR\n"
+                "3️⃣ Send a **direct link** to the newest post (e.g., `t.me/ChannelName/1500`)."
+            )
+            if prompt_msg_id: await client.edit_message_text(message.chat.id, prompt_msg_id, err)
+            else: await message.reply_text(err)
+            return
 
-        return
-
-    # ==========================================
-    # CREATE THE EXISTING DATABASE INDEX JOB
-    # ==========================================
-    success = await db.add_index_job(
-        target_chat_id,
-        target_chat_name,
-        actual_last_msg_id
-    )
+    success = await db.add_index_job(target_chat_id, target_chat_name, actual_last_msg_id)
 
     if success:
-        msg_text = (
-            f"✅ **Job Queued Successfully!**\n\n"
-            f"Channel: `{target_chat_name}`\n"
-            f"Starting from newest message: `{actual_last_msg_id}`\n\n"
-            f"The bot will safely process the channel in the "
-            f"background."
-        )
+        msg_text = f"✅ **Job Queued Successfully!**\n\nChannel: `{target_chat_name}`\nTargeting ~`{actual_last_msg_id}` messages.\n\nThe bot will safely process this in the background."
     else:
-        msg_text = (
-            f"⚠️ **Job Started / Reset!**\n\n"
-            f"The bot is processing `{target_chat_name}`."
-        )
-
-    if prompt_msg_id:
-        await client.edit_message_text(
-            message.chat.id,
-            prompt_msg_id,
-            msg_text
-        )
-    else:
-        await message.reply_text(msg_text)
+        msg_text = f"⚠️ **Job Started / Reset!**\n\nThe bot is processing `{target_chat_name}`."
+        
+    if prompt_msg_id: await client.edit_message_text(message.chat.id, prompt_msg_id, msg_text)
+    else: await message.reply_text(msg_text)
 
 
 @Client.on_message(filters.command("cancel_index") & filters.user(Config.ADMINS))
