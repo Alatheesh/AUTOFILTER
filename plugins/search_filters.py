@@ -91,6 +91,8 @@ async def get_filter_settings(user_id: int, chat_id: int, chat_type):
             return "interactive", g_sett.get("language_lock", "all"), g_sett.get("size_lock", "all")
         elif g_mode == "force_hypertext":
             return "hypertext", "all", "all"
+        elif g_mode == "force_matrix":
+            return "matrix", "all", "all"
             
     # Fallback to User's personal settings
     u_sett = await db.get_user_settings(user_id)
@@ -228,7 +230,6 @@ def render_interactive_mode(results, filtered_results, metadata, user_id, bot_us
 
 
 # --- 3. HYPERTEXT (TEXT-LINK) MODE LAYOUT ---
-# --- 3. HYPERTEXT (TEXT-LINK) MODE LAYOUT ---
 def render_hypertext_mode(results, filtered_results, metadata, user_id, bot_username, session_token, query, page, total_pages, shortener_on, color_mode, bulk_btn, chat_type, settings):
     text = f"🍿 <u>**{metadata['title']} ({metadata['release_date'][:4]})**</u>\n"
     text += f"⭐️ **Rating:** `{metadata['rating']}` | 🗣 `{metadata['language']}`\n\n"
@@ -267,6 +268,78 @@ def render_hypertext_mode(results, filtered_results, metadata, user_id, bot_user
     return text, InlineKeyboardMarkup(buttons) if buttons else None, True
 
 
+# --- 4. COMPACT KEYPAD (MATRIX) MODE LAYOUT ---
+def render_matrix_mode(results, filtered_results, metadata, user_id, bot_username, session_token, query, page, total_pages, shortener_on, color_mode, bulk_btn, chat_type, settings):
+    text = (
+        f"🎬 **{metadata['title']}** ({metadata['release_date'][:4]})\n"
+        f"⭐️ **Rating:** `{metadata['rating']}` | 🎭 `{metadata['genre']}`\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+    )
+
+    number_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+    
+    for idx, file in enumerate(results):
+        emoji = number_emojis[idx] if idx < 10 else str(idx + 1)
+        f_size = format_size(file.get('size', 0))
+        f_title = file.get('title', 'Unknown File')
+        
+        audio = str(file.get("language", "unknown")).title()
+        if audio == "Pending": audio = "Scanning..."
+        
+        subs = str(file.get("subtitle", "none")).title()
+        if subs == "Pending": subs = "Scanning..."
+        
+        text += f"{emoji} <b>[{f_size}]</b> <code>{f_title}</code>\n"
+        text += f"   ┗ 🔊 <b>{audio}</b> | 💬 <b>{subs}</b>\n\n"
+        
+    text += f"━━━━━━━━━━━━━━━━━━\n🔍 **Found:** `{len(filtered_results)}` matching files."
+
+    buttons = []
+    if bulk_btn:
+        buttons.append([bulk_btn])
+        
+    buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
+
+    numeric_rows = []
+    current_row = []
+    for idx, file in enumerate(results):
+        db_id = str(file.get("_id", ""))
+        display_num = str(idx + 1)
+        
+        if shortener_on:
+            btn = style_btn(color_mode, ButtonStyle.PRIMARY, text=display_num, url=f"https://t.me/{bot_username}?start=getfile_{db_id}")
+        else:
+            btn = style_btn(color_mode, ButtonStyle.PRIMARY, text=display_num, callback_data=f"sendfile_{session_token}_{user_id}_{db_id}")
+            
+        current_row.append(btn)
+        if len(current_row) == 5:
+            numeric_rows.append(current_row)
+            current_row = []
+            
+    if current_row:
+        numeric_rows.append(current_row)
+        
+    buttons.extend(numeric_rows)
+
+    if len(filtered_results) > 10:
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(style_btn(color_mode, ButtonStyle.DANGER, text="◀️ Prev", callback_data=f"prev_{session_token}_{user_id}_{page - 1}_{query}"))
+            
+        nav_buttons.append(style_btn(color_mode, ButtonStyle.SUCCESS, text=f"Page {page + 1}/{total_pages}", callback_data="pages_info"))
+        
+        if len(filtered_results) > (page + 1) * 10:
+            nav_buttons.append(style_btn(color_mode, ButtonStyle.DANGER, text="Next ▶️", callback_data=f"next_{session_token}_{user_id}_{page + 1}_{query}"))
+            
+        buttons.append(nav_buttons)
+
+    if settings.get("filter_delete_enabled", False):
+        m_time = settings.get("filter_delete_time", 5)
+        text += f"\n\n⏳ *Note: This message auto-deletes in {m_time} minutes.*"
+
+    return text, InlineKeyboardMarkup(buttons) if buttons else None, False
+
+
 # ==========================================
 # 🚀 MASTER RENDER & DISPATCH ENGINE
 # ==========================================
@@ -295,7 +368,13 @@ async def send_search_display(
     results = filtered_results[page * 10 : (page + 1) * 10]
     total_pages = math.ceil(len(filtered_results) / 10)
 
-    if mode == "hypertext":
+    if mode == "matrix":
+        content, markup, is_text_only = render_matrix_mode(
+            results, filtered_results, metadata, user_id, client.me.username, 
+            session_token, query, page, total_pages, shortener_on, color_mode, 
+            bulk_btn, chat_type, settings
+        )
+    elif mode == "hypertext":
         content, markup, is_text_only = render_hypertext_mode(
             results, filtered_results, metadata, user_id, client.me.username, 
             session_token, query, page, total_pages, shortener_on, color_mode, 
@@ -362,7 +441,13 @@ async def update_pagination_display(
     results = filtered_results[page * 10 : (page + 1) * 10]
     total_pages = math.ceil(len(filtered_results) / 10)
 
-    if mode == "hypertext":
+    if mode == "matrix":
+        content, markup, is_text_only = render_matrix_mode(
+            results, filtered_results, metadata, user_id, client.me.username, 
+            session_token, base_query, page, total_pages, shortener_on, color_mode, 
+            bulk_btn, chat_type, settings
+        )
+    elif mode == "hypertext":
         content, markup, is_text_only = render_hypertext_mode(
             results, filtered_results, metadata, user_id, client.me.username, 
             session_token, base_query, page, total_pages, shortener_on, color_mode, 
