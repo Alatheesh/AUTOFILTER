@@ -218,7 +218,12 @@ async def settings_router(client: Client, message: Message):
         elif c_mode == "force_on": color_btn = InlineKeyboardButton("Colors: Forced ON 🔄", callback_data=f"gset_color_force_off_{message.chat.id}", style=ButtonStyle.PRIMARY)
         else: color_btn = InlineKeyboardButton("Colors: Forced OFF 🔄", callback_data=f"gset_color_let_members_choose_{message.chat.id}", style=ButtonStyle.PRIMARY)
 
+        # 🚀 ADDED EPHEMERAL CHECK
+        eph_enabled = g_sett.get("ephemeral_enabled", False)
+        eph_status = "🟢 ON" if eph_enabled else "🔴 OFF"
+
         buttons = [
+            [InlineKeyboardButton(f"👻 Ephemeral Mode: {eph_status}", callback_data=f"gset_eph_menu_{message.chat.id}", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton("🛡️ Moderation Rules Hub", callback_data=f"set_mod_local_{message.chat.id}", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton("📝 File Caption Settings", callback_data=f"set_caption_{message.chat.id}", style=ButtonStyle.PRIMARY)],
             [mode_btn],
@@ -342,7 +347,12 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         elif c_mode == "force_on": color_btn = InlineKeyboardButton("Colors: Forced ON 🔄", callback_data=f"gset_color_force_off_{c_id}", style=ButtonStyle.PRIMARY)
         else: color_btn = InlineKeyboardButton("Colors: Forced OFF 🔄", callback_data=f"gset_color_let_members_choose_{c_id}", style=ButtonStyle.PRIMARY)
 
+        # 🚀 ADDED EPHEMERAL CHECK
+        eph_enabled = g_sett.get("ephemeral_enabled", False)
+        eph_status = "🟢 ON" if eph_enabled else "🔴 OFF"
+
         buttons = [
+            [InlineKeyboardButton(f"👻 Ephemeral Mode: {eph_status}", callback_data=f"gset_eph_menu_{c_id}", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton("🛡️ Moderation Rules Hub", callback_data=f"set_mod_local_{c_id}", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton("📝 File Caption Settings", callback_data=f"set_caption_{c_id}", style=ButtonStyle.PRIMARY)],
             [mode_btn],
@@ -403,6 +413,47 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
     if data.startswith("gset_l_"):
         await db.update_group_setting(int(data.split("_")[3]), "language_lock", data.split("_")[2]); query.data = f"gset_interactive_menu_{data.split('_')[3]}"; return await menus_callback_handler(client, query)
 
+    # ==========================================
+    # 👻 EPHEMERAL EXPLANATION & TOGGLE MENU
+    # ==========================================
+    if data.startswith("gset_eph_menu_"):
+        chat_id = int(data.split("_")[-1])
+        g_sett = await db.get_group_settings(chat_id)
+        is_on = g_sett.get("ephemeral_enabled", False)
+        status_text = "🟢 **ENABLED**" if is_on else "🔴 **DISABLED**"
+
+        text = (
+            f"👻 **Ephemeral Mode Settings**\n\n"
+            f"**What is Ephemeral Mode?**\n"
+            f"When enabled, movie search results and download buttons in this group will appear as **private ghost messages** visible **only to the person who searched**.\n\n"
+            f"✨ **Why use this?**\n"
+            f"• **Clean Chat:** Keeps your group free from spam and long movie lists.\n"
+            f"• **Silent Search:** Other members won't be disturbed by huge posters and buttons.\n"
+            f"• **Fast & Safe:** Prevents the group from hitting Telegram rate limits.\n\n"
+            f"📊 **Current Status:** {status_text}"
+        )
+
+        buttons = [
+            [
+                InlineKeyboardButton(f"{'✅ ' if is_on else ''}🟢 Turn ON", callback_data=f"gset_eph_set_on_{chat_id}", style=ButtonStyle.SUCCESS),
+                InlineKeyboardButton(f"{'✅ ' if not is_on else ''}🔴 Turn OFF", callback_data=f"gset_eph_set_off_{chat_id}", style=ButtonStyle.DANGER)
+            ],
+            [InlineKeyboardButton("🔙 Back to Group Settings", callback_data=f"tier_gmanage_{chat_id}", style=ButtonStyle.PRIMARY)]
+        ]
+        return await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+    if data.startswith("gset_eph_set_"):
+        parts = data.split("_")
+        action_state = parts[3]  # "on" or "off"
+        chat_id = int(parts[4])
+        
+        new_val = (action_state == "on")
+        await db.update_group_setting(chat_id, "ephemeral_enabled", new_val)
+        await query.answer(f"Ephemeral Mode is now {'ON 🟢' if new_val else 'OFF 🔴'}!", show_alert=False)
+        
+        query.data = f"gset_eph_menu_{chat_id}"
+        return await menus_callback_handler(client, query)
+    
     if data == "tier_root_fallback":
         keyboard = [[InlineKeyboardButton(text="👤 Personal Search Settings", callback_data="tier_user_home", style=ButtonStyle.PRIMARY)]]
         if await db.get_connected_groups(user_id): keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list", style=ButtonStyle.PRIMARY)])
