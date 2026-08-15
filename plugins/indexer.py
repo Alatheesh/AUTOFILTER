@@ -111,48 +111,6 @@ async def trigger_indexing_job(client: Client, message: Message, target_chat, pr
         else: await message.reply_text(err)
         return
 
-    # 🔒 PRIVATE CHANNEL CHECK — ONLY ADDED FOR PRIVATE CHANNELS.
-    # Public-channel behavior remains exactly as before.
-    if not getattr(chat_info, "username", None):
-        try:
-            me = await client.get_me()
-            member = await client.get_chat_member(target_chat_id, me.id)
-            member_status = str(getattr(member, "status", "")).lower()
-
-            if member_status not in ("administrator", "owner"):
-                err = (
-                    f"🔒 **Private Channel**\n\n"
-                    f"`{target_chat_name}` is a private channel.\n\n"
-                    f"Please add the bot as an **Administrator** in the channel "
-                    f"and then try `/index` again."
-                )
-                if prompt_msg_id:
-                    await client.edit_message_text(
-                        message.chat.id, prompt_msg_id, err
-                    )
-                else:
-                    await message.reply_text(err)
-                return
-
-        except Exception as e:
-            logger.warning(
-                f"Private channel admin check failed for "
-                f"{target_chat_name}: {e}"
-            )
-            err = (
-                f"🔒 **Private Channel**\n\n"
-                f"`{target_chat_name}` is private and the bot could not "
-                f"verify administrator access.\n\n"
-                f"Please add the bot as an **Administrator** and try again."
-            )
-            if prompt_msg_id:
-                await client.edit_message_text(
-                    message.chat.id, prompt_msg_id, err
-                )
-            else:
-                await message.reply_text(err)
-            return
-
     actual_last_msg_id = None
     
     # 🚀 METHOD A: Standard History Request (Works if bot is Admin)
