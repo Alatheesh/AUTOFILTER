@@ -7,6 +7,7 @@ from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBu
 from rapidfuzz import process, fuzz
 from database.multi_db import db
 from config import Config
+from plugins.vip_system import check_vip_status  # 🚀 Added VIP Import
 
 logger = logging.getLogger(__name__)
 
@@ -130,19 +131,30 @@ async def get_imdb_poster_fallback(movie_name):
 # ==========================================
 @Client.on_callback_query(filters.regex(r"^(fuz_|fuzzy_)"))
 async def handle_all_fuzzy_clicks(client: Client, callback: CallbackQuery):
+    user_id = callback.from_user.id
+    
+    # 🌟 1. VIP PAYWALL FOR THE "SHOW ME TOO" BUTTON
+    if callback.data.startswith("fuz_"):
+        is_vip, _ = await check_vip_status(user_id)
+        if not is_vip:
+            return await callback.answer(
+                "⭐ 'Show Me Too' is a VIP Exclusive feature! Use /buyvip in my PMs to unlock instant group access.", 
+                show_alert=True
+            )
+            
+    # 🌟 2. PRE-ANSWER TO PREVENT LOADING SPINNER TIMEOUTS DURING QUEUES
+    await callback.answer(f"⏳ Processing your request. If traffic is high, this may take a moment...", show_alert=False)
+
     if callback.data.startswith("fuzzy_"):
         correct_name = callback.data.split("fuzzy_", 1)[1]
     else:
         correct_name = callback.data.split("fuz_", 1)[1]
         
-    # 1. Answer the callback to stop the loading circle (BUTTONS WILL NOT BE DELETED)
-    await callback.answer(f"🔍 Fetching: {correct_name}...", show_alert=False)
-    
-    # 2. Clean the query
+    # Clean the query
     clean_query = re.sub(r"[_+\[\]\(\)\{\}\-.:']", " ", correct_name)
     clean_query = " ".join(clean_query.split())
     
-    # 3. Trick the bot into executing a normal search instantly!
+    # Trick the bot into executing a normal search instantly!
     message = callback.message
     message.text = clean_query
     message.from_user = callback.from_user 
