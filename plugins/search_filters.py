@@ -337,7 +337,7 @@ def render_matrix_mode(results, filtered_results, metadata, user_id, bot_usernam
         m_time = settings.get("filter_delete_time", 5)
         text += f"\n\n⏳ *Note: This message auto-deletes in {m_time} minutes.*"
 
-    return text, InlineKeyboardMarkup(buttons) if buttons else None, False
+    return text, InlineKeyboardMarkup(buttons) if buttons else None, True
 
 
 # ==========================================
