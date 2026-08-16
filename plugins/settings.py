@@ -181,7 +181,7 @@ async def admin_input_catcher(client: Client, message: Message):
         else:
             chat_id = int(scope)
             await db.set_custom_caption(chat_id, user_input, is_global=False)
-            back_callback = f"set_caption_{chat_id}" # 🚀 FIXED: Removed 'local_'
+            back_callback = f"set_caption_{chat_id}"
             
         await finish_input(f"✅ **Custom Caption Saved!**\n\nPreview:\n{user_input}", back_callback)
             
@@ -218,12 +218,7 @@ async def settings_router(client: Client, message: Message):
         elif c_mode == "force_on": color_btn = InlineKeyboardButton("Colors: Forced ON 🔄", callback_data=f"gset_color_force_off_{message.chat.id}", style=ButtonStyle.PRIMARY)
         else: color_btn = InlineKeyboardButton("Colors: Forced OFF 🔄", callback_data=f"gset_color_let_members_choose_{message.chat.id}", style=ButtonStyle.PRIMARY)
 
-        # 🚀 ADDED EPHEMERAL CHECK
-        eph_enabled = g_sett.get("ephemeral_enabled", False)
-        eph_status = "🟢 ON" if eph_enabled else "🔴 OFF"
-
         buttons = [
-            [InlineKeyboardButton(f"👻 Ephemeral Mode: {eph_status}", callback_data=f"gset_eph_menu_{message.chat.id}", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton("🛡️ Moderation Rules Hub", callback_data=f"set_mod_local_{message.chat.id}", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton("📝 File Caption Settings", callback_data=f"set_caption_{message.chat.id}", style=ButtonStyle.PRIMARY)],
             [mode_btn],
@@ -270,7 +265,7 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
     if data == "tier_user_home":
         u_sett = await db.get_user_settings(user_id)
         m = u_sett.get("search_mode", "default")
-        c = u_sett.get("color_mode", False) # 🎨 NEW
+        c = u_sett.get("color_mode", False)
         buttons = [
             [InlineKeyboardButton(text=f"{'✅' if m=='default' else '❌'} Default Mode", callback_data="uset_mode_default", style=ButtonStyle.PRIMARY), InlineKeyboardButton(text=f"{'✅' if m=='interactive' else '❌'} Interactive Mode", callback_data="uset_mode_interactive", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton(text=f"{'✅' if m=='hypertext' else '❌'} HyperText Mode", callback_data="uset_mode_hypertext", style=ButtonStyle.PRIMARY), InlineKeyboardButton(text=f"{'✅' if m=='matrix' else '❌'} Matrix Mode", callback_data="uset_mode_matrix", style=ButtonStyle.PRIMARY)], 
@@ -296,7 +291,6 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         await db.update_user_setting(user_id, "search_mode", "matrix")
         query.data = "tier_user_home"; return await menus_callback_handler(client, query)
 
-    # 🎨 NEW: Handler for Personal Color Toggle
     if data == "uset_toggle_color":
         u_sett = await db.get_user_settings(user_id)
         await db.update_user_setting(user_id, "color_mode", not u_sett.get("color_mode", False))
@@ -335,24 +329,17 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         mode = g_sett.get("search_mode", "let_members_choose")
         c_mode = g_sett.get("color_mode", "let_members_choose")
         
-        # 🔄 Cycle Logic for Layout (CALLBACK VERSION)
         if mode == "let_members_choose": mode_btn = InlineKeyboardButton("Layout: Let Members Choose 🔄", callback_data=f"gset_mode_force_default_{c_id}", style=ButtonStyle.PRIMARY)
         elif mode == "force_default": mode_btn = InlineKeyboardButton("Layout: Forced Default 🔄", callback_data=f"gset_mode_force_interactive_{c_id}", style=ButtonStyle.PRIMARY)
         elif mode == "force_interactive": mode_btn = InlineKeyboardButton("Layout: Forced Interactive 🔄", callback_data=f"gset_mode_force_hypertext_{c_id}", style=ButtonStyle.PRIMARY)
         elif mode == "force_hypertext": mode_btn = InlineKeyboardButton("Layout: Forced Matrix 🔄", callback_data=f"gset_mode_force_matrix_{c_id}", style=ButtonStyle.PRIMARY)
         else: mode_btn = InlineKeyboardButton("Layout: Forced Matrix 🔄", callback_data=f"gset_mode_let_members_choose_{c_id}", style=ButtonStyle.PRIMARY)
 
-        # 🎨 Cycle Logic for Colors
         if c_mode == "let_members_choose": color_btn = InlineKeyboardButton("Colors: Let Members Choose 🔄", callback_data=f"gset_color_force_on_{c_id}", style=ButtonStyle.PRIMARY)
         elif c_mode == "force_on": color_btn = InlineKeyboardButton("Colors: Forced ON 🔄", callback_data=f"gset_color_force_off_{c_id}", style=ButtonStyle.PRIMARY)
         else: color_btn = InlineKeyboardButton("Colors: Forced OFF 🔄", callback_data=f"gset_color_let_members_choose_{c_id}", style=ButtonStyle.PRIMARY)
 
-        # 🚀 ADDED EPHEMERAL CHECK
-        eph_enabled = g_sett.get("ephemeral_enabled", False)
-        eph_status = "🟢 ON" if eph_enabled else "🔴 OFF"
-
         buttons = [
-            [InlineKeyboardButton(f"👻 Ephemeral Mode: {eph_status}", callback_data=f"gset_eph_menu_{c_id}", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton("🛡️ Moderation Rules Hub", callback_data=f"set_mod_local_{c_id}", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton("📝 File Caption Settings", callback_data=f"set_caption_{c_id}", style=ButtonStyle.PRIMARY)],
             [mode_btn],
@@ -364,16 +351,15 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         try:
             return await query.message.edit_text(f"🛠️ **Remote Group Matrix Interface**", reply_markup=InlineKeyboardMarkup(buttons))
         except Exception:
-            return await query.answer() # CRASH PREVENTION: Ignores spam clicks silently
+            return await query.answer() 
 
     if data.startswith("gset_mode_"):
         chat_id = int(data.split("_")[-1])
-        # 🚀 THE FIX: Safely extract the mode name without hardcoding list checks
         target_mode = data.replace("gset_mode_", "").replace(f"_{chat_id}", "")
         
         g_sett = await db.get_group_settings(chat_id)
         if g_sett.get("search_mode") == target_mode:
-            return await query.answer("Already set to this mode!", show_alert=False) # CRASH PREVENTION
+            return await query.answer("Already set to this mode!", show_alert=False)
             
         await db.update_group_setting(chat_id, "search_mode", target_mode)
         await query.answer("Group layout policy updated.", show_alert=False)
@@ -387,7 +373,7 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
         
         g_sett = await db.get_group_settings(chat_id)
         if g_sett.get("color_mode") == target_mode:
-            return await query.answer("Already set to this mode!", show_alert=False) # CRASH PREVENTION
+            return await query.answer("Already set to this mode!", show_alert=False)
 
         await db.update_group_setting(chat_id, "color_mode", target_mode)
         await query.answer("Group color policy updated.", show_alert=False)
@@ -413,47 +399,6 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
     if data.startswith("gset_l_"):
         await db.update_group_setting(int(data.split("_")[3]), "language_lock", data.split("_")[2]); query.data = f"gset_interactive_menu_{data.split('_')[3]}"; return await menus_callback_handler(client, query)
 
-    # ==========================================
-    # 👻 EPHEMERAL EXPLANATION & TOGGLE MENU
-    # ==========================================
-    if data.startswith("gset_eph_menu_"):
-        chat_id = int(data.split("_")[-1])
-        g_sett = await db.get_group_settings(chat_id)
-        is_on = g_sett.get("ephemeral_enabled", False)
-        status_text = "🟢 **ENABLED**" if is_on else "🔴 **DISABLED**"
-
-        text = (
-            f"👻 **Ephemeral Mode Settings**\n\n"
-            f"**What is Ephemeral Mode?**\n"
-            f"When enabled, movie search results and download buttons in this group will appear as **private ghost messages** visible **only to the person who searched**.\n\n"
-            f"✨ **Why use this?**\n"
-            f"• **Clean Chat:** Keeps your group free from spam and long movie lists.\n"
-            f"• **Silent Search:** Other members won't be disturbed by huge posters and buttons.\n"
-            f"• **Fast & Safe:** Prevents the group from hitting Telegram rate limits.\n\n"
-            f"📊 **Current Status:** {status_text}"
-        )
-
-        buttons = [
-            [
-                InlineKeyboardButton(f"{'✅ ' if is_on else ''}🟢 Turn ON", callback_data=f"gset_eph_set_on_{chat_id}", style=ButtonStyle.SUCCESS),
-                InlineKeyboardButton(f"{'✅ ' if not is_on else ''}🔴 Turn OFF", callback_data=f"gset_eph_set_off_{chat_id}", style=ButtonStyle.DANGER)
-            ],
-            [InlineKeyboardButton("🔙 Back to Group Settings", callback_data=f"tier_gmanage_{chat_id}", style=ButtonStyle.PRIMARY)]
-        ]
-        return await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
-
-    if data.startswith("gset_eph_set_"):
-        parts = data.split("_")
-        action_state = parts[3]  # "on" or "off"
-        chat_id = int(parts[4])
-        
-        new_val = (action_state == "on")
-        await db.update_group_setting(chat_id, "ephemeral_enabled", new_val)
-        await query.answer(f"Ephemeral Mode is now {'ON 🟢' if new_val else 'OFF 🔴'}!", show_alert=False)
-        
-        query.data = f"gset_eph_menu_{chat_id}"
-        return await menus_callback_handler(client, query)
-    
     if data == "tier_root_fallback":
         keyboard = [[InlineKeyboardButton(text="👤 Personal Search Settings", callback_data="tier_user_home", style=ButtonStyle.PRIMARY)]]
         if await db.get_connected_groups(user_id): keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list", style=ButtonStyle.PRIMARY)])
@@ -489,7 +434,6 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         ]
         await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
-    # --- THE ADVANCED MODERATION HUB ---
     elif action.startswith("set_mod_"):
         parts = action.split("_")
         scope = parts[2]
@@ -565,7 +509,6 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
 
         await callback.message.edit_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data=back_btn)]]))
 
-    # --- CORE SETTINGS ---
     elif action == "set_inside":
         settings = await db.get_settings()
         status = "🟢 ON" if settings.get("inside_enabled", False) else "🔴 OFF"
@@ -682,7 +625,6 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         await db.update_settings({"requests_enabled": not settings.get("requests_enabled", True)})
         callback.data = "set_requests"; await settings_callbacks(client, callback)
 
-    # 🚀 UPGRADED: SEARCH & AUTO-DELETE HUB
     elif action == "set_autodelete":
         settings = await db.get_settings()
         
@@ -707,7 +649,6 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         ]
         await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
-    # 🚀 NEW: MULTI-SEARCH TOGGLE HANDLER
     elif action == "toggle_multisearch":
         settings = await db.get_settings()
         await db.update_settings({"multi_search_enabled": not settings.get("multi_search_enabled", True)})
@@ -732,11 +673,9 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
         ADMIN_STATE[user_id] = {"state": "setup_filter_time", "msg_id": callback.message.id, "timestamp": time.time()}
         await callback.message.edit_text("✏️ **Send the Search Result Auto-Delete time in MINUTES.**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="set_autodelete")]]))
 
-    # 📝 FILE CAPTION MENUS & LOGIC
     elif action.startswith("set_caption_"):
         scope = action.replace("set_caption_", "")
         
-        # Check if they have a custom caption currently
         if scope == "global":
             bot_settings = await db.settings.find_one({"_id": "bot_settings"})
             has_custom = bot_settings and bot_settings.get("custom_caption") is not None
@@ -839,7 +778,8 @@ async def clear_active_job(client: Client, message: Message):
 @Client.on_message(filters.command("userstats") & filters.user(Config.ADMINS))
 async def get_user_stats(client: Client, message: Message):
     total_users = await db.users.count_documents({})
-    total_muted, total_banned = await db.punishments.count_documents({"type": "mute"}), await db.punishments.count_documents({"type": "ban"})
+    total_muted = await db.punishments.count_documents({"type": "mute"})
+    total_banned = await db.punishments.count_documents({"type": "ban"})
     stats_text = f"📊 **Bot User Statistics**\n\n👥 Total Users: `{total_users}`\n🟢 Active Users: `{total_users - total_banned}`\n🔇 Total Muted: `{total_muted}`\n🚫 Total Banned: `{total_banned}`\n\n⚙️ **Admin Shortcuts:**\n`/mute <id> [time] [reason]`\n`/ban <id> [reason]`"
     await message.reply_text(stats_text)
     raise StopPropagation
@@ -857,8 +797,6 @@ async def get_stats_home_text_and_buttons():
 
 async def get_worker1_text_and_buttons():
     active_job = await db.get_active_job()
-    
-    # 🚀 NEW: Dynamically count how many channels are queued or processing
     queue_count = await db.jobs.count_documents({"status": {"$in": ["pending", "processing"]}})
     
     if active_job:
@@ -924,7 +862,6 @@ async def get_worker2_text_and_buttons():
     pending_meta = 0
     corrupted_count = 0
     
-    # 🚀 Accurately query the exact numbers directly from shards
     for coll in db.collections:
         pending_meta += await coll.count_documents({"language": "pending"})
         corrupted_count += await coll.count_documents({"language": {"$in": ["unknown", "corrupted"]}})
@@ -934,10 +871,7 @@ async def get_worker2_text_and_buttons():
     is_fast = is_fast_mode_active()
     is_recheck = is_recheck_mode_active()
     
-    # 🚀 THE FIX: Dynamic ETA Calculation based on Fast/Normal Mode
     time_per_file = 2.0 if is_fast else 4.5 
-    
-    # 🚀 THE FIX: Adjust queue size and progress if Recheck Mode is active
     queue_left = (pending_meta + corrupted_count) if is_recheck else pending_meta
     
     meta_eta_seconds = queue_left * time_per_file 
@@ -946,7 +880,6 @@ async def get_worker2_text_and_buttons():
     processed_files = total_files - queue_left
     meta_pct = (processed_files / total_files * 100) if total_files > 0 else 100
 
-    # 📝 Updated the text label as requested
     recheck_str = "🟢 Active (Scanning skipped files)" if is_recheck else "🔴 Inactive"
 
     text = (
@@ -969,12 +902,8 @@ async def get_worker2_text_and_buttons():
             InlineKeyboardButton(fast_status, callback_data="stats_toggle_fastmode", style=ButtonStyle.PRIMARY),
             InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w2", style=ButtonStyle.SUCCESS)
         ],
-        [
-            InlineKeyboardButton(recheck_btn, callback_data="stats_toggle_recheck", style=ButtonStyle.PRIMARY)
-        ],
-        [
-            InlineKeyboardButton("🔙 Back", callback_data="stats_home", style=ButtonStyle.DANGER)
-        ]
+        [InlineKeyboardButton(recheck_btn, callback_data="stats_toggle_recheck", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("🔙 Back", callback_data="stats_home", style=ButtonStyle.DANGER)]
     ]
     return text, InlineKeyboardMarkup(buttons)
 
@@ -984,57 +913,33 @@ async def get_worker3_home_text_and_buttons():
     text = f"⚙️ **WORKER 3: Broadcast & Scheduler Engine**\n🔄 **Status:** `Active & Monitoring`\n\n• **Pending Scheduled Jobs:** `{pending_count}`\n• **Messages in 48H Vault:** `{vault_count}`"
     
     buttons = [
-        [
-            InlineKeyboardButton("📅 Scheduled Queue", callback_data="stats_worker3_sched", style=ButtonStyle.PRIMARY), 
-            InlineKeyboardButton("📡 Recent Batches", callback_data="stats_worker3_recent", style=ButtonStyle.PRIMARY)
-        ], 
-        [
-            InlineKeyboardButton("🔙 Back", callback_data="stats_home", style=ButtonStyle.DANGER), 
-            InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w3_home", style=ButtonStyle.SUCCESS)
-        ]
+        [InlineKeyboardButton("📅 Scheduled Queue", callback_data="stats_worker3_sched", style=ButtonStyle.PRIMARY), InlineKeyboardButton("📡 Recent Batches", callback_data="stats_worker3_recent", style=ButtonStyle.PRIMARY)], 
+        [InlineKeyboardButton("🔙 Back", callback_data="stats_home", style=ButtonStyle.DANGER), InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w3_home", style=ButtonStyle.SUCCESS)]
     ]
     return text, InlineKeyboardMarkup(buttons)
-
 
 async def get_worker3_sched_text_and_buttons():
     schedules = await db.scheduled_broadcasts.find({"status": "pending"}).sort("run_at", 1).limit(5).to_list(length=5)
     text = f"📅 **SCHEDULED BROADCAST QUEUE**\n\n**Total Pending Jobs:** `{await db.scheduled_broadcasts.count_documents({'status': 'pending'})}`\n\n"
     
-    if not schedules: 
-        text += "No broadcasts are currently scheduled."
+    if not schedules: text += "No broadcasts are currently scheduled."
     else:
-        for s in schedules: 
-            text += f"• `{s['batch_id']}` - ⏳ `{datetime.datetime.fromtimestamp(s['run_at'], datetime.timezone(datetime.timedelta(hours=5, minutes=30))).strftime('%Y-%m-%d %I:%M %p')}`\n"
+        for s in schedules: text += f"• `{s['batch_id']}` - ⏳ `{datetime.datetime.fromtimestamp(s['run_at'], datetime.timezone(datetime.timedelta(hours=5, minutes=30))).strftime('%Y-%m-%d %I:%M %p')}`\n"
             
-    buttons = [
-        [
-            InlineKeyboardButton("🔙 Back", callback_data="stats_worker3_home", style=ButtonStyle.DANGER), 
-            InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w3_sched", style=ButtonStyle.SUCCESS)
-        ]
-    ]
+    buttons = [[InlineKeyboardButton("🔙 Back", callback_data="stats_worker3_home", style=ButtonStyle.DANGER), InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w3_sched", style=ButtonStyle.SUCCESS)]]
     return text, InlineKeyboardMarkup(buttons)
-
 
 async def get_worker3_recent_text_and_buttons():
     text = f"📡 **RECENT BROADCAST BATCHES (48H Vault)**\n\n"
     has_batches = False
-    
     async for batch in await db.get_recent_batches():
         has_batches, b_id = True, batch["_id"]
         eng = await db.get_batch_engagement(b_id)
         text += f"• **{b_id}**: `{batch['count']} sent` | 💬 `{eng['replies']} replies` | 🔄 `{eng['followups']} follows`\n"
         
-    if not has_batches: 
-        text += "No broadcasts sent in the last 48 hours."
-        
-    buttons = [
-        [
-            InlineKeyboardButton("🔙 Back", callback_data="stats_worker3_home", style=ButtonStyle.DANGER), 
-            InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w3_recent", style=ButtonStyle.SUCCESS)
-        ]
-    ]
+    if not has_batches: text += "No broadcasts sent in the last 48 hours."
+    buttons = [[InlineKeyboardButton("🔙 Back", callback_data="stats_worker3_home", style=ButtonStyle.DANGER), InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w3_recent", style=ButtonStyle.SUCCESS)]]
     return text, InlineKeyboardMarkup(buttons)
-
 
 @Client.on_message(filters.command("stats") & filters.user(Config.ADMINS))
 async def bot_stats_dashboard(client: Client, message: Message):
@@ -1052,30 +957,22 @@ async def stats_callback_handler(client: Client, callback: CallbackQuery):
             new_state = toggle_fast_mode()
             status_msg = "Fast Mode Activated! ⚡" if new_state else "Returned to Normal Speed 🐢"
             await callback.answer(status_msg, show_alert=False)
-            
             text, markup = await get_worker2_text_and_buttons()
             return await callback.message.edit_text(text, reply_markup=markup)
 
-        # 🚀 THE NEW RECHECK BUTTON LOGIC IS SAFELY INJECTED HERE
         if action == "stats_toggle_recheck":
             from plugins.background_worker import is_recheck_mode_active, start_recheck_mode, stop_recheck_mode
-            
             if is_recheck_mode_active():
                 stop_recheck_mode()
                 await callback.answer("⏹ Recheck mode stopped.", show_alert=False)
             else:
-                # 🛑 RULE ENFORCEMENT: Check for pending files across all shards
                 pending_count = 0
                 for coll in db.collections:
                     pending_count += await coll.count_documents({"language": "pending"})
-                
                 if pending_count > 0:
                     return await callback.answer(f"⚠️ Cannot start recheck!\n\nThere are still {pending_count} unskipped (pending) files currently processing. Let them finish first.", show_alert=True)
-                
-                # If clean, start the engine!
                 start_recheck_mode()
                 await callback.answer("🔄 Recheck mode activated! Worker 2 is now scanning skipped/corrupted files.", show_alert=True)
-            
             text, markup = await get_worker2_text_and_buttons()
             return await callback.message.edit_text(text, reply_markup=markup)
 
@@ -1098,15 +995,11 @@ async def stats_callback_handler(client: Client, callback: CallbackQuery):
     except Exception: 
         await callback.answer("⚠️ Processing sync issue. Try running /stats again.", show_alert=True)
 
-# ==========================================
-# 📊 USER STATS CALLBACK HANDLER
-# ==========================================
 @Client.on_callback_query(filters.regex("^ui_userstats$") & filters.user(Config.ADMINS))
 async def on_ui_userstats(client: Client, callback: CallbackQuery):
     total_users = await db.users.count_documents({})
     total_muted = await db.punishments.count_documents({"type": "mute"})
     total_banned = await db.punishments.count_documents({"type": "ban"})
-    
     stats_text = (
         f"📊 **Bot User Statistics**\n\n"
         f"👥 Total Users: `{total_users}`\n"
@@ -1117,9 +1010,7 @@ async def on_ui_userstats(client: Client, callback: CallbackQuery):
         f"`/mute <id> [time] [reason]`\n"
         f"`/ban <id> [reason]`"
     )
-    
     markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="tier_root_fallback", style=ButtonStyle.DANGER)]])
-    
     try:
         await callback.message.edit_text(stats_text, reply_markup=markup)
         await callback.answer()
