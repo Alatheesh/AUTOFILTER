@@ -7,7 +7,6 @@ from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBu
 from rapidfuzz import process, fuzz
 from database.multi_db import db
 from config import Config
-from plugins.vip_system import check_vip_status  # 🚀 Added VIP Import
 
 logger = logging.getLogger(__name__)
 
@@ -131,18 +130,7 @@ async def get_imdb_poster_fallback(movie_name):
 # ==========================================
 @Client.on_callback_query(filters.regex(r"^(fuz_|fuzzy_)"))
 async def handle_all_fuzzy_clicks(client: Client, callback: CallbackQuery):
-    user_id = callback.from_user.id
-    
-    # 🌟 1. VIP PAYWALL FOR THE "SHOW ME TOO" BUTTON
-    if callback.data.startswith("fuz_"):
-        is_vip, _ = await check_vip_status(user_id)
-        if not is_vip:
-            return await callback.answer(
-                "⭐ 'Show Me Too' is a VIP Exclusive feature! Use /buyvip in my PMs to unlock instant group access.", 
-                show_alert=True
-            )
-            
-    # 🌟 2. PRE-ANSWER TO PREVENT LOADING SPINNER TIMEOUTS DURING QUEUES
+    # 🌟 PRE-ANSWER TO PREVENT LOADING SPINNER TIMEOUTS DURING QUEUES
     await callback.answer(f"⏳ Processing your request. If traffic is high, this may take a moment...", show_alert=False)
 
     if callback.data.startswith("fuzzy_"):
