@@ -19,7 +19,7 @@ from config import Config
 MB = 1024 * 1024
 GB = 1024 * MB
 
-# 🌟 THE ADAPTIVE SPEED CONTROLLER
+# 🌟 THE ADAPTIVE SPEED CONTROLLER (QUEUE SYSTEM)
 GROUP_LAST_SENT = defaultdict(float)
 GROUP_THROTTLE_LOCKS = defaultdict(asyncio.Lock)
 
@@ -74,7 +74,6 @@ def build_safe_webapp_url(client_username, short_id, data_url, user_limit, is_vi
     bot_username = client_username or "Bot"
     tier = "premium" if is_vip else "free"
     
-    # 🚀 THE FIX: Safely encode the plan and expiry so spaces/special characters don't break the URL
     safe_plan = urllib.parse.quote(str(plan_name))
     safe_exp = urllib.parse.quote(str(expiry_str))
     
@@ -100,7 +99,6 @@ async def get_filter_settings(user_id: int, chat_id: int, chat_type):
         elif g_mode == "force_matrix":
             return "matrix", "all", "all"
             
-    # Fallback to User's personal settings
     u_sett = await db.get_user_settings(user_id)
     return u_sett.get("search_mode", "default"), u_sett.get("language", "all"), u_sett.get("size", "all")
 
@@ -115,11 +113,9 @@ def apply_search_filters(raw_results: list, mode: str, language: str, size: str)
     filtered_results = []
     
     for file in raw_results:
-        # 1. Size Filter
         if not (min_bytes <= file.get("size", 0) <= max_bytes): 
             continue
             
-        # 2. Interactive Mode Specific Filters
         if mode == "interactive":
             if language not in ["all", "none"]:
                 lang_data = file.get("language", "unknown").lower()
@@ -250,14 +246,11 @@ def render_hypertext_mode(results, filtered_results, metadata, user_id, bot_user
 
     buttons = []
     
-    # 1. Bulk WebApp Button (Top Row)
     if bulk_btn:
         buttons.append([bulk_btn])
 
-    # 2. Help Us Button (Middle Row - 🚀 Added to match other modes!)
     buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
 
-    # 3. Pagination Navigation (Bottom Row)
     if len(filtered_results) > 10:
         nav_buttons = []
         if page > 0:
@@ -399,65 +392,42 @@ async def send_search_display(
             bulk_btn, chat_type, settings
         )
 
-    # Check if the group has Ephemeral Mode enabled
-    g_sett = await db.get_group_settings(chat_id) if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP] else {}
-    is_ephemeral_on = g_sett.get("ephemeral_enabled", False)
-
-    # 1. GROUP WITH EPHEMERAL ON (Now sending safely to Private Messages)
-    if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP] and is_ephemeral_on:
+    # ========================================================
+    # 🌟 GROUP QUEUE SYSTEM (Limits Flooding, Sends to Group)
+    # ========================================================
+    if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         async with GROUP_THROTTLE_LOCKS[chat_id]:
             now = time.time()
             time_since_last = now - GROUP_LAST_SENT[chat_id]
+            
+            # If a message was sent less than 3 seconds ago, queue it!
             if time_since_last < 3.0:
                 await asyncio.sleep(3.0 - time_since_last)
 
-            pm_failed = False
-            
-            # Send the matrix card safely to the user's Private Messages (DMs)
+            # Send directly to the group
             if is_text_only:
                 try:
-                    await client.send_message(
-                        chat_id=user_id, text=content, reply_markup=markup, 
-                        disable_web_page_preview=True
+                    msg = await client.send_message(
+                        chat_id=chat_id, text=content, reply_markup=markup, 
+                        disable_web_page_preview=True, reply_parameters=ReplyParameters(message_id=message_id)
                     )
-                except Exception: 
-                    pm_failed = True
+                except Exception:
+                    msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup, disable_web_page_preview=True)
             else:
                 try:
-                    await client.send_photo(
-                        chat_id=user_id, photo=metadata["poster"], caption=content, 
-                        reply_markup=markup
+                    msg = await client.send_photo(
+                        chat_id=chat_id, photo=metadata["poster"], caption=content, 
+                        reply_markup=markup, reply_parameters=ReplyParameters(message_id=message_id)
                     )
-                except Exception: 
-                    pm_failed = True
+                except Exception:
+                    msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup)
 
-            # Send clean public receipt to the group
-            if pm_failed:
-                public_text = (
-                    f"🎬 **{metadata['title']}**\n"
-                    f"✅ Found `{len(filtered_results)}` matching files.\n\n"
-                    f"⚠️ **Error:** I tried to send the files privately, but you haven't started me in PM yet!"
-                )
-                public_markup = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🤖 Click Here to Start Me", url=f"https://t.me/{client.me.username}?start=start")]
-                ])
-            else:
-                public_text = (
-                    f"🎬 **{metadata['title']}**\n"
-                    f"✅ Found `{len(filtered_results)}` matching files.\n\n"
-                    f"👻 _Results were sent to your Private Messages to keep the chat clean!_"
-                )
-                public_markup = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("👁️ Show Me Too (VIP)", callback_data=f"fuz_{query[:40]}")]
-                ])
-            
-            msg = await client.send_message(
-                chat_id=chat_id, text=public_text, reply_markup=public_markup,
-                reply_parameters=ReplyParameters(message_id=message_id)
-            )
+            # Record exactly when this message was sent to reset the queue timer
             GROUP_LAST_SENT[chat_id] = time.time()
 
-    # 2. STANDARD PUBLIC GROUP OR PRIVATE MESSAGE
+    # ========================================================
+    # 🌟 PRIVATE MESSAGE SYSTEM (Instant, No Queue Needed)
+    # ========================================================
     else:
         if is_text_only:
             try:
