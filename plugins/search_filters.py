@@ -663,5 +663,40 @@ async def update_bulk_display(
                 await callback.message.edit_caption(caption, reply_markup=markup)
     except Exception:
         pass
+
+    # 🚀 FIX: Bulletproof Media Editor & Auto-Delete Timer Re-Attachment
+    try:
+        is_media = bool(callback.message.photo or callback.message.video or callback.message.document)
+        new_msg = None
+        
+        # Matrix and Hypertext modes require more text space than Telegram allows for Photo Captions (1024 limit)
+        if is_text_only or (is_media and len(caption) > 1000):
+            if is_media:
+                # Cannot convert a photo message to a text message directly. We must delete and replace it.
+                await callback.message.delete()
+                new_msg = await client.send_message(
+                    chat_id=callback.message.chat.id,
+                    text=caption,
+                    reply_markup=markup,
+                    disable_web_page_preview=True
+                )
+            else:
+                await callback.message.edit_text(caption, reply_markup=markup, disable_web_page_preview=True)
+        else:
+            try:
+                await callback.message.edit_media(InputMediaPhoto(media=metadata["poster"], caption=caption))
+                await callback.message.edit_reply_markup(reply_markup=markup)
+            except Exception:
+                await callback.message.edit_caption(caption, reply_markup=markup)
+                
+        # 🚀 If we had to spawn a NEW message, we MUST re-attach the auto-delete timer!
+        if new_msg and settings.get("filter_delete_enabled", False):
+            from plugins.advanced import trigger_ghost_self_destruct
+            trigger_ghost_self_destruct(client, callback.message.chat.id, new_msg.id, settings.get("filter_delete_time", 5) * 60)
+            
+    except Exception:
+        pass
+        
+    await callback.answer()
         
     await callback.answer()
