@@ -600,7 +600,6 @@ async def update_bulk_display(
         buttons.extend(numeric_rows)
 
     else:
-        # Default and Interactive modes
         caption = (
             f"🎬 **{metadata['title']}** ({metadata['release_date'][:4]})\n"
             f"⭐️ **Rating:** `{metadata['rating']}`\n"
@@ -622,7 +621,6 @@ async def update_bulk_display(
                 
         buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
 
-    # Pagination Logic
     total_pages = math.ceil(len(filtered_results) / 10)
     if len(filtered_results) > 10:
         nav_buttons = []
@@ -633,46 +631,17 @@ async def update_bulk_display(
             nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="Next ▶️", callback_data=f"bms_sel_{session_token}_{session_id}_{movie_idx}_{page + 1}_{user_id}"))
         buttons.append(nav_buttons)
 
-    # BACK BUTTON - Parameter Order Fix
     buttons.append([style_btn(color_mode, ButtonStyle.DANGER, text="⬅ Back to Movie List", callback_data=f"bms_back_{session_token}_{user_id}_{session_id}")])
     
     markup = InlineKeyboardMarkup(buttons)
     
-    # 🚀 FIX 2: Bulletproof Media Editor & Telegram API Limit Bypass
-    try:
-        is_media = bool(callback.message.photo or callback.message.video or callback.message.document)
-        
-        # Matrix and Hypertext modes require more text space than Telegram allows for Photo Captions (1024 limit)
-        if is_text_only or (is_media and len(caption) > 1000):
-            if is_media:
-                # Cannot convert a photo message to a text message directly. We must delete and replace it.
-                await callback.message.delete()
-                await client.send_message(
-                    chat_id=callback.message.chat.id,
-                    text=caption,
-                    reply_markup=markup,
-                    disable_web_page_preview=True
-                )
-            else:
-                await callback.message.edit_text(caption, reply_markup=markup, disable_web_page_preview=True)
-        else:
-            try:
-                await callback.message.edit_media(InputMediaPhoto(media=metadata["poster"], caption=caption))
-                await callback.message.edit_reply_markup(reply_markup=markup)
-            except Exception:
-                await callback.message.edit_caption(caption, reply_markup=markup)
-    except Exception:
-        pass
-
-    # 🚀 FIX: Bulletproof Media Editor & Auto-Delete Timer Re-Attachment
+    # 🚀 CLEANED UP EXECUTION BLOCK - NO DUPLICATES
     try:
         is_media = bool(callback.message.photo or callback.message.video or callback.message.document)
         new_msg = None
         
-        # Matrix and Hypertext modes require more text space than Telegram allows for Photo Captions (1024 limit)
         if is_text_only or (is_media and len(caption) > 1000):
             if is_media:
-                # Cannot convert a photo message to a text message directly. We must delete and replace it.
                 await callback.message.delete()
                 new_msg = await client.send_message(
                     chat_id=callback.message.chat.id,
@@ -689,14 +658,12 @@ async def update_bulk_display(
             except Exception:
                 await callback.message.edit_caption(caption, reply_markup=markup)
                 
-        # 🚀 If we had to spawn a NEW message, we MUST re-attach the auto-delete timer!
+        # 🚀 Re-attach the auto-delete timer if a new message was spawned!
         if new_msg and settings.get("filter_delete_enabled", False):
             from plugins.advanced import trigger_ghost_self_destruct
             trigger_ghost_self_destruct(client, callback.message.chat.id, new_msg.id, settings.get("filter_delete_time", 5) * 60)
             
     except Exception:
         pass
-        
-    await callback.answer()
         
     await callback.answer()
