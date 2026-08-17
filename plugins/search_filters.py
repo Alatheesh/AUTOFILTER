@@ -5,6 +5,8 @@ import json
 import urllib.parse
 import hashlib
 import aiohttp
+import asyncio
+from collections import defaultdict
 from pyrogram import Client
 from pyrogram.enums import ChatType, ButtonStyle
 from pyrogram.types import (
@@ -16,6 +18,10 @@ from config import Config
 
 MB = 1024 * 1024
 GB = 1024 * MB
+
+# 🌟 THE ADAPTIVE SPEED CONTROLLER
+GROUP_LAST_SENT = defaultdict(float)
+GROUP_THROTTLE_LOCKS = defaultdict(asyncio.Lock)
 
 # ==========================================
 # 📏 SIZE FILTER MAPPING
@@ -68,7 +74,6 @@ def build_safe_webapp_url(client_username, short_id, data_url, user_limit, is_vi
     bot_username = client_username or "Bot"
     tier = "premium" if is_vip else "free"
     
-    # 🚀 THE FIX: Safely encode the plan and expiry so spaces/special characters don't break the URL
     safe_plan = urllib.parse.quote(str(plan_name))
     safe_exp = urllib.parse.quote(str(expiry_str))
     
@@ -94,7 +99,6 @@ async def get_filter_settings(user_id: int, chat_id: int, chat_type):
         elif g_mode == "force_matrix":
             return "matrix", "all", "all"
             
-    # Fallback to User's personal settings
     u_sett = await db.get_user_settings(user_id)
     return u_sett.get("search_mode", "default"), u_sett.get("language", "all"), u_sett.get("size", "all")
 
@@ -109,11 +113,9 @@ def apply_search_filters(raw_results: list, mode: str, language: str, size: str)
     filtered_results = []
     
     for file in raw_results:
-        # 1. Size Filter
         if not (min_bytes <= file.get("size", 0) <= max_bytes): 
             continue
             
-        # 2. Interactive Mode Specific Filters
         if mode == "interactive":
             if language not in ["all", "none"]:
                 lang_data = file.get("language", "unknown").lower()
@@ -244,14 +246,11 @@ def render_hypertext_mode(results, filtered_results, metadata, user_id, bot_user
 
     buttons = []
     
-    # 1. Bulk WebApp Button (Top Row)
     if bulk_btn:
         buttons.append([bulk_btn])
 
-    # 2. Help Us Button (Middle Row - 🚀 Added to match other modes!)
     buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
 
-    # 3. Pagination Navigation (Bottom Row)
     if len(filtered_results) > 10:
         nav_buttons = []
         if page > 0:
@@ -393,22 +392,59 @@ async def send_search_display(
             bulk_btn, chat_type, settings
         )
 
-    if is_text_only:
-        try:
-            msg = await client.send_message(
-                chat_id=chat_id, text=content, reply_markup=markup, 
-                disable_web_page_preview=True, reply_parameters=ReplyParameters(message_id=message_id)
-            )
-        except Exception:
-            msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup, disable_web_page_preview=True)
+    # ========================================================
+    # 🌟 GROUP QUEUE SYSTEM (Limits Flooding, Sends to Group)
+    # ========================================================
+    if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        async with GROUP_THROTTLE_LOCKS[chat_id]:
+            now = time.time()
+            time_since_last = now - GROUP_LAST_SENT[chat_id]
+            
+            # If a message was sent less than 3 seconds ago, queue it!
+            if time_since_last < 3.0:
+                await asyncio.sleep(3.0 - time_since_last)
+
+            # Send directly to the group
+            if is_text_only:
+                try:
+                    msg = await client.send_message(
+                        chat_id=chat_id, text=content, reply_markup=markup, 
+                        disable_web_page_preview=True, reply_parameters=ReplyParameters(message_id=message_id)
+                    )
+                except Exception:
+                    msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup, disable_web_page_preview=True)
+            else:
+                try:
+                    msg = await client.send_photo(
+                        chat_id=chat_id, photo=metadata["poster"], caption=content, 
+                        reply_markup=markup, reply_parameters=ReplyParameters(message_id=message_id)
+                    )
+                except Exception:
+                    msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup)
+
+            # Record exactly when this message was sent to reset the queue timer
+            GROUP_LAST_SENT[chat_id] = time.time()
+
+    # ========================================================
+    # 🌟 PRIVATE MESSAGE SYSTEM (Instant, No Queue Needed)
+    # ========================================================
     else:
-        try:
-            msg = await client.send_photo(
-                chat_id=chat_id, photo=metadata["poster"], caption=content, 
-                reply_markup=markup, reply_parameters=ReplyParameters(message_id=message_id)
-            )
-        except Exception:
-            msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup)
+        if is_text_only:
+            try:
+                msg = await client.send_message(
+                    chat_id=chat_id, text=content, reply_markup=markup, 
+                    disable_web_page_preview=True, reply_parameters=ReplyParameters(message_id=message_id)
+                )
+            except Exception:
+                msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup, disable_web_page_preview=True)
+        else:
+            try:
+                msg = await client.send_photo(
+                    chat_id=chat_id, photo=metadata["poster"], caption=content, 
+                    reply_markup=markup, reply_parameters=ReplyParameters(message_id=message_id)
+                )
+            except Exception:
+                msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup)
 
     if settings.get("filter_delete_enabled", False):
         from plugins.advanced import trigger_ghost_self_destruct
@@ -475,6 +511,7 @@ async def update_pagination_display(
         pass
     await callback.answer()
 
+
 async def update_bulk_display(
     client: Client,
     callback: CallbackQuery,
@@ -496,7 +533,7 @@ async def update_bulk_display(
     """
     Renders the Bulk Movie Select view, respecting the user's layout mode.
     """
-    from pyrogram.types import InputMediaPhoto  # Safe localized import
+    from pyrogram.types import InputMediaPhoto
     
     buttons = []
     if bulk_btn:
@@ -509,19 +546,16 @@ async def update_bulk_display(
         caption = f"🍿 <u>**{metadata['title']} ({metadata['release_date'][:4]})**</u>\n"
         caption += f"⭐️ **Rating:** `{metadata['rating']}` | 🗣 `{metadata['language']}`\n\n"
         caption += "👇 **Click a link to receive your file:**\n\n"
-        
         for file in results:
             db_id = str(file.get("_id", ""))
             f_size = format_size(file.get('size', 0))
             f_title = file.get('title', 'Unknown File')
             link = f"https://t.me/{client.me.username}?start=getfile_{db_id}"
             caption += f"📁 <a href='{link}'>[{f_size}] {f_title}</a>\n\n"
-            
         caption += f"━━━━━━━━━━━━━━━━━━\n🔍 **Found:** `{len(filtered_results)}` matching files."
         is_text_only = True
         buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
 
-    # 🚀 FIX 1: The Missing Matrix Mode Layout for Multi-Search
     elif mode == "matrix":
         caption = (
             f"🎬 **{metadata['title']}** ({metadata['release_date'][:4]})\n"
@@ -552,23 +586,20 @@ async def update_bulk_display(
         for idx, file in enumerate(results):
             db_id = str(file.get("_id", ""))
             display_num = str(idx + 1)
-            
             if shortener_on:
                 btn = style_btn(color_mode, ButtonStyle.PRIMARY, text=display_num, url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")
             else:
                 btn = style_btn(color_mode, ButtonStyle.PRIMARY, text=display_num, callback_data=f"sendfile_{session_token}_{user_id}_{db_id}")
-                
             current_row.append(btn)
             if len(current_row) == 5:
                 numeric_rows.append(current_row)
                 current_row = []
-                
         if current_row:
             numeric_rows.append(current_row)
-            
         buttons.extend(numeric_rows)
 
     else:
+        # Default and Interactive modes
         caption = (
             f"🎬 **{metadata['title']}** ({metadata['release_date'][:4]})\n"
             f"⭐️ **Rating:** `{metadata['rating']}`\n"
@@ -590,15 +621,18 @@ async def update_bulk_display(
                 
         buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
 
+    # Pagination Logic
     total_pages = math.ceil(len(filtered_results) / 10)
     if len(filtered_results) > 10:
         nav_buttons = []
-        if page > 0: nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="◀️ Prev", callback_data=f"bms_sel_{session_token}_{session_id}_{movie_idx}_{page - 1}_{user_id}"))
+        if page > 0: 
+            nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="◀️ Prev", callback_data=f"bms_sel_{session_token}_{session_id}_{movie_idx}_{page - 1}_{user_id}"))
         nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text=f"Page {page + 1} of {total_pages}", callback_data="pages_info"))
-        if len(filtered_results) > (page + 1) * 10: nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="Next ▶️", callback_data=f"bms_sel_{session_token}_{session_id}_{movie_idx}_{page + 1}_{user_id}"))
+        if len(filtered_results) > (page + 1) * 10: 
+            nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="Next ▶️", callback_data=f"bms_sel_{session_token}_{session_id}_{movie_idx}_{page + 1}_{user_id}"))
         buttons.append(nav_buttons)
 
-    # 🚀 FIX 2: Reverted back to the original {user_id}_{session_id} order that your handler expects
+    # BACK BUTTON - Parameter Order Fix
     buttons.append([style_btn(color_mode, ButtonStyle.DANGER, text="⬅ Back to Movie List", callback_data=f"bms_back_{session_token}_{user_id}_{session_id}")])
     
     markup = InlineKeyboardMarkup(buttons)
