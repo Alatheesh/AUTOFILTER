@@ -521,7 +521,7 @@ async def update_bulk_display(
         is_text_only = True
         buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
 
-    # 🚀 FIX 1: Added full Matrix Mode logic for Multi-Search view
+    # 🚀 FIX 1: The Missing Matrix Mode Layout for Multi-Search
     elif mode == "matrix":
         caption = (
             f"🎬 **{metadata['title']}** ({metadata['release_date'][:4]})\n"
@@ -598,8 +598,8 @@ async def update_bulk_display(
         if len(filtered_results) > (page + 1) * 10: nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="Next ▶️", callback_data=f"bms_sel_{session_token}_{session_id}_{movie_idx}_{page + 1}_{user_id}"))
         buttons.append(nav_buttons)
 
-    # 🚀 FIX 2: Swapped parameter order from {user_id}_{session_id} to {session_id}_{user_id}
-    buttons.append([style_btn(color_mode, ButtonStyle.DANGER, text="⬅ Back to Movie List", callback_data=f"bms_back_{session_token}_{session_id}_{user_id}")])
+    # 🚀 FIX 2: Reverted back to the original {user_id}_{session_id} order that your handler expects
+    buttons.append([style_btn(color_mode, ButtonStyle.DANGER, text="⬅ Back to Movie List", callback_data=f"bms_back_{session_token}_{user_id}_{session_id}")])
     
     markup = InlineKeyboardMarkup(buttons)
     
