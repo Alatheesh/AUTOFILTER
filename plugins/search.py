@@ -530,8 +530,8 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^bms_back_(.+)_(.+)_(.+)$"))
 async def handle_bulk_movie_back(client: Client, callback: CallbackQuery):
     token = callback.matches[0].group(1)
-    session_id = callback.matches[0].group(2)
-    searcher_id = int(callback.matches[0].group(3))
+    searcher_id = int(callback.matches[0].group(2))  # <--- THIS MUST BE GROUP 2 (User ID)
+    session_id = callback.matches[0].group(3)        # <--- THIS MUST BE GROUP 3 (Session ID)
     
     if token != BOT_SESSION_TOKEN:
         return await callback.answer("⚠️ Session expired due to bot update/restart. Please search again!", show_alert=True)
