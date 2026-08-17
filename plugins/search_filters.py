@@ -11,7 +11,7 @@ from pyrogram import Client
 from pyrogram.enums import ChatType, ButtonStyle
 from pyrogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton, 
-    ReplyParameters, WebAppInfo, CallbackQuery, InputMediaPhoto
+    ReplyParameters, WebAppInfo, CallbackQuery
 )
 from database.multi_db import db
 from config import Config
@@ -240,7 +240,6 @@ def render_hypertext_mode(results, filtered_results, metadata, user_id, bot_user
     for file in results:
         db_id = str(file.get("_id", ""))
         f_size = format_size(file.get('size', 0))
-        # 🚀 FIX: HTML Sandbox Escaping
         f_title = str(file.get('title', 'Unknown File')).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         link = f"https://t.me/{bot_username}?start=getfile_{db_id}"
         text += f"📁 <a href='{link}'>[{f_size}] {f_title}</a>\n\n"
@@ -281,8 +280,6 @@ def render_matrix_mode(results, filtered_results, metadata, user_id, bot_usernam
     for idx, file in enumerate(results):
         emoji = number_emojis[idx] if idx < 10 else str(idx + 1)
         f_size = format_size(file.get('size', 0))
-        
-        # 🚀 FIX: HTML Sandbox Escaping
         f_title = str(file.get('title', 'Unknown File')).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         
         audio = str(file.get("language", "unknown")).title()
@@ -536,29 +533,31 @@ async def update_bulk_display(
     """
     Renders the Bulk Movie Select view, respecting the user's layout mode.
     """
+    from pyrogram.types import InputMediaPhoto
+    
     buttons = []
     if bulk_btn:
         buttons.append([bulk_btn])
 
     caption = ""
+    is_text_only = False
 
     if mode == "hypertext":
+        is_text_only = True
         caption = f"🍿 <u>**{metadata['title']} ({metadata['release_date'][:4]})**</u>\n"
         caption += f"⭐️ **Rating:** `{metadata['rating']}` | 🗣 `{metadata['language']}`\n\n"
         caption += "👇 **Click a link to receive your file:**\n\n"
         for file in results:
             db_id = str(file.get("_id", ""))
             f_size = format_size(file.get('size', 0))
-            
-            # 🚀 FIX: HTML Sandbox Escaping
             f_title = str(file.get('title', 'Unknown File')).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            
             link = f"https://t.me/{client.me.username}?start=getfile_{db_id}"
             caption += f"📁 <a href='{link}'>[{f_size}] {f_title}</a>\n\n"
         caption += f"━━━━━━━━━━━━━━━━━━\n🔍 **Found:** `{len(filtered_results)}` matching files."
         buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
 
     elif mode == "matrix":
+        is_text_only = True
         caption = (
             f"🎬 **{metadata['title']}** ({metadata['release_date'][:4]})\n"
             f"⭐️ **Rating:** `{metadata['rating']}` | 🎭 `{metadata['genre']}`\n"
@@ -568,8 +567,6 @@ async def update_bulk_display(
         for idx, file in enumerate(results):
             emoji = number_emojis[idx] if idx < 10 else str(idx + 1)
             f_size = format_size(file.get('size', 0))
-            
-            # 🚀 FIX: HTML Sandbox Escaping
             f_title = str(file.get('title', 'Unknown File')).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             
             audio = str(file.get("language", "unknown")).title()
@@ -603,6 +600,7 @@ async def update_bulk_display(
         buttons.extend(numeric_rows)
 
     else:
+        # Default and Interactive modes
         caption = (
             f"🎬 **{metadata['title']}** ({metadata['release_date'][:4]})\n"
             f"⭐️ **Rating:** `{metadata['rating']}`\n"
@@ -624,6 +622,7 @@ async def update_bulk_display(
                 
         buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
 
+    # Pagination Logic
     total_pages = math.ceil(len(filtered_results) / 10)
     if len(filtered_results) > 10:
         nav_buttons = []
@@ -634,22 +633,34 @@ async def update_bulk_display(
             nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="Next ▶️", callback_data=f"bms_sel_{session_token}_{session_id}_{movie_idx}_{page + 1}_{user_id}"))
         buttons.append(nav_buttons)
 
+    # BACK BUTTON - Parameter Order Fix
     buttons.append([style_btn(color_mode, ButtonStyle.DANGER, text="⬅ Back to Movie List", callback_data=f"bms_back_{session_token}_{user_id}_{session_id}")])
     
     markup = InlineKeyboardMarkup(buttons)
     
-    # 🚀 FIX: Bulletproof Media Editor
+    # 🚀 FIX 2: Bulletproof Media Editor & Telegram API Limit Bypass
     try:
-        # Check if the original message we are editing contains media
-        if callback.message.photo or callback.message.video or callback.message.document:
+        is_media = bool(callback.message.photo or callback.message.video or callback.message.document)
+        
+        # Matrix and Hypertext modes require more text space than Telegram allows for Photo Captions (1024 limit)
+        if is_text_only or (is_media and len(caption) > 1000):
+            if is_media:
+                # Cannot convert a photo message to a text message directly. We must delete and replace it.
+                await callback.message.delete()
+                await client.send_message(
+                    chat_id=callback.message.chat.id,
+                    text=caption,
+                    reply_markup=markup,
+                    disable_web_page_preview=True
+                )
+            else:
+                await callback.message.edit_text(caption, reply_markup=markup, disable_web_page_preview=True)
+        else:
             try:
                 await callback.message.edit_media(InputMediaPhoto(media=metadata["poster"], caption=caption))
                 await callback.message.edit_reply_markup(reply_markup=markup)
             except Exception:
                 await callback.message.edit_caption(caption, reply_markup=markup)
-        else:
-            # If the original message was just text
-            await callback.message.edit_text(caption, reply_markup=markup, disable_web_page_preview=True)
     except Exception:
         pass
         
