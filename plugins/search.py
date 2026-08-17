@@ -527,6 +527,37 @@ async def handle_bulk_movie_select(client: Client, callback: CallbackQuery):
         
     await callback.answer()
 
+@Client.on_callback_query(filters.regex(r"^bms_back_(.+)_(.+)_(.+)$"))
+async def handle_bulk_movie_back(client: Client, callback: CallbackQuery):
+    token = callback.matches[0].group(1)
+    session_id = callback.matches[0].group(2)
+    searcher_id = int(callback.matches[0].group(3))
+    
+    if token != BOT_SESSION_TOKEN:
+        return await callback.answer("⚠️ Session expired due to bot update/restart. Please search again!", show_alert=True)
+    if callback.from_user.id != searcher_id:
+        return await callback.answer("⚠️ This multi-search wasn't requested by you. Please search your own!", show_alert=True)
+    
+    if session_id not in MULTI_SEARCH_CACHE or time.time() - MULTI_SEARCH_CACHE[session_id]["timestamp"] > MULTI_SEARCH_TTL:
+        return await callback.answer("⏳ Session Expired! Please search again.", show_alert=True)
+        
+    # Retrieve the original bulk summary menu from the RAM cache
+    session_data = MULTI_SEARCH_CACHE[session_id]
+    summary_text = session_data["summary_text"]
+    buttons = session_data["buttons"]
+    
+    final_markup = InlineKeyboardMarkup(buttons) if buttons else None
+    
+    try:
+        # Check if it's a photo (Banner) or just text and edit accordingly
+        if callback.message.photo:
+            await callback.message.edit_caption(summary_text, reply_markup=final_markup)
+        else:
+            await callback.message.edit_text(summary_text, reply_markup=final_markup)
+        await callback.answer("Returned to Movie List!")
+    except Exception as e:
+        await callback.answer() # Silently ignore if already on the list
+
 # ==========================================
 # 🌟 NORMAL PAGINATION CALLBACKS
 # ==========================================
