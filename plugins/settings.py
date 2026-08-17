@@ -308,7 +308,10 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
             [InlineKeyboardButton(f"{'✅ ' if l=='all' else ''}Any Language", callback_data="uset_l_all", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton("🔙 Save & Return", callback_data="tier_user_home", style=ButtonStyle.SUCCESS)]
         ]
-        return await query.message.edit_text("✨ **Interactive Mode Filter Settings**", reply_markup=InlineKeyboardMarkup(buttons))
+        try:
+            return await query.message.edit_text("✨ **Interactive Mode Filter Settings**", reply_markup=InlineKeyboardMarkup(buttons))
+        except Exception:
+            return await query.answer() # Silently ignores double-clicks
 
     if data.startswith("uset_s_"):
         await db.update_user_setting(user_id, "size", data.replace("uset_s_", "")); query.data = "uset_interactive_menu"; return await menus_callback_handler(client, query)
@@ -396,7 +399,10 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
             [InlineKeyboardButton(f"{'✅ ' if l=='all' else ''}Any Language", callback_data=f"gset_l_all_{c_id}", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton("🔙 Save & Return", callback_data=f"tier_gmanage_{c_id}", style=ButtonStyle.SUCCESS)]
         ]
-        return await query.message.edit_text("✨ **Group Interactive Filters**", reply_markup=InlineKeyboardMarkup(buttons))
+        try:
+            return await query.message.edit_text("✨ **Group Interactive Filters**", reply_markup=InlineKeyboardMarkup(buttons))
+        except Exception:
+            return await query.answer() # Silently ignores double-clicks
 
     if data.startswith("gset_s_"):
         await db.update_group_setting(int(data.split("_")[3]), "size_lock", data.split("_")[2]); query.data = f"gset_interactive_menu_{data.split('_')[3]}"; return await menus_callback_handler(client, query)
