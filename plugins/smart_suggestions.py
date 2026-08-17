@@ -130,19 +130,19 @@ async def get_imdb_poster_fallback(movie_name):
 # ==========================================
 @Client.on_callback_query(filters.regex(r"^(fuz_|fuzzy_)"))
 async def handle_all_fuzzy_clicks(client: Client, callback: CallbackQuery):
-    # 🌟 PRE-ANSWER TO PREVENT LOADING SPINNER TIMEOUTS DURING QUEUES
-    await callback.answer(f"⏳ Processing your request. If traffic is high, this may take a moment...", show_alert=False)
-
     if callback.data.startswith("fuzzy_"):
         correct_name = callback.data.split("fuzzy_", 1)[1]
     else:
         correct_name = callback.data.split("fuz_", 1)[1]
         
-    # Clean the query
+    # 1. Answer the callback to stop the loading circle (BUTTONS WILL NOT BE DELETED)
+    await callback.answer(f"🔍 Fetching: {correct_name}...", show_alert=False)
+    
+    # 2. Clean the query
     clean_query = re.sub(r"[_+\[\]\(\)\{\}\-.:']", " ", correct_name)
     clean_query = " ".join(clean_query.split())
     
-    # Trick the bot into executing a normal search instantly!
+    # 3. Trick the bot into executing a normal search instantly!
     message = callback.message
     message.text = clean_query
     message.from_user = callback.from_user 
