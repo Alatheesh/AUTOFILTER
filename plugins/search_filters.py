@@ -5,6 +5,8 @@ import json
 import urllib.parse
 import hashlib
 import aiohttp
+import asyncio
+from collections import defaultdict
 from pyrogram import Client
 from pyrogram.enums import ChatType, ButtonStyle
 from pyrogram.types import (
@@ -16,6 +18,10 @@ from config import Config
 
 MB = 1024 * 1024
 GB = 1024 * MB
+
+# 🌟 THE ADAPTIVE SPEED CONTROLLER
+GROUP_LAST_SENT = defaultdict(float)
+GROUP_THROTTLE_LOCKS = defaultdict(asyncio.Lock)
 
 # ==========================================
 # 📏 SIZE FILTER MAPPING
@@ -244,14 +250,11 @@ def render_hypertext_mode(results, filtered_results, metadata, user_id, bot_user
 
     buttons = []
     
-    # 1. Bulk WebApp Button (Top Row)
     if bulk_btn:
         buttons.append([bulk_btn])
 
-    # 2. Help Us Button (Middle Row - 🚀 Added to match other modes!)
     buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
 
-    # 3. Pagination Navigation (Bottom Row)
     if len(filtered_results) > 10:
         nav_buttons = []
         if page > 0:
@@ -393,22 +396,59 @@ async def send_search_display(
             bulk_btn, chat_type, settings
         )
 
-    if is_text_only:
-        try:
-            msg = await client.send_message(
-                chat_id=chat_id, text=content, reply_markup=markup, 
-                disable_web_page_preview=True, reply_parameters=ReplyParameters(message_id=message_id)
-            )
-        except Exception:
-            msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup, disable_web_page_preview=True)
+    # ========================================================
+    # 🌟 GROUP QUEUE SYSTEM (Limits Flooding, Sends to Group)
+    # ========================================================
+    if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        async with GROUP_THROTTLE_LOCKS[chat_id]:
+            now = time.time()
+            time_since_last = now - GROUP_LAST_SENT[chat_id]
+            
+            # If a message was sent less than 3 seconds ago, queue it!
+            if time_since_last < 3.0:
+                await asyncio.sleep(3.0 - time_since_last)
+
+            # Send directly to the group
+            if is_text_only:
+                try:
+                    msg = await client.send_message(
+                        chat_id=chat_id, text=content, reply_markup=markup, 
+                        disable_web_page_preview=True, reply_parameters=ReplyParameters(message_id=message_id)
+                    )
+                except Exception:
+                    msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup, disable_web_page_preview=True)
+            else:
+                try:
+                    msg = await client.send_photo(
+                        chat_id=chat_id, photo=metadata["poster"], caption=content, 
+                        reply_markup=markup, reply_parameters=ReplyParameters(message_id=message_id)
+                    )
+                except Exception:
+                    msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup)
+
+            # Record exactly when this message was sent to reset the queue timer
+            GROUP_LAST_SENT[chat_id] = time.time()
+
+    # ========================================================
+    # 🌟 PRIVATE MESSAGE SYSTEM (Instant, No Queue Needed)
+    # ========================================================
     else:
-        try:
-            msg = await client.send_photo(
-                chat_id=chat_id, photo=metadata["poster"], caption=content, 
-                reply_markup=markup, reply_parameters=ReplyParameters(message_id=message_id)
-            )
-        except Exception:
-            msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup)
+        if is_text_only:
+            try:
+                msg = await client.send_message(
+                    chat_id=chat_id, text=content, reply_markup=markup, 
+                    disable_web_page_preview=True, reply_parameters=ReplyParameters(message_id=message_id)
+                )
+            except Exception:
+                msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup, disable_web_page_preview=True)
+        else:
+            try:
+                msg = await client.send_photo(
+                    chat_id=chat_id, photo=metadata["poster"], caption=content, 
+                    reply_markup=markup, reply_parameters=ReplyParameters(message_id=message_id)
+                )
+            except Exception:
+                msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup)
 
     if settings.get("filter_delete_enabled", False):
         from plugins.advanced import trigger_ghost_self_destruct
@@ -547,7 +587,8 @@ async def update_bulk_display(
         if len(filtered_results) > (page + 1) * 10: nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="Next ▶️", callback_data=f"bms_sel_{session_token}_{session_id}_{movie_idx}_{page + 1}_{user_id}"))
         buttons.append(nav_buttons)
 
-    buttons.append([style_btn(color_mode, ButtonStyle.DANGER, text="⬅ Back to Movie List", callback_data=f"bms_back_{session_token}_{user_id}_{session_id}")])
+    # 🚀 THE BUG FIX: Corrected parameter order to match the rest of the multi-search system
+    buttons.append([style_btn(color_mode, ButtonStyle.DANGER, text="⬅ Back to Movie List", callback_data=f"bms_back_{session_token}_{session_id}_{user_id}")])
     
     markup = InlineKeyboardMarkup(buttons)
     
