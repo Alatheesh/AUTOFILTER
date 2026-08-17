@@ -5,8 +5,6 @@ import json
 import urllib.parse
 import hashlib
 import aiohttp
-import asyncio
-from collections import defaultdict
 from pyrogram import Client
 from pyrogram.enums import ChatType, ButtonStyle
 from pyrogram.types import (
@@ -18,10 +16,6 @@ from config import Config
 
 MB = 1024 * 1024
 GB = 1024 * MB
-
-# 🌟 THE ADAPTIVE SPEED CONTROLLER
-GROUP_LAST_SENT = defaultdict(float)
-GROUP_THROTTLE_LOCKS = defaultdict(asyncio.Lock)
 
 # ==========================================
 # 📏 SIZE FILTER MAPPING
@@ -250,11 +244,14 @@ def render_hypertext_mode(results, filtered_results, metadata, user_id, bot_user
 
     buttons = []
     
+    # 1. Bulk WebApp Button (Top Row)
     if bulk_btn:
         buttons.append([bulk_btn])
 
+    # 2. Help Us Button (Middle Row - 🚀 Added to match other modes!)
     buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
 
+    # 3. Pagination Navigation (Bottom Row)
     if len(filtered_results) > 10:
         nav_buttons = []
         if page > 0:
@@ -396,59 +393,22 @@ async def send_search_display(
             bulk_btn, chat_type, settings
         )
 
-    # ========================================================
-    # 🌟 GROUP QUEUE SYSTEM (Limits Flooding, Sends to Group)
-    # ========================================================
-    if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-        async with GROUP_THROTTLE_LOCKS[chat_id]:
-            now = time.time()
-            time_since_last = now - GROUP_LAST_SENT[chat_id]
-            
-            # If a message was sent less than 3 seconds ago, queue it!
-            if time_since_last < 3.0:
-                await asyncio.sleep(3.0 - time_since_last)
-
-            # Send directly to the group
-            if is_text_only:
-                try:
-                    msg = await client.send_message(
-                        chat_id=chat_id, text=content, reply_markup=markup, 
-                        disable_web_page_preview=True, reply_parameters=ReplyParameters(message_id=message_id)
-                    )
-                except Exception:
-                    msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup, disable_web_page_preview=True)
-            else:
-                try:
-                    msg = await client.send_photo(
-                        chat_id=chat_id, photo=metadata["poster"], caption=content, 
-                        reply_markup=markup, reply_parameters=ReplyParameters(message_id=message_id)
-                    )
-                except Exception:
-                    msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup)
-
-            # Record exactly when this message was sent to reset the queue timer
-            GROUP_LAST_SENT[chat_id] = time.time()
-
-    # ========================================================
-    # 🌟 PRIVATE MESSAGE SYSTEM (Instant, No Queue Needed)
-    # ========================================================
+    if is_text_only:
+        try:
+            msg = await client.send_message(
+                chat_id=chat_id, text=content, reply_markup=markup, 
+                disable_web_page_preview=True, reply_parameters=ReplyParameters(message_id=message_id)
+            )
+        except Exception:
+            msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup, disable_web_page_preview=True)
     else:
-        if is_text_only:
-            try:
-                msg = await client.send_message(
-                    chat_id=chat_id, text=content, reply_markup=markup, 
-                    disable_web_page_preview=True, reply_parameters=ReplyParameters(message_id=message_id)
-                )
-            except Exception:
-                msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup, disable_web_page_preview=True)
-        else:
-            try:
-                msg = await client.send_photo(
-                    chat_id=chat_id, photo=metadata["poster"], caption=content, 
-                    reply_markup=markup, reply_parameters=ReplyParameters(message_id=message_id)
-                )
-            except Exception:
-                msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup)
+        try:
+            msg = await client.send_photo(
+                chat_id=chat_id, photo=metadata["poster"], caption=content, 
+                reply_markup=markup, reply_parameters=ReplyParameters(message_id=message_id)
+            )
+        except Exception:
+            msg = await client.send_message(chat_id=chat_id, text=content, reply_markup=markup)
 
     if settings.get("filter_delete_enabled", False):
         from plugins.advanced import trigger_ghost_self_destruct
@@ -559,6 +519,55 @@ async def update_bulk_display(
             
         caption += f"━━━━━━━━━━━━━━━━━━\n🔍 **Found:** `{len(filtered_results)}` matching files."
         is_text_only = True
+        buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
+
+    # 🚀 FIX 1: Added full Matrix Mode logic for Multi-Search view
+    elif mode == "matrix":
+        caption = (
+            f"🎬 **{metadata['title']}** ({metadata['release_date'][:4]})\n"
+            f"⭐️ **Rating:** `{metadata['rating']}` | 🎭 `{metadata['genre']}`\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+        )
+        number_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+        for idx, file in enumerate(results):
+            emoji = number_emojis[idx] if idx < 10 else str(idx + 1)
+            f_size = format_size(file.get('size', 0))
+            f_title = file.get('title', 'Unknown File')
+            
+            audio = str(file.get("language", "unknown")).title()
+            if audio == "Pending": audio = "Scanning..."
+            
+            subs = str(file.get("subtitle", "none")).title()
+            if subs == "Pending": subs = "Scanning..."
+            
+            caption += f"{emoji} <b>[{f_size}]</b> <code>{f_title}</code>\n"
+            caption += f"   ┗ 🔊 <b>{audio}</b> | 💬 <b>{subs}</b>\n\n"
+            
+        caption += f"━━━━━━━━━━━━━━━━━━\n🔍 **Found:** `{len(filtered_results)}` matching files."
+        
+        buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
+        
+        numeric_rows = []
+        current_row = []
+        for idx, file in enumerate(results):
+            db_id = str(file.get("_id", ""))
+            display_num = str(idx + 1)
+            
+            if shortener_on:
+                btn = style_btn(color_mode, ButtonStyle.PRIMARY, text=display_num, url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")
+            else:
+                btn = style_btn(color_mode, ButtonStyle.PRIMARY, text=display_num, callback_data=f"sendfile_{session_token}_{user_id}_{db_id}")
+                
+            current_row.append(btn)
+            if len(current_row) == 5:
+                numeric_rows.append(current_row)
+                current_row = []
+                
+        if current_row:
+            numeric_rows.append(current_row)
+            
+        buttons.extend(numeric_rows)
+
     else:
         caption = (
             f"🎬 **{metadata['title']}** ({metadata['release_date'][:4]})\n"
@@ -574,11 +583,13 @@ async def update_bulk_display(
             f_size = format_size(file.get('size', 0))
             rnd_color = random.choice([ButtonStyle.PRIMARY, ButtonStyle.SUCCESS, ButtonStyle.DANGER])
             
-            if shortener_on: buttons.append([style_btn(color_mode, rnd_color, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
-            else: buttons.append([style_btn(color_mode, rnd_color, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{session_token}_{user_id}_{db_id}")])
+            if shortener_on: 
+                buttons.append([style_btn(color_mode, rnd_color, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", url=f"https://t.me/{client.me.username}?start=getfile_{db_id}")])
+            else: 
+                buttons.append([style_btn(color_mode, rnd_color, text=f"📂 [{f_size}] - {file.get('title', 'Unknown')}", callback_data=f"sendfile_{session_token}_{user_id}_{db_id}")])
+                
+        buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
 
-    buttons.append([style_btn(color_mode, ButtonStyle.SUCCESS, text="🤝 Help Us!", callback_data="help_us_menu")])
-    
     total_pages = math.ceil(len(filtered_results) / 10)
     if len(filtered_results) > 10:
         nav_buttons = []
@@ -587,7 +598,7 @@ async def update_bulk_display(
         if len(filtered_results) > (page + 1) * 10: nav_buttons.append(style_btn(color_mode, ButtonStyle.PRIMARY, text="Next ▶️", callback_data=f"bms_sel_{session_token}_{session_id}_{movie_idx}_{page + 1}_{user_id}"))
         buttons.append(nav_buttons)
 
-    # 🚀 THE BUG FIX: Corrected parameter order to match the rest of the multi-search system
+    # 🚀 FIX 2: Swapped parameter order from {user_id}_{session_id} to {session_id}_{user_id}
     buttons.append([style_btn(color_mode, ButtonStyle.DANGER, text="⬅ Back to Movie List", callback_data=f"bms_back_{session_token}_{session_id}_{user_id}")])
     
     markup = InlineKeyboardMarkup(buttons)
