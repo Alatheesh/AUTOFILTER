@@ -36,13 +36,12 @@ def is_recheck_mode_active():
 def start_recheck_mode():
     global RECHECK_MODE_ACTIVE, RECHECK_SESSION_ID
     RECHECK_MODE_ACTIVE = True
-    RECHECK_SESSION_ID = int(time.time()) # Creates a unique session lock!
+    RECHECK_SESSION_ID = int(time.time())
 
 def stop_recheck_mode():
     global RECHECK_MODE_ACTIVE
     RECHECK_MODE_ACTIVE = False
 
-# A massive, comprehensive dictionary of global media languages and their MKV abbreviations
 LANGUAGE_MAP = {
     # 🇮🇳 Indian & South Asian
     "tamil": ["tamil", "'ta'", "'tam'"],
@@ -72,7 +71,7 @@ LANGUAGE_MAP = {
     "portuguese": ["portuguese", "'pt'", "'por'"],
     "italian": ["italian", "'it'", "'ita'"],
 
-    # ⛩️ East Asian & Southeast Asian (Anime, K-Drama, Regional Cinema)
+    # ⛩️ East Asian & Southeast Asian
     "japanese": ["japanese", "'ja'", "'jpn'"],
     "korean": ["korean", "'ko'", "'kor'"],
     "chinese": ["chinese", "mandarin", "cantonese", "'zh'", "'chi'", "'zho'", "'yue'", "'cmn'"],
@@ -94,7 +93,7 @@ LANGUAGE_MAP = {
     "amharic": ["amharic", "'am'", "'amh'"],
     "afrikaans": ["afrikaans", "'af'", "'afr'"],
 
-    # 🇪🇺 Expanded European (Nordic, Eastern Europe, etc.)
+    # 🇪🇺 Expanded European
     "dutch": ["dutch", "flemish", "'nl'", "'dut'", "'nld'"],
     "polish": ["polish", "'pl'", "'pol'"],
     "ukrainian": ["ukrainian", "'uk'", "'ukr'"],
@@ -131,6 +130,9 @@ async def extract_language_micro_chunk(client: Client, file_id: str, unique_id: 
                 downloaded += len(chunk)
                 if downloaded >= chunk_limit:
                     break 
+
+        if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
+            return "unknown", "none"
 
         media_info = await asyncio.to_thread(MediaInfo.parse, temp_path)
 
@@ -182,6 +184,8 @@ async def start_background_language_indexer(client: Client):
     global RECHECK_MODE_ACTIVE
     logger.info("🟢 Background Metadata Worker Started!")
 
+    consecutive_errors = 0
+
     while True:
         try:
             target_file = None
@@ -195,10 +199,9 @@ async def start_background_language_indexer(client: Client):
                     target_collection = coll
                     break
 
-            # 🔄 PRIORITY 2: If no pending files, check the Skipped Queue (If Recheck is ON)
+            # 🔄 PRIORITY 2: If no pending files, check the Skipped Queue
             if not target_file and RECHECK_MODE_ACTIVE:
                 for coll in db.collections:
-                    # Find a skipped file that hasn't been checked in THIS specific session
                     doc = await coll.find_one({
                         "language": {"$in": ["unknown", "corrupted"]},
                         "recheck_session": {"$ne": RECHECK_SESSION_ID}
@@ -208,38 +211,44 @@ async def start_background_language_indexer(client: Client):
                         target_collection = coll
                         break
                 
-                # If we searched all shards and found nothing, the recheck is completely done!
                 if not target_file:
                     RECHECK_MODE_ACTIVE = False
                     logger.info("✅ Recheck session completed! All skipped files scanned.")
 
             if not target_file:
-                await asyncio.sleep(60)
+                consecutive_errors = 0
+                await asyncio.sleep(30)
                 continue
 
             file_id = target_file.get("file_id")
             unique_id = target_file.get("file_unique_id", "UNKNOWN")
 
+            # 🚀 FIX: Reduced timeout to 15s to prevent long DC long-polling stalls
             try:
                 audio_langs, sub_langs = await asyncio.wait_for(
                     extract_language_micro_chunk(client, file_id, unique_id),
-                    timeout=45.0
+                    timeout=15.0
                 )
+                consecutive_errors = 0
             except asyncio.TimeoutError:
                 logger.warning(f"⚠️ Worker TIMEOUT on {unique_id}. Marking as corrupted to skip.")
                 audio_langs, sub_langs = "corrupted", "corrupted"
+                consecutive_errors += 1
             except FloodWait as fw:
                 logger.warning(f"⚠️ Worker hit Rate Limit. Sleeping for {fw.value}s")
                 await asyncio.sleep(fw.value)
                 continue
+            except Exception as e:
+                logger.warning(f"⚠️ Worker unhandled issue on {unique_id}: {e}")
+                audio_langs, sub_langs = "corrupted", "corrupted"
+                consecutive_errors += 1
 
-            # 📝 Prepare Database Update
+            # 📝 Update database
             update_data = {
                 "language": audio_langs,
                 "subtitle": sub_langs
             }
             
-            # If we are in Recheck Mode, lock this file so we don't scan it again this session
             if RECHECK_MODE_ACTIVE and target_file.get("language") in ["unknown", "corrupted"]:
                 update_data["recheck_session"] = RECHECK_SESSION_ID
 
@@ -248,8 +257,14 @@ async def start_background_language_indexer(client: Client):
                 {"$set": update_data}
             )
 
-            sleep_time = 1.0 if FAST_MODE_ACTIVE else 3.0
-            await asyncio.sleep(sleep_time)
+            # 🚀 FIX: Smart dynamic backoff to protect MTProto connection
+            if consecutive_errors >= 3:
+                logger.warning("⚠️ Multiple media errors detected. Pausing worker for 5s to stabilize connection...")
+                await asyncio.sleep(5.0)
+                consecutive_errors = 0
+            else:
+                sleep_time = 1.0 if FAST_MODE_ACTIVE else 2.5
+                await asyncio.sleep(sleep_time)
 
         except Exception as e:
             logger.error(f"Background loop crashed: {e}. Restarting in 10s...")
