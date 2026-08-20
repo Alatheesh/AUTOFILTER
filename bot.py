@@ -1,5 +1,3 @@
-import os
-import sys
 import asyncio
 import logging
 from aiohttp import web
@@ -33,26 +31,6 @@ app = Client(
     workers=60  # <--- ADDED THIS EXACT LINE
 )
 
-async def connection_watchdog(client):
-    """Silently monitors the connection and self-restarts if Telegram drops."""
-    await asyncio.sleep(60)  # Wait 60 seconds after boot before checking
-    
-    failed_checks = 0
-    while True:
-        await asyncio.sleep(60)  # Check the pulse every 1 minute
-        
-        # If Pyrogram loses connection to Telegram
-        if not client.is_connected:
-            failed_checks += 1
-            logger.warning(f"⚠️ Watchdog: Telegram connection lost! (Attempt {failed_checks}/3)")
-            
-            # If it's been dead for 3 minutes, force a system restart
-            if failed_checks >= 3:
-                logger.critical("🚨 Watchdog: Bot is a Zombie! FORCING AUTO-RESTART...")
-                os.execl(sys.executable, sys.executable, *sys.argv)
-        else:
-            failed_checks = 0  # Reset if the connection is perfectly fine
-
 async def web_server():
     async def handle_request(request):
         return web.Response(text="Bot is running smoothly!", content_type='text/html')
@@ -80,8 +58,7 @@ async def main():
         logger.info(f"🔗 Username: @{me.username}")
         logger.info("==================================================")
 
-       # 🔥 START THE QUEUE, METADATA WORKERS, AND WATCHDOG HERE 🔥
-        asyncio.create_task(connection_watchdog(app))  # 🚀 NEW WATCHDOG TASK
+       # 🔥 START THE QUEUE AND METADATA WORKERS HERE 🔥
         asyncio.create_task(process_indexing_queue(app))
         asyncio.create_task(start_background_language_indexer(app))
         asyncio.create_task(schedule_worker(app))  # 🚀 NEW LOOP STARTED!
