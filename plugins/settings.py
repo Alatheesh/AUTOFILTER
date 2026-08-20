@@ -871,7 +871,7 @@ async def get_worker1_text_and_buttons():
     return text, InlineKeyboardMarkup(buttons)
 
 async def get_worker2_text_and_buttons():
-    from plugins.background_worker import is_fast_mode_active, is_recheck_mode_active
+    from plugins.background_worker import is_fast_mode_active
     
     db_stats = await db.global_stats()
     total_files = db_stats.get('total_files', 0)
@@ -879,7 +879,6 @@ async def get_worker2_text_and_buttons():
     pending_meta = 0
     corrupted_count = 0
     
-    # 🚀 Accurately query the exact numbers directly from shards
     for coll in db.collections:
         pending_meta += await coll.count_documents({"language": "pending"})
         corrupted_count += await coll.count_documents({"language": {"$in": ["unknown", "corrupted"]}})
@@ -887,22 +886,13 @@ async def get_worker2_text_and_buttons():
     indexed_meta = total_files - pending_meta - corrupted_count
     
     is_fast = is_fast_mode_active()
-    is_recheck = is_recheck_mode_active()
-    
-    # 🚀 THE FIX: Dynamic ETA Calculation based on Fast/Normal Mode
     time_per_file = 2.0 if is_fast else 4.5 
     
-    # 🚀 THE FIX: Adjust queue size and progress if Recheck Mode is active
-    queue_left = (pending_meta + corrupted_count) if is_recheck else pending_meta
-    
-    meta_eta_seconds = queue_left * time_per_file 
+    meta_eta_seconds = pending_meta * time_per_file 
     meta_eta_string = format_eta(meta_eta_seconds)
     
-    processed_files = total_files - queue_left
+    processed_files = total_files - pending_meta
     meta_pct = (processed_files / total_files * 100) if total_files > 0 else 100
-
-    # 📝 Updated the text label as requested
-    recheck_str = "🟢 Active (Scanning skipped files)" if is_recheck else "🔴 Inactive"
 
     text = (
         f"⚙️ **WORKER 2: Language & Metadata Extraction**\n"
@@ -911,21 +901,15 @@ async def get_worker2_text_and_buttons():
         f"• **Corrupted / Skipped:** `{corrupted_count:,}` files\n"
         f"• **Current Progress:** `{meta_pct:.1f}%` complete\n"
         f"• **Pending Migration Queue:** `{pending_meta:,}` files left\n"
-        f"• **Skipped Checking Mode:** `{recheck_str}`\n"
-        f"• **Estimated Completion Time (ETA):** `{meta_eta_string}`\n\n"
-        f"💡 *Note: The Recheck Engine safely scans failed files and will auto-pause if new pending files arrive.*"
+        f"• **Estimated Completion Time (ETA):** `{meta_eta_string}`"
     )
 
     fast_status = "⚡ Fast Mode: ON" if is_fast else "🐢 Fast Mode: OFF"
-    recheck_btn = "⏹ Stop Recheck" if is_recheck else "🔄 Recheck Skipped"
 
     buttons = [
         [
             InlineKeyboardButton(fast_status, callback_data="stats_toggle_fastmode", style=ButtonStyle.PRIMARY),
             InlineKeyboardButton("🔄 Refresh", callback_data="stats_refresh_w2", style=ButtonStyle.SUCCESS)
-        ],
-        [
-            InlineKeyboardButton(recheck_btn, callback_data="stats_toggle_recheck", style=ButtonStyle.PRIMARY)
         ],
         [
             InlineKeyboardButton("🔙 Back", callback_data="stats_home", style=ButtonStyle.DANGER)
