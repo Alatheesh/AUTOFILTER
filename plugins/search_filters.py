@@ -53,11 +53,15 @@ def format_size(size_bytes):
 
 async def upload_json_payload(data_list):
     json_string = json.dumps(data_list)
+    
+    # ☁️ ATTEMPT 1: Npoint (Primary)
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post("https://api.npoint.io/", json=data_list, timeout=8) as resp:
                 if resp.status == 200: return f"https://api.npoint.io/{(await resp.json())['id']}"
     except Exception: pass
+    
+    # ☁️ ATTEMPT 2: Dpaste (Backup 1)
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post("https://dpaste.com/api/v2/", data={"content": json_string, "syntax": "json"}, timeout=8) as resp:
@@ -65,6 +69,25 @@ async def upload_json_payload(data_list):
                     url = (await resp.text()).strip()
                     if url.startswith("http"): return f"{url}.txt"
     except Exception: pass
+
+    # ☁️ ATTEMPT 3: Bytebin (Backup 2 - Built for massive 30MB+ JSON payloads)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post("https://bytebin.lucko.me/post", data=json_string, headers={"Content-Type": "application/json"}, timeout=10) as resp:
+                if resp.status in [200, 201]:
+                    key = (await resp.json())['key']
+                    return f"https://bytebin.lucko.me/{key}"
+    except Exception: pass
+
+    # ☁️ ATTEMPT 4: MD-5 Paste (Backup 3 - Heavy-duty Hastebin clone)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post("https://paste.md-5.net/documents", data=json_string, timeout=10) as resp:
+                if resp.status in [200, 201]:
+                    key = (await resp.json())['key']
+                    return f"https://paste.md-5.net/raw/{key}"
+    except Exception: pass
+
     return None
 
 def build_safe_webapp_url(client_username, short_id, data_url, user_limit, is_vip=False, plan_name="Free Tier", expiry_str="N/A"):
