@@ -1081,23 +1081,3 @@ async def on_ui_userstats(client: Client, callback: CallbackQuery):
     except Exception as e:
         await callback.answer("⚠️ Error loading stats.", show_alert=True)
         logger.error(f"User Stats UI Error: {e}")
-
-
-@Client.on_message(filters.command("purge_corrupted") & filters.user(Config.ADMINS))
-async def purge_corrupted_files(client: Client, message: Message):
-    status = await message.reply_text("🗑 **Scanning database for corrupted files only...** Please wait.")
-    total_deleted = 0
-    
-    try:
-        # Loop through all database shards and delete ONLY files explicitly marked as 'corrupted'
-        for coll in db.collections:
-            result = await coll.delete_many({
-                "language": "corrupted"
-            })
-            total_deleted += result.deleted_count
-            
-        await status.edit_text(f"✅ **Purge Complete!**\n\nPermanently deleted `{total_deleted:,}` corrupted files. All 'unknown' files were kept safe!")
-    except Exception as e:
-        await status.edit_text(f"❌ **Error during purge:** `{str(e)}`")
-        
-    raise StopPropagation
