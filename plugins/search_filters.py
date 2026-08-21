@@ -70,7 +70,25 @@ async def upload_json_payload(data_list):
                     if url.startswith("http"): return f"{url}.txt"
     except Exception: pass
 
-    # ☁️ ATTEMPT 3: Bytebin (Backup 2 - Built for massive 30MB+ JSON payloads)
+    # ☁️ ATTEMPT 3: Pastebin.ai (Backup 2 - Handles up to 1MB UTF-8 seamlessly)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post("https://pastebin.ai/api/v1/paste", json={"content": json_string}, timeout=8) as resp:
+                if resp.status in [200, 201]:
+                    res_data = await resp.json()
+                    if "raw_url" in res_data: return res_data["raw_url"]
+    except Exception: pass
+
+    # ☁️ ATTEMPT 4: PasteFox (Backup 3 - Great temporary paste with anonymous support)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post("https://pastefox.com/api/v1/paste", json={"content": json_string}, timeout=8) as resp:
+                if resp.status in [200, 201]:
+                    res_data = await resp.json()
+                    if "raw_url" in res_data: return res_data["raw_url"]
+    except Exception: pass
+
+    # ☁️ ATTEMPT 5: Bytebin (Backup 4 - Built for massive payloads)
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post("https://bytebin.lucko.me/post", data=json_string, headers={"Content-Type": "application/json"}, timeout=10) as resp:
@@ -79,7 +97,7 @@ async def upload_json_payload(data_list):
                     return f"https://bytebin.lucko.me/{key}"
     except Exception: pass
 
-    # ☁️ ATTEMPT 4: MD-5 Paste (Backup 3 - Heavy-duty Hastebin clone)
+    # ☁️ ATTEMPT 6: MD-5 Paste (Backup 5 - Heavy-duty Hastebin clone)
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post("https://paste.md-5.net/documents", data=json_string, timeout=10) as resp:
