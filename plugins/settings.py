@@ -917,7 +917,6 @@ async def get_user_stats(client: Client, message: Message):
             ]
         })
 
-
         # ==========================================
         # ⚙️ USER PREFERENCES
         # ==========================================
@@ -951,28 +950,12 @@ async def get_user_stats(client: Client, message: Message):
                 }
             ]).to_list(length=1)
 
-            if result:
-                return str(result[0]["_id"])
+            return str(result[0]["_id"]) if result else "N/A"
 
-            return "N/A"
-
-
-        most_search_mode = await get_most_used(
-            "search_mode"
-        )
-
-        most_quality = await get_most_used(
-            "quality"
-        )
-
-        most_language = await get_most_used(
-            "language"
-        )
-
-        most_size = await get_most_used(
-            "size"
-        )
-
+        most_search_mode = await get_most_used("search_mode")
+        most_quality = await get_most_used("quality")
+        most_language = await get_most_used("language")
+        most_size = await get_most_used("size")
 
         # ==========================================
         # 💎 VIP STATISTICS
@@ -983,7 +966,6 @@ async def get_user_stats(client: Client, message: Message):
 
         current_time = time.time()
 
-        # Correct VIP collection
         vip_documents = await db.vip_users.find(
             {}
         ).to_list(length=None)
@@ -995,92 +977,79 @@ async def get_user_stats(client: Client, message: Message):
 
         for vip in vip_documents:
 
-            # --------------------------------------
-            # Get plan from existing document formats
-            # --------------------------------------
-
+            # Get plan from both possible formats
             plan = (
                 vip.get("plan")
                 or vip.get("plan_id")
                 or "Unknown"
             )
 
-            # --------------------------------------
-            # Detect trial users
-            # Trial documents use started_at
-            # --------------------------------------
-
-            is_trial = (
-                "started_at" in vip
-                and "plan_id" in vip
-            )
-
-            if is_trial:
-                trial_users += 1
-
-            # --------------------------------------
-            # Get expiry from both formats
-            # --------------------------------------
-
+            # Get expiry from both possible formats
             expiry = (
                 vip.get("expiry")
                 or vip.get("expires_at")
             )
 
-            # Convert datetime expiry if necessary
+            # Convert datetime expiry to timestamp
             if isinstance(expiry, datetime):
                 expiry = expiry.timestamp()
 
-            # Convert string timestamp if necessary
+            # Convert numeric/string expiry safely
             try:
                 if expiry is not None:
                     expiry = float(expiry)
             except (ValueError, TypeError):
                 expiry = None
 
-            # Normalize status
-            status = str(
-                vip.get("status", "")
-            ).lower()
+            # Check whether this plan is a trial
+            is_trial = "trial" in str(plan).lower()
 
-            # --------------------------------------
-            # Active / Expired calculation
-            # --------------------------------------
+            # ======================================
+            # 🎁 ACTIVE TRIAL USERS
+            # ======================================
+
+            if is_trial and expiry is not None:
+
+                if expiry > current_time:
+                    trial_users += 1
+
+                # Do not count trials as normal VIP users
+                plan_distribution[plan] = (
+                    plan_distribution.get(plan, 0) + 1
+                )
+
+                continue
+
+            # ======================================
+            # 🟢 NORMAL ACTIVE / EXPIRED VIP USERS
+            # ======================================
 
             if expiry is not None:
 
                 if expiry > current_time:
-
-                    # Trial users are counted separately
-                    if not is_trial:
-                        active_vip += 1
-
-                else:
-
-                    # Trial users are counted separately
-                    if not is_trial:
-                        expired_vip += 1
-
-            elif status == "active":
-
-                # VIP marked active without expiry
-                if not is_trial:
                     active_vip += 1
-
-            elif status:
-
-                # Any other status
-                if not is_trial:
+                else:
                     expired_vip += 1
 
-            # --------------------------------------
-            # Plan Distribution
-            # --------------------------------------
+            else:
+
+                status = str(
+                    vip.get("status", "")
+                ).lower()
+
+                if status == "active":
+                    active_vip += 1
+
+                elif status:
+                    expired_vip += 1
+
+            # ======================================
+            # 📊 PLAN DISTRIBUTION
+            # ======================================
 
             plan_distribution[plan] = (
                 plan_distribution.get(plan, 0) + 1
             )
-
 
         # ==========================================
         # 📊 BUILD PLAN DISTRIBUTION
@@ -1102,10 +1071,7 @@ async def get_user_stats(client: Client, message: Message):
 
         else:
 
-            plan_text = (
-                "\n   • No VIP plans found"
-            )
-
+            plan_text = "\n   • No VIP plans found"
 
         # ==========================================
         # 📊 FINAL MESSAGE
@@ -1154,9 +1120,7 @@ async def get_user_stats(client: Client, message: Message):
             f"{plan_text}"
         )
 
-        await progress.edit_text(
-            stats_text
-        )
+        await progress.edit_text(stats_text)
 
     except Exception as e:
 
