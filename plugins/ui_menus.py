@@ -126,39 +126,140 @@ def media_category_keyboard():
 # ==========================================
 @Client.on_message(filters.command("start"))
 async def start_menu_handler(client: Client, message: Message):
-    if len(message.command) > 1: 
+    if len(message.command) > 1:
         cmd = message.command[1]
+
         if cmd.startswith("appeal_"):
             p_type = cmd.split("_")[1]
-            btn = InlineKeyboardMarkup([[InlineKeyboardButton("Submit Formal Appeal", callback_data=f"appeal_global_{p_type}", style=ButtonStyle.PRIMARY)]])
-            await message.reply_text(f"⚖️ **Global {p_type.upper()} Appeal Center**\n\nClick the button below to officially submit your appeal to the Creator.", reply_markup=btn)
+
+            btn = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "Submit Formal Appeal",
+                        callback_data=f"appeal_global_{p_type}",
+                        style=ButtonStyle.PRIMARY
+                    )
+                ]
+            ])
+
+            await message.reply_text(
+                f"⚖️ **Global {p_type.upper()} Appeal Center**\n\n"
+                "Click the button below to officially submit your appeal to the Creator.",
+                reply_markup=btn
+            )
+
             raise StopPropagation
-        return 
+
+        return
 
     user_id = message.from_user.id
     user_exists = await db.users.find_one({"user_id": user_id})
+
+    # ==========================================
+    # 👤 NEW USER DETECTION + FREE TRIAL
+    # ==========================================
     if not user_exists:
-        await log_to_channel(client, f"#new_user\n👤 Name: `{message.from_user.first_name}`\n🆔 ID: `{user_id}`\n🔗 Username: @{message.from_user.username or 'None'}")
-        await db.update_user_setting(user_id, "joined_date", datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
-        
+
+        await log_to_channel(
+            client,
+            f"#new_user\n"
+            f"👤 Name: `{message.from_user.first_name}`\n"
+            f"🆔 ID: `{user_id}`\n"
+            f"🔗 Username: @{message.from_user.username or 'None'}"
+        )
+
+        await db.update_user_setting(
+            user_id,
+            "joined_date",
+            datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        )
+
+        # Get Free Trial settings
         settings = await db.get_settings()
-        trial_days = settings.get("free_trial_days", 0)
-        if trial_days > 0:
+
+        free_trial_enabled = settings.get(
+            "free_trial_enabled",
+            True
+        )
+
+        trial_plan = settings.get(
+            "free_trial_plan",
+            "gold"
+        )
+
+        trial_days = settings.get(
+            "free_trial_days",
+            7
+        )
+
+        # ==========================================
+        # 🎁 GIVE FREE TRIAL IF ENABLED
+        # ==========================================
+        if free_trial_enabled and trial_days > 0:
+
             from plugins.vip_system import add_vip
-            await add_vip(user=message.from_user, plan_name="🎁 Gold (Trial)", days=trial_days, method="Auto Free Trial", is_promo=True)
+
+            plan_names = {
+                "gold": "🎁 Gold (Trial)",
+                "silver": "🎁 Silver (Trial)",
+                "bronze": "🎁 Bronze (Trial)"
+            }
+
+            selected_plan = plan_names.get(
+                str(trial_plan).lower(),
+                f"🎁 {str(trial_plan).title()} (Trial)"
+            )
+
+            await add_vip(
+                user=message.from_user,
+                plan_name=selected_plan,
+                days=trial_days,
+                method="Auto Free Trial",
+                is_promo=True
+            )
+
+    # ==========================================
+    # ⏳ START LOADING STICKER
+    # ==========================================
+    try:
+        loading_msg = await message.reply_sticker(
+            random.choice(START_STICKERS)
+        )
+
+        await asyncio.sleep(1)
+
+        await loading_msg.delete()
+
+    except Exception:
+        pass
+
+    # ==========================================
+    # 🏠 START MENU
+    # ==========================================
+    bot_me = await client.get_me()
+
+    formatted_start = START_TEXT.format(
+        bot_name=bot_me.first_name
+    )
+
+    markup = get_start_markup(
+        bot_me.username,
+        user_id
+    )
 
     try:
-        loading_msg = await message.reply_sticker(random.choice(START_STICKERS))
-        await asyncio.sleep(1)
-        await loading_msg.delete()
-    except Exception: pass
-        
-    bot_me = await client.get_me()
-    formatted_start = START_TEXT.format(bot_name=bot_me.first_name)
-    markup = get_start_markup(bot_me.username, user_id)
-    
-    try: await message.reply_photo(photo=random.choice(START_BANNER_IMAGES), caption=formatted_start, reply_markup=markup)
-    except Exception: await message.reply_text(text=formatted_start, reply_markup=markup)
+        await message.reply_photo(
+            photo=random.choice(START_BANNER_IMAGES),
+            caption=formatted_start,
+            reply_markup=markup
+        )
+
+    except Exception:
+        await message.reply_text(
+            text=formatted_start,
+            reply_markup=markup
+        )
+
     raise StopPropagation
 
 
