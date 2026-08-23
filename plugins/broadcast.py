@@ -229,8 +229,38 @@ async def execute_broadcast_run(client: Client, admin_chat_id: int, target_msg: 
         
     tracker_markup = InlineKeyboardMarkup(tracker_buttons) if tracker_buttons else None
     
-    await status_msg.edit_text(f"✅ **BROADCAST COMPLETE**\n\n🏷 **Batch ID:** `{batch_id}`\n🟢 **Total Sent:** `{sent}`\n🔴 **Dead Accounts:** `{failed}`\n⏭ **Skipped:** `{skipped}`\n⏱ **Total Time:** `{total_time}s`\n\n*(Use `/broadcast_del {batch_id}` to recall)*", reply_markup=tracker_markup)
-
+    await status_msg.edit_text(
+        f"✅ **BROADCAST COMPLETE**\n\n"
+    
+        f"🏷 **Batch ID:** `{batch_id}`\n\n"
+    
+        f"🟢 **Total Sent:** `{sent}`\n"
+        f"🔴 **Dead Accounts:** `{failed}`\n"
+        f"⏭ **Skipped:** `{skipped}`\n"
+        f"⏱ **Total Time:** `{total_time}s`\n\n"
+    
+        "━━━━━━━━━━━━━━\n\n"
+    
+        "🛠 **MANAGE THIS BROADCAST**\n\n"
+    
+        "🗑 **Recall / Delete**\n"
+        f"`/broadcast_del {batch_id}`\n\n"
+    
+        "✏️ **Edit Broadcast**\n"
+        f"`/broadcast_edit {batch_id} <New Text>`\n\n"
+    
+        "Or use:\n"
+        "`/broadcast_edit`\n"
+        "to open the edit wizard.\n\n"
+    
+        "━━━━━━━━━━━━━━\n\n"
+    
+        "📌 Save this **Batch ID** if you want to "
+        "manage this broadcast later.",
+    
+        reply_markup=tracker_markup
+    )
+    
 async def schedule_auto_delete(client, user_id, msg_id, delay_seconds):
     await asyncio.sleep(delay_seconds)
     try:
@@ -324,8 +354,62 @@ async def interactive_broadcast_listener(client: Client, message: Message):
         }
         text = (
             "✅ **Message Saved!**\n\n"
-            "Now, send any parameters you want to apply (e.g., `-novip`, `-vip`, `-silent`, `-ask 10m`, or a schedule time like `2026-12-31 15:30`).\n\n"
-            "*(Send `none` to deploy immediately without parameters)*"
+            "Now configure how you want to send it.\n\n"
+        
+            "━━━━━━━━━━━━━━\n\n"
+        
+            "🎯 **TARGET AUDIENCE**\n\n"
+        
+            "`none` — Send to everyone\n"
+            "`-vip` — Send only to VIP users\n"
+            "`-novip` — Send only to non-VIP users\n\n"
+        
+            "━━━━━━━━━━━━━━\n\n"
+        
+            "⚙️ **DELIVERY OPTIONS**\n\n"
+        
+            "`-silent`\n"
+            "Send without notification sound.\n\n"
+        
+            "`-reply`\n"
+            "Allow users to reply to the broadcast.\n\n"
+        
+            "`-ask 10m`\n"
+            "Automatically delete the broadcast after a period.\n\n"
+        
+            "Time units: `s` Seconds • `m` Minutes • `h` Hours\n\n"
+        
+            "━━━━━━━━━━━━━━\n\n"
+        
+            "😊 **REACTIONS**\n\n"
+        
+            "`-reaction 👍 ❤️ 🔥`\n"
+            "Add reactions to the broadcast.\n\n"
+        
+            "━━━━━━━━━━━━━━\n\n"
+        
+            "🔁 **FOLLOW-UP**\n\n"
+        
+            "`-followup Batch_ID`\n"
+            "Target users from a previous broadcast.\n\n"
+        
+            "━━━━━━━━━━━━━━\n\n"
+        
+            "⏰ **SCHEDULE**\n\n"
+        
+            "`2026-12-31 15:30`\n"
+            "Send the broadcast at a specific date and time.\n\n"
+        
+            "━━━━━━━━━━━━━━\n\n"
+        
+            "🚀 **EXAMPLE**\n\n"
+        
+            "`-vip -silent -ask 1h -reaction 👍 ❤️`\n\n"
+        
+            "Or send:\n"
+            "`none`\n\n"
+        
+            "to broadcast immediately without extra options."
         )
         markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_broadcast_flow")]])
         try: await client.edit_message_text(message.chat.id, prompt_msg_id, text, reply_markup=markup)
@@ -483,9 +567,60 @@ async def ultimate_broadcast(client: Client, message: Message):
         await process_broadcast_command(client, message, target_msg, command_text)
     else:
         prompt = await message.reply_text(
-            "📢 **Broadcast Wizard**\n\nPlease send or forward the message (text, photo, video) you want to broadcast.\n\n*(Or click Cancel to abort)*",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_broadcast_flow")]])
+            "📢 **Broadcast Wizard**\n\n"
+            "Please send or forward the message you want to broadcast.\n\n"
+    
+            "📨 **Supported Messages**\n"
+            "• Text\n"
+            "• Photo with caption\n"
+            "• Video with caption\n"
+            "• Forwarded messages\n\n"
+    
+            "━━━━━━━━━━━━━━\n\n"
+    
+            "👤 **Personalized Messages**\n\n"
+            "You can use these inside your message:\n\n"
+    
+            "`{first_name}` — User's first name\n"
+            "`{last_name}` — User's last name\n"
+            "`{full_name}` — User's full name\n\n"
+    
+            "**Example:**\n\n"
+            "Hello {first_name}! 👋\n\n"
+            "Welcome back to the bot, {full_name}.\n\n"
+    
+            "━━━━━━━━━━━━━━\n\n"
+    
+            "🔗 **Add Buttons**\n\n"
+            "You can add buttons directly inside your message:\n\n"
+    
+            "`[Button Name|https://example.com]`\n\n"
+    
+            "**Example:**\n\n"
+            "Join our official channel!\n\n"
+            "`[📢 Join Channel|https://t.me/YourChannel]`\n\n"
+    
+            "━━━━━━━━━━━━━━\n\n"
+    
+            "💡 **Next Step**\n\n"
+            "Send or forward your completed message below.\n\n"
+    
+            "After saving it, you can configure the target "
+            "audience, delivery options, reactions, follow-ups, "
+            "scheduling, and more.\n\n"
+    
+            "*(Or click Cancel to abort)*",
+    
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "❌ Cancel",
+                        callback_data="cancel_broadcast_flow"
+                    )
+                ]
+            ])
         )
+    
         BROADCAST_STATE[message.from_user.id] = {
             "action": "broadcast_wait_msg",
             "message_id": prompt.id,
