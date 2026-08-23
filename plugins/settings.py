@@ -883,14 +883,16 @@ async def get_user_stats(client: Client, message: Message):
 
         total_users = await db.users.count_documents({})
 
-        # Total searches from all users
         search_result = await db.users.aggregate([
             {
                 "$group": {
                     "_id": None,
                     "total_searches": {
                         "$sum": {
-                            "$ifNull": ["$total_searches", 0]
+                            "$ifNull": [
+                                "$total_searches",
+                                0
+                            ]
                         }
                     }
                 }
@@ -898,7 +900,7 @@ async def get_user_stats(client: Client, message: Message):
         ]).to_list(length=1)
 
         total_searches = (
-            search_result[0]["total_searches"]
+            search_result[0].get("total_searches", 0)
             if search_result else 0
         )
 
@@ -910,7 +912,8 @@ async def get_user_stats(client: Client, message: Message):
         users_with_no_searches = await db.users.count_documents({
             "$or": [
                 {"total_searches": {"$exists": False}},
-                {"total_searches": 0}
+                {"total_searches": 0},
+                {"total_searches": None}
             ]
         })
 
@@ -926,29 +929,32 @@ async def get_user_stats(client: Client, message: Message):
                     "$match": {
                         field: {
                             "$exists": True,
-                            "$ne": None,
-                            "$ne": ""
+                            "$nin": [None, ""]
                         }
                     }
                 },
                 {
                     "$group": {
                         "_id": f"${field}",
-                        "count": {"$sum": 1}
+                        "count": {
+                            "$sum": 1
+                        }
                     }
                 },
                 {
-                    "$sort": {"count": -1}
+                    "$sort": {
+                        "count": -1
+                    }
                 },
                 {
                     "$limit": 1
                 }
             ]).to_list(length=1)
 
-            return (
-                str(result[0]["_id"])
-                if result else "N/A"
-            )
+            if result:
+                return str(result[0]["_id"])
+
+            return "N/A"
 
 
         most_search_mode = await get_most_used(
@@ -973,13 +979,14 @@ async def get_user_stats(client: Client, message: Message):
         # ==========================================
 
         import time
+        from datetime import datetime
 
         current_time = time.time()
 
-        # Get all VIP documents
-        vip_documents = await db.vip.find({}).to_list(
-            length=None
-        )
+        # Correct VIP collection
+        vip_documents = await db.vip_users.find(
+            {}
+        ).to_list(length=None)
 
         active_vip = 0
         expired_vip = 0
@@ -988,47 +995,88 @@ async def get_user_stats(client: Client, message: Message):
 
         for vip in vip_documents:
 
-            # Get plan name from either format
+            # --------------------------------------
+            # Get plan from existing document formats
+            # --------------------------------------
+
             plan = (
                 vip.get("plan")
                 or vip.get("plan_id")
                 or "Unknown"
             )
 
-            # Check if this is a trial
-            if str(plan).lower() in [
-                "trial",
-                "free_trial",
-                "free trial"
-            ]:
+            # --------------------------------------
+            # Detect trial users
+            # Trial documents use started_at
+            # --------------------------------------
+
+            is_trial = (
+                "started_at" in vip
+                and "plan_id" in vip
+            )
+
+            if is_trial:
                 trial_users += 1
 
-            # Support both expiry field formats
+            # --------------------------------------
+            # Get expiry from both formats
+            # --------------------------------------
+
             expiry = (
                 vip.get("expiry")
                 or vip.get("expires_at")
-                or 0
             )
 
-            # Support existing status field if present
-            status = vip.get("status")
+            # Convert datetime expiry if necessary
+            if isinstance(expiry, datetime):
+                expiry = expiry.timestamp()
 
-            # Determine active/expired
-            if status == "active":
+            # Convert string timestamp if necessary
+            try:
+                if expiry is not None:
+                    expiry = float(expiry)
+            except (ValueError, TypeError):
+                expiry = None
 
-                if expiry == 0 or expiry > current_time:
-                    active_vip += 1
-                else:
-                    expired_vip += 1
+            # Normalize status
+            status = str(
+                vip.get("status", "")
+            ).lower()
 
-            elif expiry:
+            # --------------------------------------
+            # Active / Expired calculation
+            # --------------------------------------
+
+            if expiry is not None:
 
                 if expiry > current_time:
-                    active_vip += 1
+
+                    # Trial users are counted separately
+                    if not is_trial:
+                        active_vip += 1
+
                 else:
+
+                    # Trial users are counted separately
+                    if not is_trial:
+                        expired_vip += 1
+
+            elif status == "active":
+
+                # VIP marked active without expiry
+                if not is_trial:
+                    active_vip += 1
+
+            elif status:
+
+                # Any other status
+                if not is_trial:
                     expired_vip += 1
 
-            # Count plan distribution
+            # --------------------------------------
+            # Plan Distribution
+            # --------------------------------------
+
             plan_distribution[plan] = (
                 plan_distribution.get(plan, 0) + 1
             )
@@ -1044,15 +1092,19 @@ async def get_user_stats(client: Client, message: Message):
 
             for plan, count in sorted(
                 plan_distribution.items(),
-                key=lambda x: x[1],
+                key=lambda item: item[1],
                 reverse=True
             ):
+
                 plan_text += (
-                    f"\n   • {plan}: `{count}`"
+                    f"\n   • `{plan}`: `{count:,}`"
                 )
 
         else:
-            plan_text = "\n   • No VIP plans found"
+
+            plan_text = (
+                "\n   • No VIP plans found"
+            )
 
 
         # ==========================================
@@ -1064,7 +1116,8 @@ async def get_user_stats(client: Client, message: Message):
 
             f"👥 Total Users: `{total_users:,}`\n"
             f"🔎 Total Searches: `{total_searches:,}`\n"
-            f"📈 Average Searches/User: `{average_searches}`\n"
+            f"📈 Average Searches/User: "
+            f"`{average_searches}`\n"
             f"😴 Users With 0 Searches: "
             f"`{users_with_no_searches:,}`\n\n"
 
@@ -1088,9 +1141,15 @@ async def get_user_stats(client: Client, message: Message):
 
             "💎 **VIP STATISTICS**\n\n"
 
-            f"├ 🟢 Active VIP Users: `{active_vip:,}`\n"
-            f"├ ⌛ Expired VIP Users: `{expired_vip:,}`\n"
-            f"├ 🎁 Trial Users: `{trial_users:,}`\n"
+            f"├ 🟢 Active VIP Users: "
+            f"`{active_vip:,}`\n"
+
+            f"├ ⌛ Expired VIP Users: "
+            f"`{expired_vip:,}`\n"
+
+            f"├ 🎁 Trial Users: "
+            f"`{trial_users:,}`\n"
+
             f"└ 📊 Plan Distribution:"
             f"{plan_text}"
         )
@@ -1102,7 +1161,7 @@ async def get_user_stats(client: Client, message: Message):
     except Exception as e:
 
         await progress.edit_text(
-            f"❌ **Failed to get user statistics**\n\n"
+            "❌ **Failed to get user statistics**\n\n"
             f"`{str(e)}`"
         )
 
