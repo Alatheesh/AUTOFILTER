@@ -407,8 +407,8 @@ def get_dashboard_main_markup():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("👥 Memberships", callback_data="vipdb_members", style=ButtonStyle.PRIMARY), InlineKeyboardButton("💳 Payments", callback_data="vipdb_payments", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton("🎟️ Coupons", callback_data="vipdb_coupons", style=ButtonStyle.PRIMARY), InlineKeyboardButton("📦 Plans", callback_data="vipdb_plans", style=ButtonStyle.PRIMARY)],
-        # 🚀 UPGRADED: Changed "Promotions" to "Increments"
         [InlineKeyboardButton("📊 Statistics", callback_data="vipdb_stats", style=ButtonStyle.PRIMARY), InlineKeyboardButton("🎁 Increments", callback_data="vipdb_increments", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("🎁 Free Trials", callback_data="vipdb_freetrial", style=ButtonStyle.SUCCESS)],
         [InlineKeyboardButton("⚙️ Settings", callback_data="vipdb_settings", style=ButtonStyle.PRIMARY), InlineKeyboardButton("📜 Logs", callback_data="vipdb_logs", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton("🔍 Universal Search", callback_data="vipdb_search", style=ButtonStyle.SUCCESS), InlineKeyboardButton("⚡ Live Activity", callback_data="vipdb_live", style=ButtonStyle.SUCCESS)],
         [InlineKeyboardButton("❌ Close Panel", callback_data="vipdb_close", style=ButtonStyle.DANGER)]
@@ -555,7 +555,7 @@ async def vip_panel_router(client, callback: CallbackQuery):
     # ==========================================
     # 🚀 NEW: DYNAMIC INCREMENTS ENGINE
     # ==========================================
-    elif action == "increments":
+        elif action == "increments":
         text = "🎁 **Increments Center**\n\nManage mass upgrades, rollbacks, and free tier injections."
         markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("🎁 Selected Increments", callback_data="vipwiz_inc_init", style=ButtonStyle.SUCCESS)],
@@ -563,6 +563,422 @@ async def vip_panel_router(client, callback: CallbackQuery):
             [InlineKeyboardButton("🔙 Back to Dashboard", callback_data="vipdb_home", style=ButtonStyle.DANGER)]
         ])
         await callback.message.edit_text(text, reply_markup=markup)
+
+
+    # ==========================================
+    # 🎁 FREE TRIAL SETTINGS
+    # ==========================================
+    elif action == "freetrial":
+
+        settings = await db.get_settings()
+
+        enabled = settings.get("free_trial_enabled", True)
+        trial_plan = settings.get("free_trial_plan", "gold")
+        trial_days = settings.get("free_trial_days", 7)
+
+        plans = await get_all_plans()
+
+        plan_name = plans.get(
+            trial_plan,
+            {}
+        ).get(
+            "name",
+            trial_plan.title()
+        )
+
+        status_text = "🟢 ON" if enabled else "🔴 OFF"
+
+        text = (
+            "🎁 **FREE TRIAL SETTINGS**\n\n"
+            f"Status: {status_text}\n\n"
+            f"📦 Selected Plan: `{plan_name}`\n"
+            f"⏱️ Trial Duration: `{trial_days} Days`\n\n"
+            "━━━━━━━━━━━━━━━━━━"
+        )
+
+        markup = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(
+                    "🟢 ON",
+                    callback_data="vipdb_trialon",
+                    style=ButtonStyle.SUCCESS
+                ),
+                InlineKeyboardButton(
+                    "🔴 OFF",
+                    callback_data="vipdb_trialoff",
+                    style=ButtonStyle.DANGER
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📦 Select Plan",
+                    callback_data="vipdb_trialplan",
+                    style=ButtonStyle.PRIMARY
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "⏱️ Select Days",
+                    callback_data="vipdb_trialdays",
+                    style=ButtonStyle.PRIMARY
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 Back to Dashboard",
+                    callback_data="vipdb_home",
+                    style=ButtonStyle.DANGER
+                )
+            ]
+        ])
+
+        await callback.message.edit_text(
+            text,
+            reply_markup=markup
+        )
+
+
+    # ==========================================
+    # 🟢 ENABLE FREE TRIAL
+    # ==========================================
+    elif action == "trialon":
+
+        await db.update_settings({
+            "free_trial_enabled": True
+        })
+
+        settings = await db.get_settings()
+
+        trial_plan = settings.get("free_trial_plan", "gold")
+        trial_days = settings.get("free_trial_days", 7)
+
+        plans = await get_all_plans()
+
+        plan_name = plans.get(
+            trial_plan,
+            {}
+        ).get(
+            "name",
+            trial_plan.title()
+        )
+
+        text = (
+            "🎁 **FREE TRIAL SETTINGS**\n\n"
+            "Status: 🟢 ON\n\n"
+            f"📦 Selected Plan: `{plan_name}`\n"
+            f"⏱️ Trial Duration: `{trial_days} Days`\n\n"
+            "━━━━━━━━━━━━━━━━━━"
+        )
+
+        markup = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🟢 ON", callback_data="vipdb_trialon", style=ButtonStyle.SUCCESS),
+                InlineKeyboardButton("🔴 OFF", callback_data="vipdb_trialoff", style=ButtonStyle.DANGER)
+            ],
+            [
+                InlineKeyboardButton("📦 Select Plan", callback_data="vipdb_trialplan", style=ButtonStyle.PRIMARY)
+            ],
+            [
+                InlineKeyboardButton("⏱️ Select Days", callback_data="vipdb_trialdays", style=ButtonStyle.PRIMARY)
+            ],
+            [
+                InlineKeyboardButton("🔙 Back to Dashboard", callback_data="vipdb_home", style=ButtonStyle.DANGER)
+            ]
+        ])
+
+        await callback.answer("Free trial enabled!")
+
+        await callback.message.edit_text(
+            text,
+            reply_markup=markup
+        )
+
+
+    # ==========================================
+    # 🔴 DISABLE FREE TRIAL
+    # ==========================================
+    elif action == "trialoff":
+
+        await db.update_settings({
+            "free_trial_enabled": False
+        })
+
+        settings = await db.get_settings()
+
+        trial_plan = settings.get("free_trial_plan", "gold")
+        trial_days = settings.get("free_trial_days", 7)
+
+        plans = await get_all_plans()
+
+        plan_name = plans.get(
+            trial_plan,
+            {}
+        ).get(
+            "name",
+            trial_plan.title()
+        )
+
+        text = (
+            "🎁 **FREE TRIAL SETTINGS**\n\n"
+            "Status: 🔴 OFF\n\n"
+            f"📦 Selected Plan: `{plan_name}`\n"
+            f"⏱️ Trial Duration: `{trial_days} Days`\n\n"
+            "━━━━━━━━━━━━━━━━━━"
+        )
+
+        markup = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🟢 ON", callback_data="vipdb_trialon", style=ButtonStyle.SUCCESS),
+                InlineKeyboardButton("🔴 OFF", callback_data="vipdb_trialoff", style=ButtonStyle.DANGER)
+            ],
+            [
+                InlineKeyboardButton("📦 Select Plan", callback_data="vipdb_trialplan", style=ButtonStyle.PRIMARY)
+            ],
+            [
+                InlineKeyboardButton("⏱️ Select Days", callback_data="vipdb_trialdays", style=ButtonStyle.PRIMARY)
+            ],
+            [
+                InlineKeyboardButton("🔙 Back to Dashboard", callback_data="vipdb_home", style=ButtonStyle.DANGER)
+            ]
+        ])
+
+        await callback.answer("Free trial disabled!")
+
+        await callback.message.edit_text(
+            text,
+            reply_markup=markup
+        )
+
+
+    # ==========================================
+    # 📦 SELECT FREE TRIAL PLAN
+    # ==========================================
+    elif action == "trialplan":
+
+        plans = await get_all_plans()
+
+        buttons = []
+        row = []
+
+        for plan_id, plan in plans.items():
+
+            row.append(
+                InlineKeyboardButton(
+                    plan.get("name", plan_id.title()),
+                    callback_data=f"vipdb_trialsetplan_{plan_id}",
+                    style=ButtonStyle.PRIMARY
+                )
+            )
+
+            if len(row) == 2:
+                buttons.append(row)
+                row = []
+
+        if row:
+            buttons.append(row)
+
+        buttons.append([
+            InlineKeyboardButton(
+                "🔙 Back",
+                callback_data="vipdb_freetrial",
+                style=ButtonStyle.DANGER
+            )
+        ])
+
+        await callback.message.edit_text(
+            "📦 **SELECT FREE TRIAL PLAN**\n\n"
+            "Select the VIP plan for new users:",
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+
+    # ==========================================
+    # 💾 SAVE SELECTED PLAN
+    # ==========================================
+    elif action == "trialsetplan":
+
+        try:
+            plan_id = callback.data.split("_", 2)[2]
+
+        except IndexError:
+            return await callback.answer(
+                "Invalid plan!",
+                show_alert=True
+            )
+
+        await db.update_settings({
+            "free_trial_plan": plan_id
+        })
+
+        await callback.answer(
+            "Free trial plan updated!"
+        )
+
+        settings = await db.get_settings()
+
+        enabled = settings.get(
+            "free_trial_enabled",
+            True
+        )
+
+        trial_days = settings.get(
+            "free_trial_days",
+            7
+        )
+
+        plans = await get_all_plans()
+
+        plan_name = plans.get(
+            plan_id,
+            {}
+        ).get(
+            "name",
+            plan_id.title()
+        )
+
+        status_text = "🟢 ON" if enabled else "🔴 OFF"
+
+        text = (
+            "🎁 **FREE TRIAL SETTINGS**\n\n"
+            f"Status: {status_text}\n\n"
+            f"📦 Selected Plan: `{plan_name}`\n"
+            f"⏱️ Trial Duration: `{trial_days} Days`\n\n"
+            "━━━━━━━━━━━━━━━━━━"
+        )
+
+        markup = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🟢 ON", callback_data="vipdb_trialon", style=ButtonStyle.SUCCESS),
+                InlineKeyboardButton("🔴 OFF", callback_data="vipdb_trialoff", style=ButtonStyle.DANGER)
+            ],
+            [
+                InlineKeyboardButton("📦 Select Plan", callback_data="vipdb_trialplan", style=ButtonStyle.PRIMARY)
+            ],
+            [
+                InlineKeyboardButton("⏱️ Select Days", callback_data="vipdb_trialdays", style=ButtonStyle.PRIMARY)
+            ],
+            [
+                InlineKeyboardButton("🔙 Back to Dashboard", callback_data="vipdb_home", style=ButtonStyle.DANGER)
+            ]
+        ])
+
+        await callback.message.edit_text(
+            text,
+            reply_markup=markup
+        )
+
+
+    # ==========================================
+    # ⏱️ SELECT TRIAL DAYS
+    # ==========================================
+    elif action == "trialdays":
+
+        markup = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("1 Day", callback_data="vipdb_trialsetdays_1", style=ButtonStyle.PRIMARY),
+                InlineKeyboardButton("3 Days", callback_data="vipdb_trialsetdays_3", style=ButtonStyle.PRIMARY)
+            ],
+            [
+                InlineKeyboardButton("7 Days", callback_data="vipdb_trialsetdays_7", style=ButtonStyle.PRIMARY),
+                InlineKeyboardButton("15 Days", callback_data="vipdb_trialsetdays_15", style=ButtonStyle.PRIMARY)
+            ],
+            [
+                InlineKeyboardButton("30 Days", callback_data="vipdb_trialsetdays_30", style=ButtonStyle.PRIMARY)
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 Back",
+                    callback_data="vipdb_freetrial",
+                    style=ButtonStyle.DANGER
+                )
+            ]
+        ])
+
+        await callback.message.edit_text(
+            "⏱️ **SELECT FREE TRIAL DURATION**\n\n"
+            "Select how long the free VIP trial lasts:",
+            reply_markup=markup
+        )
+
+
+    # ==========================================
+    # 💾 SAVE SELECTED DAYS
+    # ==========================================
+    elif action == "trialsetdays":
+
+        try:
+            days = int(
+                callback.data.split("_", 2)[2]
+            )
+
+        except (ValueError, IndexError):
+
+            return await callback.answer(
+                "Invalid duration!",
+                show_alert=True
+            )
+
+        await db.update_settings({
+            "free_trial_days": days
+        })
+
+        await callback.answer(
+            f"Trial set to {days} days!"
+        )
+
+        settings = await db.get_settings()
+
+        enabled = settings.get(
+            "free_trial_enabled",
+            True
+        )
+
+        trial_plan = settings.get(
+            "free_trial_plan",
+            "gold"
+        )
+
+        plans = await get_all_plans()
+
+        plan_name = plans.get(
+            trial_plan,
+            {}
+        ).get(
+            "name",
+            trial_plan.title()
+        )
+
+        status_text = "🟢 ON" if enabled else "🔴 OFF"
+
+        text = (
+            "🎁 **FREE TRIAL SETTINGS**\n\n"
+            f"Status: {status_text}\n\n"
+            f"📦 Selected Plan: `{plan_name}`\n"
+            f"⏱️ Trial Duration: `{days} Days`\n\n"
+            "━━━━━━━━━━━━━━━━━━"
+        )
+
+        markup = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🟢 ON", callback_data="vipdb_trialon", style=ButtonStyle.SUCCESS),
+                InlineKeyboardButton("🔴 OFF", callback_data="vipdb_trialoff", style=ButtonStyle.DANGER)
+            ],
+            [
+                InlineKeyboardButton("📦 Select Plan", callback_data="vipdb_trialplan", style=ButtonStyle.PRIMARY)
+            ],
+            [
+                InlineKeyboardButton("⏱️ Select Days", callback_data="vipdb_trialdays", style=ButtonStyle.PRIMARY)
+            ],
+            [
+                InlineKeyboardButton("🔙 Back to Dashboard", callback_data="vipdb_home", style=ButtonStyle.DANGER)
+            ]
+        ])
+
+        await callback.message.edit_text(
+            text,
+            reply_markup=markup
+        )
+
 
     elif action == "settings":
         text = (
@@ -1310,26 +1726,4 @@ async def user_redeem_coupon(client, message: Message):
     await add_vip(message.from_user, plan_meta["name"], plan_meta["days"], method=f"Coupon ({code})", is_promo=True)
     await log_vip_event("Coupon", message.from_user.id, f"Redeemed {code}")
     await message.reply(f"🎉 **Redemption Success!** Activated tier `{plan_meta['name']}`.")
-    raise StopPropagation
-
-# ==========================================
-# 🎁 FREE TRIAL COMMAND
-# ==========================================
-@Client.on_message(filters.command("freetrial") & filters.user(Config.ADMINS))
-async def set_free_trial_command(client: Client, message: Message):
-    if len(message.command) < 2:
-        settings = await db.get_settings()
-        current = settings.get("free_trial_days", 7)
-        status = f"{current} Days" if current > 0 else "Disabled"
-        return await message.reply_text(f"🎁 **Free Trial Settings**\n\nCurrent Trial: `{status}`\n\nTo change, use:\n`/freetrial <days>` (e.g., `/freetrial 7`)\n`/freetrial 0` (to disable completely)")
-    
-    try:
-        days = int(message.command[1])
-        await db.update_settings({"free_trial_days": days})
-        if days == 0:
-            await message.reply_text("🚫 Free trial for new users has been **disabled**.")
-        else:
-            await message.reply_text(f"✅ New users will now automatically receive a **{days}-day 🎁 Gold (Trial)**.")
-    except ValueError:
-        await message.reply_text("❌ Please provide a valid number of days.")
     raise StopPropagation
