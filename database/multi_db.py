@@ -119,18 +119,40 @@ class MultiDB:
 # 💎 DYNAMIC VIP & VERIFICATION ENGINE
 # ==========================================
     async def apply_new_user_trial(self, user_id: int):
-        """Grants a new user a free VIP trial if enabled."""
-        if not self.clients: return
+        """Grants a new user the configured free VIP trial."""
+    
+        if not self.clients:
+            return
+    
         settings = await self.get_settings()
+        free_trial_enabled = settings.get("free_trial_enabled", True)
+    
+        if not free_trial_enabled:
+            return
+    
+        trial_plan = settings.get("free_trial_plan", "gold")
         trial_days = settings.get("free_trial_days", 7)
-        if trial_days > 0:
-            expiry_ts = time.time() + (trial_days * 86400)
-            await self.vip_users.update_one(
-                {"user_id": user_id},
-                {"$set": {"user_id": user_id, "plan_id": "gold", "expires_at": expiry_ts, "started_at": time.time()}},
-                upsert=True
-            )
-
+    
+        if not isinstance(trial_days, int) or trial_days <= 0:
+            return
+    
+        current_time = time.time()
+        expiry_ts = current_time + (trial_days * 86400)
+    
+        await self.vip_users.update_one(
+            {"user_id": user_id},
+            {
+                "$set": {
+                    "user_id": user_id,
+                    "plan_id": trial_plan,
+                    "expires_at": expiry_ts,
+                    "started_at": current_time
+                }
+            },
+            upsert=True
+        )
+    
+    
     async def get_active_vip_plan(self, user_id: int) -> Optional[str]:
         """Checks if a user is an active VIP and returns their plan_id."""
         if not self.clients: return None
