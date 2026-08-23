@@ -555,7 +555,7 @@ async def vip_panel_router(client, callback: CallbackQuery):
     # ==========================================
     # 🚀 NEW: DYNAMIC INCREMENTS ENGINE
     # ==========================================
-        elif action == "increments":
+    elif action == "increments":
         text = "🎁 **Increments Center**\n\nManage mass upgrades, rollbacks, and free tier injections."
         markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("🎁 Selected Increments", callback_data="vipwiz_inc_init", style=ButtonStyle.SUCCESS)],
@@ -564,14 +564,11 @@ async def vip_panel_router(client, callback: CallbackQuery):
         ])
         await callback.message.edit_text(text, reply_markup=markup)
 
-
     # ==========================================
     # 🎁 FREE TRIAL SETTINGS
     # ==========================================
     elif action == "freetrial":
-
         settings = await db.get_settings()
-
         enabled = settings.get("free_trial_enabled", True)
         trial_plan = settings.get("free_trial_plan", "gold")
         trial_days = settings.get("free_trial_days", 7)
