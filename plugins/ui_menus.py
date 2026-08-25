@@ -23,18 +23,9 @@ from config import Config
 
 START_TEXT = """👋 **𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 {bot_name}!**
 
-I'm here to help you find movies, series, and files quickly and easily. 🎬
+I'm here to help you discover and find movies, series, and other available files. 🎬 Search for your favorites and explore content across different qualities and languages.
 
-🔎 Search for what you're looking for, explore the available results, and choose the option that suits you.
-
-✨ **𝗪𝗛𝗔𝗧 𝗬𝗢𝗨 𝗖𝗔𝗡 𝗗𝗢**
-• Find movies and series
-• Explore available qualities
-• Check available languages
-• Access available files
-• Manage your profile and VIP
-
-Choose an option below to get started. 🚀"""
+Enjoy your experience! ✨"""
 
 
 MEDIA_MENU_TEXT = """🎬 **𝗠𝗘𝗗𝗜𝗔 𝗛𝗨𝗕**
