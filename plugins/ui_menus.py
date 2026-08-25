@@ -23,323 +23,286 @@ from config import Config
 
 START_TEXT = """👋 **𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 {bot_name}!**
 
-I am a highly-optimized Telegram repository search system. I help you instantly find movies, files, and data by indexing available public channels.
+I'm here to help you find movies, series, and files quickly and easily. 🎬
 
-✨ Use the category hubs below to explore my features:"""
+🔎 Search for what you're looking for, explore the available results, and choose the option that suits you.
+
+✨ **𝗪𝗛𝗔𝗧 𝗬𝗢𝗨 𝗖𝗔𝗡 𝗗𝗢**
+• Find movies and series
+• Explore available qualities
+• Check available languages
+• Access available files
+• Manage your profile and VIP
+
+Choose an option below to get started. 🚀"""
 
 
 MEDIA_MENU_TEXT = """🎬 **𝗠𝗘𝗗𝗜𝗔 𝗛𝗨𝗕**
 
-Everything you need to find and track your favorite movies.
+Everything related to your searches is available here.
 
-• View your past search history
-• Request movies that aren't in the database"""
+🕘 **Search History**
+View and revisit your previous searches.
+
+🎬 **Movie Requests**
+Can't find something? Send a request and let us know."""
 
 
 PROFILE_MENU_TEXT = """💎 **𝗠𝗬 𝗣𝗥𝗢𝗙𝗜𝗟𝗘**
 
-Manage your personal account, check your search stats, or upgrade to a VIP plan for premium features."""
+Manage your account and view your personal information.
+
+📊 Check your search activity
+👑 View your VIP status
+🛒 Explore available VIP plans"""
 
 
-INFO_MENU_TEXT = """ℹ️ **𝗜𝗡𝗙𝗢𝗥𝗠𝗔𝗧𝗜𝗢𝗡 𝗛𝗨𝗕**
+INFO_MENU_TEXT = """ℹ️ **𝗛𝗘𝗟𝗣 & 𝗜𝗡𝗙𝗢**
 
-Select a topic below to read more about my policies, how to use my commands, and my source code."""
+Need help or want to know more?
+
+Here you can learn how to use the bot, read important information, and view our policies.
+
+Choose a topic below."""
 
 
 ADMIN_MENU_TEXT = """👨‍💻 **𝗔𝗗𝗠𝗜𝗡 𝗖𝗢𝗠𝗠𝗔𝗡𝗗 𝗖𝗘𝗡𝗧𝗘𝗥**
 
-Welcome back, Boss! Here are your quick-reference system commands:
+Welcome back! Here are some quick admin tools.
 
-📢 `/broadcast` - Mass deploy messages
-👻 `/broadcast_edit` - Silently update an active broadcast
-🗑 `/broadcast_del` - Erase a broadcast from the Vault
-🎯 `/user_broadcast` - Secure 1-on-1 direct message
-🧹 `/delbroadcastuser` - Scrub an ad from a single user
-📊 `/info` - Check user database stats
+📢 `/broadcast` — Send a broadcast
+✏️ `/broadcast_edit` — Edit a broadcast
+🗑 `/broadcast_del` — Delete a broadcast
+🎯 `/user_broadcast` — Message one user
+🧹 `/delbroadcastuser` — Delete from one user
+📊 `/info` — View user information
 
-*(Use the settings menu for database/optimization controls)*"""
+💡 Use **Bot Commands** for the complete command guide."""
 
 
 BOT_COMMANDS_TEXT = """🤖 **𝗕𝗢𝗧 𝗖𝗢𝗠𝗠𝗔𝗡𝗗𝗦**
 
-Browse the available commands and learn how to use them.
+Browse all available commands in a simple and organized way.
 
-Choose a category below."""
+Choose a category below to continue."""
 
 
 USER_COMMANDS_TEXT = """👤 **𝗨𝗦𝗘𝗥 𝗖𝗢𝗠𝗠𝗔𝗡𝗗𝗦**
 
-Choose a category to see available commands and examples."""
+Explore commands available to you.
+
+Commands are grouped by their purpose to make them easier to understand.
+
+Choose a category below."""
 
 
 ADMIN_COMMANDS_TEXT = """👨‍💻 **𝗔𝗗𝗠𝗜𝗡 𝗖𝗢𝗠𝗠𝗔𝗡𝗗𝗦**
 
-Choose a category below.
+Manage the bot using the available admin tools.
 
-⚠️ These commands are available only to bot admins."""
+⚠️ These commands are restricted to authorized admins.
+
+Choose a category below."""
 
 
 SEARCH_COMMANDS_TEXT = """🔍 **𝗦𝗘𝗔𝗥𝗖𝗛 & 𝗗𝗜𝗦𝗖𝗢𝗩𝗘𝗥𝗬**
 
-`/movie <name>`
+🔎 `/movie <name>`
 Search for a movie or title.
+**Example:** `/movie Avengers`
 
-**Example:**
-`/movie Avengers`
+━━━━━━━━━━━━
 
-━━━━━━━━━━━━━━
+🎬 `/plot <movie name>`
+Get information about a movie.
+**Example:** `/plot Interstellar`
 
-`/plot <movie name>`
-Get information and details about a movie.
+━━━━━━━━━━━━
 
-**Example:**
-`/plot Interstellar`
+✨ `/font`
+Open the text style generator.
 
-━━━━━━━━━━━━━━
+━━━━━━━━━━━━
 
-`/font`
-Open the text font/style generator.
-
-━━━━━━━━━━━━━━
-
-💡 **Quick Search**
-
-You can also simply send the name of a movie or file to search normally."""
+💡 **𝗤𝗨𝗜𝗖𝗞 𝗦𝗘𝗔𝗥𝗖**
+Simply send the name of a movie or file to search directly."""
 
 
 ACCOUNT_COMMANDS_TEXT = """👤 **𝗔𝗖𝗖𝗢𝗨𝗡𝗧 & 𝗩𝗜𝗣**
 
-`/start`
+🏠 `/start`
 Open the main menu.
 
-━━━━━━━━━━━━━━
+🆔 `/id`
+View your User ID and Chat ID.
 
-`/id`
-Get your User ID and current Chat ID.
+ℹ️ `/info`
+View your account information.
 
-━━━━━━━━━━━━━━
+━━━━━━━━━━━━
 
-`/info`
-View information about yourself.
+💎 **𝗩𝗜𝗣 𝗖𝗢𝗠𝗠𝗔𝗡𝗗𝗦**
 
-━━━━━━━━━━━━━━
-
-💎 **VIP COMMANDS**
-
-`/checkvip`
+👑 `/checkvip`
 Check your current VIP status.
 
-`/buyvip`
+🛒 `/buyvip`
 View available VIP plans.
 
-`/redeem <code>`
+🎁 `/redeem <code>`
 Redeem a VIP or promotional code.
-
-**Example:**
-`/redeem ABC123`"""
+**Example:** `/redeem ABC123`"""
 
 
 SETTINGS_COMMANDS_TEXT = """⚙️ **𝗦𝗘𝗧𝗧𝗜𝗡𝗚𝗦 & 𝗚𝗥𝗢𝗨𝗣𝗦**
 
-`/settings`
-Open your personal bot settings.
+⚙️ `/settings`
+Open and manage your personal settings.
 
-━━━━━━━━━━━━━━
+━━━━━━━━━━━━
 
-👥 **GROUP CONNECTIONS**
+👥 **𝗚𝗥𝗢𝗨𝗣 𝗖𝗢𝗡𝗡𝗘𝗖𝗧𝗜𝗢𝗡𝗦**
 
-`/connect`
+🔗 `/connect`
 Connect the bot to a group.
 
-`/disconnect`
-Disconnect a linked group.
+🔌 `/disconnect`
+Disconnect your linked group.
 
-Use these commands to manage your connected groups and search preferences."""
+Use these commands to manage your group connection and preferences."""
 
 
 REQUEST_COMMANDS_TEXT = """🎬 **𝗥𝗘𝗤𝗨𝗘𝗦𝗧𝗦 & 𝗛𝗜𝗦𝗧𝗢𝗥𝗬**
 
-`/request <movie name>`
-Request a movie that is not available.
+🎥 `/request <movie name>`
+Request content that isn't available.
+**Example:** `/request Avatar 3`
 
-**Example:**
-`/request Avatar 3`
+━━━━━━━━━━━━
 
-━━━━━━━━━━━━━━
+🕘 `/history`
+View your previous searches.
 
-`/history`
-View your search history.
-
-━━━━━━━━━━━━━━
-
-`/clear_history`
+🗑 `/clear_history`
 Delete your search history."""
 
 
-TOOLS_COMMANDS_TEXT = """🛠 **𝗧𝗢𝗢𝗟𝗦 & 𝗜𝗡𝗙𝗢𝗥𝗠𝗔𝗧𝗜𝗢𝗡**
+TOOLS_COMMANDS_TEXT = """🛠 **𝗧𝗢𝗢𝗟𝗦 & 𝗜𝗡𝗙𝗢**
 
-`/help`
+❓ `/help`
 Learn how to use the bot.
 
-━━━━━━━━━━━━━━
+🤖 `/about`
+Learn more about the bot.
 
-`/about`
-View information about the bot.
+🆔 `/id`
+Get User or Chat IDs.
 
-━━━━━━━━━━━━━━
-
-`/id`
-Get user or chat IDs.
-
-━━━━━━━━━━━━━━
-
-`/info`
-View user information."""
+ℹ️ `/info`
+View account information."""
 
 
 BROADCAST_COMMANDS_TEXT = """📢 **𝗕𝗥𝗢𝗔𝗗𝗖𝗔𝗦𝗧 𝗖𝗢𝗠𝗠𝗔𝗡𝗗𝗦**
 
-`/broadcast`
-Start the Broadcast Wizard.
+📣 `/broadcast`
+Open the Broadcast Wizard.
 
-━━━━━━━━━━━━━━
-
-`/broadcast_edit`
+✏️ `/broadcast_edit`
 Edit a previously sent broadcast.
 
-━━━━━━━━━━━━━━
+🗑 `/broadcast_del`
+Delete a broadcast.
 
-`/broadcast_del`
-Delete or recall a broadcast.
+🎯 `/user_broadcast`
+Send a message to one user.
 
-━━━━━━━━━━━━━━
+🧹 `/delbroadcastuser`
+Delete a broadcast for a specific user.
 
-`/user_broadcast`
-Send a direct broadcast to one user.
+💬 `/replybroadcast`
+Reply to a user's broadcast response.
 
-━━━━━━━━━━━━━━
-
-`/delbroadcastuser`
-Remove a broadcast from a specific user.
-
-━━━━━━━━━━━━━━
-
-`/replybroadcast`
-Reply to a user's broadcast message.
-
-━━━━━━━━━━━━━━
-
-`/cancelfollowup`
-Cancel an active follow-up or scheduled broadcast."""
+❌ `/cancelfollowup`
+Cancel an active follow-up."""
 
 
 MODERATION_COMMANDS_TEXT = """👥 **𝗨𝗦𝗘𝗥 𝗠𝗔𝗡𝗔𝗚𝗘𝗠𝗘𝗡𝗧**
 
-Use these commands by replying to a user or providing their User ID where required.
+Reply to a user or provide their User ID where required.
 
-⚠️ `/warn`
-Give a warning.
+⚠️ `/warn` — Give a warning
+✅ `/unwarn` — Remove a warning
 
-`/unwarn`
-Remove a warning.
+🔇 `/mute` — Mute a user
+🔊 `/unmute` — Unmute a user
 
-━━━━━━━━━━━━━━
+🚫 `/ban` — Ban a user
+🟢 `/unban` — Remove a ban
 
-🔇 `/mute`
-Mute a user.
-
-🔊 `/unmute`
-Unmute a user.
-
-━━━━━━━━━━━━━━
-
-🚫 `/ban`
-Ban a user.
-
-✅ `/unban`
-Unban a user.
-
-━━━━━━━━━━━━━━
-
-👤 `/info <user_id>`
+ℹ️ `/info <user_id>`
 View detailed user information."""
 
 
 STATS_COMMANDS_TEXT = """📊 **𝗦𝗧𝗔𝗧𝗜𝗦𝗧𝗜𝗖𝗦 & 𝗠𝗢𝗡𝗜𝗧𝗢𝗥𝗜𝗡𝗚**
 
-`/stats`
+📈 `/stats`
 View bot and system statistics.
 
-━━━━━━━━━━━━━━
-
-`/userstats`
+👥 `/userstats`
 View detailed user statistics.
 
-━━━━━━━━━━━━━━
-
-`/info <user_id>`
-View detailed information about a specific user."""
+ℹ️ `/info <user_id>`
+View detailed information about a user."""
 
 
 BACKUP_COMMANDS_TEXT = """💾 **𝗗𝗔𝗧𝗔𝗕𝗔𝗦𝗘 & 𝗕𝗔𝗖𝗞𝗨𝗣**
 
-`/backup`
+📦 `/backup`
 Create a database backup.
 
-⚠️ Use this command only when required.
+⚠️ Use this command only when a backup is required.
 
-━━━━━━━━━━━━━━
+━━━━━━━━━━━━
 
-`/clear_job`
+🧹 `/clear_job`
 Clear an active background job."""
 
 
 INDEX_COMMANDS_TEXT = """📥 **𝗜𝗡𝗗𝗘𝗫𝗜𝗡𝗚 & 𝗙𝗜𝗟𝗘𝗦**
 
-`/index`
+📥 `/index`
 Start indexing a source.
 
-━━━━━━━━━━━━━━
+📦 `/batch`
+Alternative indexing command.
 
-`/batch`
-Alternative command for indexing.
-
-━━━━━━━━━━━━━━
-
-`/cancel_index`
+❌ `/cancel_index`
 Cancel the current indexing process.
 
-━━━━━━━━━━━━━━
-
-`/indexdata`
+📊 `/indexdata`
 Manage or inspect indexed data.
 
-━━━━━━━━━━━━━━
+━━━━━━━━━━━━
 
-🗑 **FILE MANAGEMENT**
+🗑 **𝗙𝗜𝗟𝗘 𝗠𝗔𝗡𝗔𝗚𝗘𝗠𝗘𝗡𝗧**
 
 Reply to a file and use:
 
-`/del`
+`/del` • `/delete` • `/remove`
 
-You may also use:
+━━━━━━━━━━━━
 
-`/delete`
-`/remove`
-
-━━━━━━━━━━━━━━
-
-`/cleanjunk`
+🧹 `/cleanjunk`
 Clean unnecessary or junk data."""
 
 
 VIP_ADMIN_COMMANDS_TEXT = """💎 **𝗩𝗜𝗣 𝗠𝗔𝗡𝗔𝗚𝗘𝗠𝗘𝗡𝗧**
 
-`/vippanel`
+👑 `/vippanel`
 
-Open the VIP management panel.
+Open the complete VIP management panel.
 
-From the panel, admins can manage:
+From the panel, you can manage:
 
 • VIP plans
 • VIP users
@@ -350,65 +313,86 @@ From the panel, admins can manage:
 
 SYSTEM_COMMANDS_TEXT = """⚙️ **𝗦𝗬𝗦𝗧𝗘𝗠 & 𝗚𝗥𝗢𝗨𝗣𝗦**
 
-`/admin`
-Open the admin control area.
+👨‍💻 `/admin`
+Open the admin control panel.
 
-━━━━━━━━━━━━━━
-
-`/setshort`
+🔗 `/setshort`
 Configure the URL shortener.
 
-━━━━━━━━━━━━━━
+🔄 `/refreshadmins`
+Refresh cached group admin data.
 
-`/refreshadmins`
-Refresh cached group administrator data.
-
-Use `/refreshadmins` inside a group."""
+💡 Use `/refreshadmins` inside the target group."""
 
 
-ABOUT_TEXT = """🤖 **Bot Name:** {bot_name}
-🧑‍💻 **Creator:** [LATHEESH](https://t.me/LATHEESH)
-⚙️ **Engine:** Kurigram (Python)
-📊 **Status:** Active & Running"""
+ABOUT_TEXT = """🤖 **𝗔𝗕𝗢𝗨𝗧 {bot_name}**
+
+{bot_name} helps you search for movies, series, and available files in a simple and convenient way. 🎬
+
+🔎 Search for what you want
+🎞 Explore available versions
+🌐 Check available languages
+📂 Access available results
+💎 Explore VIP features
+
+Everything is designed to make finding what you're looking for quick and easy."""
 
 
-HELP_TEXT = """🛠 **How to Use This Bot:**
+HELP_TEXT = """🛠 **𝗛𝗢𝗪 𝗧𝗢 𝗨𝗦𝗘 {bot_name}**
 
-**1.** Add me to your group using the button on the main menu.
-**2.** Make me an admin so I can read messages.
-**3.** Simply type the name of the movie or file you want.
-**4.** I will automatically reply with the matching files!"""
+Getting started is simple. 👇
 
+**① 🔎 Search**
+Send the name of the movie, series, or file you're looking for.
 
-SOURCE_TEXT = """🔒 **Source Code Status:**
+**② 🎬 Choose**
+Browse the available results and select the one you want.
 
-This bot's source code is strictly **private** and will not be published publicly.
+**③ ⚙️ Select Options**
+Choose from available quality, language, size, or other options.
 
-If you have business inquiries, contact the admin."""
+**④ 📂 Access**
+Follow the available buttons to continue with your selected result.
 
+💎 You can also explore **My Profile** to check your activity and VIP status.
 
-DISCLAIMER_TEXT = """⚠️ **Disclaimer:**
-
-This bot only indexes data that is publicly uploaded on Telegram by other users.
-
-The creator holds no responsibility for user-generated content."""
-
-
-DMCA_TEXT = """⚖️ **DMCA & Takedown Requests:**
-
-If you are a copyright owner and wish to place a request to remove a specific file or link from our database, please contact our admin directly.
-
-**Contact:** [@ntmadminbot](https://t.me/ntmadminbot)"""
+Need more help? Use the options below."""
 
 
-PRIVACY_TEXT = """🔒 **Privacy Policy:**
+SOURCE_TEXT = """🔒 **𝗦𝗢𝗨𝗥𝗖𝗘 𝗖𝗢𝗗𝗘**
 
-We respect your privacy.
+The source code for this bot is private and is not publicly available.
 
-This bot only collects basic usage statistics to optimize search performance.
+For business inquiries, support, or other important matters, please contact the administrator."""
 
-We do not store sensitive personal information."""
 
+DISCLAIMER_TEXT = """⚠️ **𝗗𝗜𝗦𝗖𝗟𝗔𝗜𝗠𝗘𝗥**
+
+This bot helps users search and access content available through Telegram.
+
+The bot does not claim ownership of content uploaded or shared by third-party users or channels.
+
+Users are responsible for how they use the content and services available through the bot."""
+
+
+DMCA_TEXT = """⚖️ **𝗗𝗠𝗖𝗔 & 𝗧𝗔𝗞𝗘𝗗𝗢𝗪𝗡 𝗥𝗘𝗤𝗨𝗘𝗦𝗧𝗦**
+
+If you are a copyright owner and would like to request the removal of specific content or links, please contact the administrator.
+
+📩 **Contact:** [@ntmadminbot](https://t.me/ntmadminbot)
+
+Please include enough information to identify the content in your request."""
+
+
+PRIVACY_TEXT = """🔒 **𝗣𝗥𝗜𝗩𝗔𝗖𝗬 𝗣𝗢𝗟𝗜𝗖𝗬**
+
+Your privacy matters to us.
+
+The bot may store basic account and usage information required for its features and functionality.
+
+Sensitive personal information is not intentionally collected through normal use of the bot.
+
+By using the bot, you agree to the applicable terms and policies."""
 
 # ==========================================
 # 🎨 STICKER & MEDIA PACKS
@@ -1162,12 +1146,13 @@ async def callback_ui_router(
     # ==========================================
 
     elif target == "info_menu":
-
+    
         await callback.message.edit_text(
-            text=INFO_MENU_TEXT,
+            text=INFO_MENU_TEXT.format(
+                bot_name=bot_me.first_name
+            ),
             reply_markup=info_category_keyboard()
         )
-
 
     elif target == "profile_menu":
 
@@ -1364,9 +1349,11 @@ async def callback_ui_router(
     # ==========================================
 
     elif target == "help":
-
+    
         await callback.message.edit_text(
-            text=HELP_TEXT,
+            text=HELP_TEXT.format(
+                bot_name=bot_me.first_name
+            ),
             reply_markup=InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton(
@@ -1377,7 +1364,6 @@ async def callback_ui_router(
                 ]
             ])
         )
-
 
     elif target == "about":
 
