@@ -188,7 +188,7 @@ async def admin_input_catcher(client: Client, message: Message):
     raise StopPropagation
 
 # ==========================================
-# ⚙️ PERSONAL SETTINGS ROUTER
+# 🛠 MASTER SETTINGS ROUTER
 # ==========================================
 @Client.on_message(filters.command("settings"))
 async def settings_router(client: Client, message: Message):
@@ -196,40 +196,220 @@ async def settings_router(client: Client, message: Message):
         return
 
     user_id = message.from_user.id
+    is_group = message.chat.type in [
+        ChatType.GROUP,
+        ChatType.SUPERGROUP
+    ]
 
+    # ==========================================
+    # 👑 BOT CREATOR
+    # ==========================================
+    if is_creator(user_id):
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "👤 Personal Search Settings",
+                    callback_data=f"tier_user_home_{user_id}",
+                    style=ButtonStyle.PRIMARY
+                )
+            ]
+        ]
+
+        if await db.get_connected_groups(user_id):
+            keyboard.append([
+                InlineKeyboardButton(
+                    "🛡️ Manage My Linked Groups",
+                    callback_data="tier_group_list",
+                    style=ButtonStyle.PRIMARY
+                )
+            ])
+
+        keyboard.append([
+            InlineKeyboardButton(
+                "📊 User Stats Dashboard",
+                callback_data="ui_userstats",
+                style=ButtonStyle.PRIMARY
+            )
+        ])
+
+        keyboard.append([
+            InlineKeyboardButton(
+                "👑 Bot Creator Control Panel",
+                callback_data="set_home",
+                style=ButtonStyle.SUCCESS
+            )
+        ])
+
+        keyboard.append([
+            InlineKeyboardButton(
+                "✖️ Close",
+                callback_data=f"uset_close_{user_id}",
+                style=ButtonStyle.DANGER
+            )
+        ])
+
+        await message.reply_text(
+            "🎛️ **Central Command Settings Hub:**\n"
+            "Select the settings area you want to manage.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+        raise StopPropagation
+
+    # ==========================================
+    # 🛡️ GROUP ADMIN / GROUP MANAGER
+    # ==========================================
+    if is_group:
+        try:
+            member = await client.get_chat_member(
+                message.chat.id,
+                user_id
+            )
+
+            is_group_admin = (
+                member.status in [
+                    "administrator",
+                    "owner"
+                ]
+            )
+
+        except Exception:
+            is_group_admin = False
+
+        g_sett = await db.get_group_settings(
+            message.chat.id
+        )
+
+        is_primary_connector = (
+            g_sett.get("connected_by") == user_id
+        )
+
+        # Group admin or primary connector
+        if is_group_admin or is_primary_connector:
+
+            keyboard = [
+                [
+                    InlineKeyboardButton(
+                        "👤 Personal Search Settings",
+                        callback_data=f"tier_user_home_{user_id}",
+                        style=ButtonStyle.PRIMARY
+                    )
+                ]
+            ]
+
+            if g_sett.get("connected_by"):
+                keyboard.append([
+                    InlineKeyboardButton(
+                        "🛡️ Manage This Group",
+                        callback_data=(
+                            f"tier_gmanage_"
+                            f"{message.chat.id}"
+                        ),
+                        style=ButtonStyle.PRIMARY
+                    )
+                ])
+
+            if await db.get_connected_groups(user_id):
+                keyboard.append([
+                    InlineKeyboardButton(
+                        "📂 Manage My Linked Groups",
+                        callback_data="tier_group_list",
+                        style=ButtonStyle.PRIMARY
+                    )
+                ])
+
+            keyboard.append([
+                InlineKeyboardButton(
+                    "✖️ Close",
+                    callback_data=f"uset_close_{user_id}",
+                    style=ButtonStyle.DANGER
+                )
+            ])
+
+            await message.reply_text(
+                "⚙️ **SETTINGS**\n\n"
+                "Choose the settings you want to manage.",
+                reply_markup=InlineKeyboardMarkup(
+                    keyboard
+                )
+            )
+
+            raise StopPropagation
+
+    # ==========================================
+    # 👤 NORMAL USER PERSONAL SETTINGS
+    # PM OR GROUP
+    # ==========================================
     u_sett = await db.get_user_settings(user_id)
-    m = u_sett.get("search_mode", "default")
-    c = u_sett.get("color_mode", False)
+
+    m = u_sett.get(
+        "search_mode",
+        "default"
+    )
+
+    c = u_sett.get(
+        "color_mode",
+        False
+    )
 
     buttons = [
         [
             InlineKeyboardButton(
-                text=f"{'✅' if m == 'default' else '❌'} Default Mode",
-                callback_data=f"uset_mode_default_{user_id}",
+                text=(
+                    f"{'✅' if m == 'default' else '❌'} "
+                    "Default Mode"
+                ),
+                callback_data=(
+                    f"uset_mode_default_{user_id}"
+                ),
                 style=ButtonStyle.PRIMARY
             ),
+
             InlineKeyboardButton(
-                text=f"{'✅' if m == 'interactive' else '❌'} Interactive Mode",
-                callback_data=f"uset_mode_interactive_{user_id}",
+                text=(
+                    f"{'✅' if m == 'interactive' else '❌'} "
+                    "Interactive Mode"
+                ),
+                callback_data=(
+                    f"uset_mode_interactive_{user_id}"
+                ),
                 style=ButtonStyle.PRIMARY
             )
         ],
+
         [
             InlineKeyboardButton(
-                text=f"{'✅' if m == 'hypertext' else '❌'} HyperText Mode",
-                callback_data=f"uset_mode_hypertext_{user_id}",
+                text=(
+                    f"{'✅' if m == 'hypertext' else '❌'} "
+                    "HyperText Mode"
+                ),
+                callback_data=(
+                    f"uset_mode_hypertext_{user_id}"
+                ),
                 style=ButtonStyle.PRIMARY
             ),
+
             InlineKeyboardButton(
-                text=f"{'✅' if m == 'matrix' else '❌'} Matrix Mode",
-                callback_data=f"uset_mode_matrix_{user_id}",
+                text=(
+                    f"{'✅' if m == 'matrix' else '❌'} "
+                    "Matrix Mode"
+                ),
+                callback_data=(
+                    f"uset_mode_matrix_{user_id}"
+                ),
                 style=ButtonStyle.PRIMARY
             )
         ],
+
         [
             InlineKeyboardButton(
-                text=f"{'✅' if c else '❌'} Colorful Buttons UI",
-                callback_data=f"uset_toggle_color_{user_id}",
+                text=(
+                    f"{'✅' if c else '❌'} "
+                    "Colorful Buttons UI"
+                ),
+                callback_data=(
+                    f"uset_toggle_color_{user_id}"
+                ),
                 style=ButtonStyle.SUCCESS
             )
         ]
@@ -238,33 +418,30 @@ async def settings_router(client: Client, message: Message):
     if m == "interactive":
         buttons.append([
             InlineKeyboardButton(
-                text="⚙️ Configure File Size & Language",
-                callback_data=f"uset_interactive_menu_{user_id}",
+                "⚙️ Configure File Size & Language",
+                callback_data=(
+                    f"uset_interactive_menu_{user_id}"
+                ),
                 style=ButtonStyle.PRIMARY
             )
         ])
 
     buttons.append([
         InlineKeyboardButton(
-            text="✖️ Close",
+            "✖️ Close",
             callback_data=f"uset_close_{user_id}",
             style=ButtonStyle.DANGER
         )
     ])
 
-    text = (
-        "⚙️ **𝗣𝗘𝗥𝗦𝗢𝗡𝗔𝗟 𝗦𝗘𝗧𝗧𝗜𝗡𝗚𝗦**\n\n"
-        "These settings apply only to your account.\n\n"
-        "Choose how you want your search results to appear."
-    )
-
     await message.reply_text(
-        text,
+        "⚙️ **PERSONAL SETTINGS**\n\n"
+        "These settings apply only to your account.\n\n"
+        "Choose how you want your search results to appear.",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
     raise StopPropagation
-
 @Client.on_message(filters.command("admin") & filters.user(Config.ADMINS))
 async def admin_direct_command(client: Client, message: Message):
     text = "👑 **Bot Creator Control Panel**\n\nSelect a master module to configure:"
