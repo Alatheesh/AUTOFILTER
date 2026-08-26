@@ -443,7 +443,7 @@ def get_start_markup(bot_username: str, user_id: int) -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(
                 "⚙️ Settings",
-                callback_data="ui_settings_menu",
+                callback_data=f"ui_settings_menu_{user_id}",
                 style=ButtonStyle.PRIMARY
             ),
             InlineKeyboardButton(
