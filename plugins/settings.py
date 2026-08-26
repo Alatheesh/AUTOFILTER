@@ -188,56 +188,82 @@ async def admin_input_catcher(client: Client, message: Message):
     raise StopPropagation
 
 # ==========================================
-# 🛠 MASTER SETTINGS ROUTER
+# ⚙️ PERSONAL SETTINGS ROUTER
 # ==========================================
 @Client.on_message(filters.command("settings"))
 async def settings_router(client: Client, message: Message):
-    if not message.from_user: return
+    if not message.from_user:
+        return
+
     user_id = message.from_user.id
-    
-    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-        g_sett = await db.get_group_settings(message.chat.id)
-        if not g_sett.get("connected_by"):
-            return await message.reply_text("⚠️ **Group Not Connected!**\nAn admin must send `/connect` in this group first to initialize the bot.")
-            
-        if g_sett.get("connected_by") != user_id and not is_creator(user_id):
-            return await message.reply_text("🛑 **Access Denied:** Only the Primary Connector who linked this group can change its settings.")
 
-        mode = g_sett.get("search_mode", "let_members_choose")
-        c_mode = g_sett.get("color_mode", "let_members_choose")
-        
-        # 🔄 Cycle Logic for Layout
-        if mode == "let_members_choose": mode_btn = InlineKeyboardButton("Layout: Let Members Choose 🔄", callback_data=f"gset_mode_force_default_{message.chat.id}", style=ButtonStyle.PRIMARY)
-        elif mode == "force_default": mode_btn = InlineKeyboardButton("Layout: Forced Default 🔄", callback_data=f"gset_mode_force_interactive_{message.chat.id}", style=ButtonStyle.PRIMARY)
-        elif mode == "force_interactive": mode_btn = InlineKeyboardButton("Layout: Forced Interactive 🔄", callback_data=f"gset_mode_force_hypertext_{message.chat.id}", style=ButtonStyle.PRIMARY)
-        elif mode == "force_hypertext": mode_btn = InlineKeyboardButton("Layout: Forced Matrix 🔄", callback_data=f"gset_mode_force_matrix_{message.chat.id}", style=ButtonStyle.PRIMARY)
-        else: mode_btn = InlineKeyboardButton("Layout: Forced Matrix 🔄", callback_data=f"gset_mode_let_members_choose_{message.chat.id}", style=ButtonStyle.PRIMARY)
+    u_sett = await db.get_user_settings(user_id)
+    m = u_sett.get("search_mode", "default")
+    c = u_sett.get("color_mode", False)
 
-        # 🎨 Cycle Logic for Colors
-        if c_mode == "let_members_choose": color_btn = InlineKeyboardButton("Colors: Let Members Choose 🔄", callback_data=f"gset_color_force_on_{message.chat.id}", style=ButtonStyle.PRIMARY)
-        elif c_mode == "force_on": color_btn = InlineKeyboardButton("Colors: Forced ON 🔄", callback_data=f"gset_color_force_off_{message.chat.id}", style=ButtonStyle.PRIMARY)
-        else: color_btn = InlineKeyboardButton("Colors: Forced OFF 🔄", callback_data=f"gset_color_let_members_choose_{message.chat.id}", style=ButtonStyle.PRIMARY)
-
-        buttons = [
-            [InlineKeyboardButton("🛡️ Moderation Rules Hub", callback_data=f"set_mod_local_{message.chat.id}", style=ButtonStyle.PRIMARY)],
-            [InlineKeyboardButton("📝 File Caption Settings", callback_data=f"set_caption_{message.chat.id}", style=ButtonStyle.PRIMARY)],
-            [mode_btn],
-            [color_btn]
+    buttons = [
+        [
+            InlineKeyboardButton(
+                text=f"{'✅' if m == 'default' else '❌'} Default Mode",
+                callback_data=f"uset_mode_default_{user_id}",
+                style=ButtonStyle.PRIMARY
+            ),
+            InlineKeyboardButton(
+                text=f"{'✅' if m == 'interactive' else '❌'} Interactive Mode",
+                callback_data=f"uset_mode_interactive_{user_id}",
+                style=ButtonStyle.PRIMARY
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=f"{'✅' if m == 'hypertext' else '❌'} HyperText Mode",
+                callback_data=f"uset_mode_hypertext_{user_id}",
+                style=ButtonStyle.PRIMARY
+            ),
+            InlineKeyboardButton(
+                text=f"{'✅' if m == 'matrix' else '❌'} Matrix Mode",
+                callback_data=f"uset_mode_matrix_{user_id}",
+                style=ButtonStyle.PRIMARY
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=f"{'✅' if c else '❌'} Colorful Buttons UI",
+                callback_data=f"uset_toggle_color_{user_id}",
+                style=ButtonStyle.SUCCESS
+            )
         ]
-        await message.reply_text(f"🛠️ **Group Settings Menu:** `{message.chat.title}`\nConfigure settings and moderation limits for this group:", reply_markup=InlineKeyboardMarkup(buttons))
-        raise StopPropagation
+    ]
 
-    else:
-        keyboard = [[InlineKeyboardButton(text="👤 Personal Search Settings", callback_data="tier_user_home", style=ButtonStyle.PRIMARY)]]
-        if await db.get_connected_groups(user_id): keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list", style=ButtonStyle.PRIMARY)])
-        if is_creator(user_id):
-            keyboard.append([InlineKeyboardButton("📊 User Stats Dashboard", callback_data="ui_userstats", style=ButtonStyle.PRIMARY)])
-            keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="set_home", style=ButtonStyle.SUCCESS)])
-            
-        keyboard.append([InlineKeyboardButton("🔙 Back to Features", callback_data="ui_features", style=ButtonStyle.DANGER)])
-            
-        await message.reply_text("🎛️ **Central Command Settings Hub:**\nSelect the access layer tier you wish to inspect or modify:", reply_markup=InlineKeyboardMarkup(keyboard))
-        raise StopPropagation
+    if m == "interactive":
+        buttons.append([
+            InlineKeyboardButton(
+                text="⚙️ Configure File Size & Language",
+                callback_data=f"uset_interactive_menu_{user_id}",
+                style=ButtonStyle.PRIMARY
+            )
+        ])
+
+    buttons.append([
+        InlineKeyboardButton(
+            text="✖️ Close",
+            callback_data=f"uset_close_{user_id}",
+            style=ButtonStyle.DANGER
+        )
+    ])
+
+    text = (
+        "⚙️ **𝗣𝗘𝗥𝗦𝗢𝗡𝗔𝗟 𝗦𝗘𝗧𝗧𝗜𝗡𝗚𝗦**\n\n"
+        "These settings apply only to your account.\n\n"
+        "Choose how you want your search results to appear."
+    )
+
+    await message.reply_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+    raise StopPropagation
 
 @Client.on_message(filters.command("admin") & filters.user(Config.ADMINS))
 async def admin_direct_command(client: Client, message: Message):
@@ -262,62 +288,278 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
     user_id = query.from_user.id
     data = query.data
 
-    if data == "tier_user_home":
-        u_sett = await db.get_user_settings(user_id)
-        m = u_sett.get("search_mode", "default")
-        c = u_sett.get("color_mode", False) # 🎨 NEW
-        buttons = [
-            [InlineKeyboardButton(text=f"{'✅' if m=='default' else '❌'} Default Mode", callback_data="uset_mode_default", style=ButtonStyle.PRIMARY), InlineKeyboardButton(text=f"{'✅' if m=='interactive' else '❌'} Interactive Mode", callback_data="uset_mode_interactive", style=ButtonStyle.PRIMARY)],
-            [InlineKeyboardButton(text=f"{'✅' if m=='hypertext' else '❌'} HyperText Mode", callback_data="uset_mode_hypertext", style=ButtonStyle.PRIMARY), InlineKeyboardButton(text=f"{'✅' if m=='matrix' else '❌'} Matrix Mode", callback_data="uset_mode_matrix", style=ButtonStyle.PRIMARY)], 
-            [InlineKeyboardButton(text=f"{'✅' if c else '❌'} Colorful Buttons UI", callback_data="uset_toggle_color", style=ButtonStyle.SUCCESS)]
-        ]
-        if m == "interactive": buttons.append([InlineKeyboardButton(text="⚙️ Configure File Size & Language", callback_data="uset_interactive_menu", style=ButtonStyle.PRIMARY)])
-        buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="tier_root_fallback", style=ButtonStyle.DANGER)])
-        return await query.message.edit_text("👤 **Personal Display Preferences:**\nChoose how output records populate on your workspace screen:", reply_markup=InlineKeyboardMarkup(buttons))
-
-    if data == "uset_mode_default":
-        await db.update_user_setting(user_id, "search_mode", "default")
-        query.data = "tier_user_home"; return await menus_callback_handler(client, query)
-
-    if data == "uset_mode_interactive":
-        await db.update_user_setting(user_id, "search_mode", "interactive")
-        query.data = "uset_interactive_menu"; return await menus_callback_handler(client, query)
-
-    if data == "uset_mode_hypertext":
-        await db.update_user_setting(user_id, "search_mode", "hypertext")
-        query.data = "tier_user_home"; return await menus_callback_handler(client, query)
-
-    if data == "uset_mode_matrix":
-        await db.update_user_setting(user_id, "search_mode", "matrix")
-        query.data = "tier_user_home"; return await menus_callback_handler(client, query)
-
-    # 🎨 NEW: Handler for Personal Color Toggle
-    if data == "uset_toggle_color":
-        u_sett = await db.get_user_settings(user_id)
-        await db.update_user_setting(user_id, "color_mode", not u_sett.get("color_mode", False))
-        query.data = "tier_user_home"; return await menus_callback_handler(client, query)
-
-    if data == "uset_interactive_menu":
-        u_sett = await db.get_user_settings(user_id)
-        s, l = u_sett.get("size", "all"), u_sett.get("language", "all")
-        buttons = [
-            [InlineKeyboardButton(f"{'✅ ' if s=='small' else ''}< 500 MB", callback_data="uset_s_small", style=ButtonStyle.PRIMARY), InlineKeyboardButton(f"{'✅ ' if s=='medium' else ''}500 MB - 1 GB", callback_data="uset_s_medium", style=ButtonStyle.PRIMARY)],
-            [InlineKeyboardButton(f"{'✅ ' if s=='large' else ''}1 GB - 2 GB", callback_data="uset_s_large", style=ButtonStyle.PRIMARY), InlineKeyboardButton(f"{'✅ ' if s=='xlarge' else ''}> 2 GB", callback_data="uset_s_xlarge", style=ButtonStyle.PRIMARY)],
-            [InlineKeyboardButton(f"{'✅ ' if s=='all' else ''}Any File Size", callback_data="uset_s_all", style=ButtonStyle.PRIMARY)],
-            [InlineKeyboardButton(f"{'✅ ' if l=='tamil' else ''}Tamil", callback_data="uset_l_tamil", style=ButtonStyle.PRIMARY), InlineKeyboardButton(f"{'✅ ' if l=='telugu' else ''}Telugu", callback_data="uset_l_telugu", style=ButtonStyle.PRIMARY), InlineKeyboardButton(f"{'✅ ' if l=='hindi' else ''}Hindi", callback_data="uset_l_hindi", style=ButtonStyle.PRIMARY)],
-            [InlineKeyboardButton(f"{'✅ ' if l=='all' else ''}Any Language", callback_data="uset_l_all", style=ButtonStyle.PRIMARY)],
-            [InlineKeyboardButton("🔙 Save & Return", callback_data="tier_user_home", style=ButtonStyle.SUCCESS)]
-        ]
+    # ==========================================
+    # 🔐 PERSONAL SETTINGS OWNER CHECK
+    # ==========================================
+    if data.startswith("uset_"):
         try:
-            return await query.message.edit_text("✨ **Interactive Mode Filter Settings**", reply_markup=InlineKeyboardMarkup(buttons))
+            owner_id = int(data.rsplit("_", 1)[1])
+        except (ValueError, IndexError):
+            return await query.answer()
+
+        if query.from_user.id != owner_id:
+            return await query.answer(
+                "⚠️ This is not your settings request.\n\n"
+                "Please use /settings to open your own settings.",
+                show_alert=True
+            )
+
+    # ==========================================
+    # ⚙️ PERSONAL SETTINGS HOME
+    # ==========================================
+    if data.startswith("tier_user_home_"):
+        try:
+            owner_id = int(data.rsplit("_", 1)[1])
+        except (ValueError, IndexError):
+            return await query.answer()
+
+        if query.from_user.id != owner_id:
+            return await query.answer(
+                "⚠️ This is not your settings request.\n\n"
+                "Please use /settings to open your own settings.",
+                show_alert=True
+            )
+
+        u_sett = await db.get_user_settings(owner_id)
+        m = u_sett.get("search_mode", "default")
+        c = u_sett.get("color_mode", False)
+
+        buttons = [
+            [
+                InlineKeyboardButton(
+                    text=f"{'✅' if m == 'default' else '❌'} Default Mode",
+                    callback_data=f"uset_mode_default_{owner_id}",
+                    style=ButtonStyle.PRIMARY
+                ),
+                InlineKeyboardButton(
+                    text=f"{'✅' if m == 'interactive' else '❌'} Interactive Mode",
+                    callback_data=f"uset_mode_interactive_{owner_id}",
+                    style=ButtonStyle.PRIMARY
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"{'✅' if m == 'hypertext' else '❌'} HyperText Mode",
+                    callback_data=f"uset_mode_hypertext_{owner_id}",
+                    style=ButtonStyle.PRIMARY
+                ),
+                InlineKeyboardButton(
+                    text=f"{'✅' if m == 'matrix' else '❌'} Matrix Mode",
+                    callback_data=f"uset_mode_matrix_{owner_id}",
+                    style=ButtonStyle.PRIMARY
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"{'✅' if c else '❌'} Colorful Buttons UI",
+                    callback_data=f"uset_toggle_color_{owner_id}",
+                    style=ButtonStyle.SUCCESS
+                )
+            ]
+        ]
+
+        if m == "interactive":
+            buttons.append([
+                InlineKeyboardButton(
+                    text="⚙️ Configure File Size & Language",
+                    callback_data=f"uset_interactive_menu_{owner_id}",
+                    style=ButtonStyle.PRIMARY
+                )
+            ])
+
+        buttons.append([
+            InlineKeyboardButton(
+                text="🔙 Back to Features",
+                callback_data="ui_features",
+                style=ButtonStyle.DANGER
+            )
+        ])
+
+        return await query.message.edit_text(
+            "⚙️ **𝗣𝗘𝗥𝗦𝗢𝗡𝗔𝗟 𝗦𝗘𝗧𝗧𝗜𝗡𝗚𝗦**\n\n"
+            "These settings apply only to your account.\n\n"
+            "Choose how you want your search results to appear.",
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+    # ==========================================
+    # 🔍 PERSONAL SEARCH MODE
+    # ==========================================
+    if data.startswith("uset_mode_default_"):
+        owner_id = int(data.rsplit("_", 1)[1])
+        await db.update_user_setting(owner_id, "search_mode", "default")
+        query.data = f"tier_user_home_{owner_id}"
+        return await menus_callback_handler(client, query)
+
+    if data.startswith("uset_mode_interactive_"):
+        owner_id = int(data.rsplit("_", 1)[1])
+        await db.update_user_setting(owner_id, "search_mode", "interactive")
+        query.data = f"uset_interactive_menu_{owner_id}"
+        return await menus_callback_handler(client, query)
+
+    if data.startswith("uset_mode_hypertext_"):
+        owner_id = int(data.rsplit("_", 1)[1])
+        await db.update_user_setting(owner_id, "search_mode", "hypertext")
+        query.data = f"tier_user_home_{owner_id}"
+        return await menus_callback_handler(client, query)
+
+    if data.startswith("uset_mode_matrix_"):
+        owner_id = int(data.rsplit("_", 1)[1])
+        await db.update_user_setting(owner_id, "search_mode", "matrix")
+        query.data = f"tier_user_home_{owner_id}"
+        return await menus_callback_handler(client, query)
+
+    # ==========================================
+    # 🎨 PERSONAL COLOR TOGGLE
+    # ==========================================
+    if data.startswith("uset_toggle_color_"):
+        owner_id = int(data.rsplit("_", 1)[1])
+        u_sett = await db.get_user_settings(owner_id)
+
+        await db.update_user_setting(
+            owner_id,
+            "color_mode",
+            not u_sett.get("color_mode", False)
+        )
+
+        query.data = f"tier_user_home_{owner_id}"
+        return await menus_callback_handler(client, query)
+
+    # ==========================================
+    # ⚙️ INTERACTIVE FILTER SETTINGS
+    # ==========================================
+    if data.startswith("uset_interactive_menu_"):
+        owner_id = int(data.rsplit("_", 1)[1])
+
+        u_sett = await db.get_user_settings(owner_id)
+        s = u_sett.get("size", "all")
+        l = u_sett.get("language", "all")
+
+        buttons = [
+            [
+                InlineKeyboardButton(
+                    f"{'✅ ' if s == 'small' else ''}< 500 MB",
+                    callback_data=f"uset_s_small_{owner_id}",
+                    style=ButtonStyle.PRIMARY
+                ),
+                InlineKeyboardButton(
+                    f"{'✅ ' if s == 'medium' else ''}500 MB - 1 GB",
+                    callback_data=f"uset_s_medium_{owner_id}",
+                    style=ButtonStyle.PRIMARY
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    f"{'✅ ' if s == 'large' else ''}1 GB - 2 GB",
+                    callback_data=f"uset_s_large_{owner_id}",
+                    style=ButtonStyle.PRIMARY
+                ),
+                InlineKeyboardButton(
+                    f"{'✅ ' if s == 'xlarge' else ''}> 2 GB",
+                    callback_data=f"uset_s_xlarge_{owner_id}",
+                    style=ButtonStyle.PRIMARY
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    f"{'✅ ' if s == 'all' else ''}Any File Size",
+                    callback_data=f"uset_s_all_{owner_id}",
+                    style=ButtonStyle.PRIMARY
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    f"{'✅ ' if l == 'tamil' else ''}Tamil",
+                    callback_data=f"uset_l_tamil_{owner_id}",
+                    style=ButtonStyle.PRIMARY
+                ),
+                InlineKeyboardButton(
+                    f"{'✅ ' if l == 'telugu' else ''}Telugu",
+                    callback_data=f"uset_l_telugu_{owner_id}",
+                    style=ButtonStyle.PRIMARY
+                ),
+                InlineKeyboardButton(
+                    f"{'✅ ' if l == 'hindi' else ''}Hindi",
+                    callback_data=f"uset_l_hindi_{owner_id}",
+                    style=ButtonStyle.PRIMARY
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    f"{'✅ ' if l == 'all' else ''}Any Language",
+                    callback_data=f"uset_l_all_{owner_id}",
+                    style=ButtonStyle.PRIMARY
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 Save & Return",
+                    callback_data=f"tier_user_home_{owner_id}",
+                    style=ButtonStyle.SUCCESS
+                )
+            ]
+        ]
+
+        try:
+            return await query.message.edit_text(
+                "✨ **𝗜𝗡𝗧𝗘𝗥𝗔𝗖𝗧𝗜𝗩𝗘 𝗠𝗢𝗗𝗘 𝗙𝗜𝗟𝗧𝗘𝗥 𝗦𝗘𝗧𝗧𝗜𝗡𝗚𝗦**\n\n"
+                "Choose your preferred file size and language.",
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
         except Exception:
-            return await query.answer() # Silently ignores double-clicks
+            return await query.answer()
 
+    # ==========================================
+    # 📦 PERSONAL FILE SIZE
+    # ==========================================
     if data.startswith("uset_s_"):
-        await db.update_user_setting(user_id, "size", data.replace("uset_s_", "")); query.data = "uset_interactive_menu"; return await menus_callback_handler(client, query)
-    if data.startswith("uset_l_"):
-        await db.update_user_setting(user_id, "language", data.replace("uset_l_", "")); query.data = "uset_interactive_menu"; return await menus_callback_handler(client, query)
+        parts = data.split("_")
+        size = parts[-2]
+        owner_id = int(parts[-1])
 
+        await db.update_user_setting(
+            owner_id,
+            "size",
+            size
+        )
+
+        query.data = f"uset_interactive_menu_{owner_id}"
+        return await menus_callback_handler(client, query)
+
+    # ==========================================
+    # 🌐 PERSONAL LANGUAGE
+    # ==========================================
+    if data.startswith("uset_l_"):
+        parts = data.split("_")
+        language = parts[-2]
+        owner_id = int(parts[-1])
+
+        await db.update_user_setting(
+            owner_id,
+            "language",
+            language
+        )
+
+        query.data = f"uset_interactive_menu_{owner_id}"
+        return await menus_callback_handler(client, query)
+
+    # ==========================================
+    # ✖️ CLOSE PERSONAL SETTINGS
+    # ==========================================
+    if data.startswith("uset_close_"):
+        owner_id = int(data.rsplit("_", 1)[1])
+
+        try:
+            await query.message.delete()
+        except Exception:
+            try:
+                await query.message.edit_reply_markup(
+                    reply_markup=None
+                )
+            except Exception:
+                pass
+
+        return await query.answer()
     if data == "tier_group_list":
         managed = await db.get_connected_groups(user_id)
         if not managed: return await query.answer("No linked administration nodes found.", show_alert=True)
