@@ -446,6 +446,11 @@ async def settings_callbacks(client: Client, callback: CallbackQuery):
     action = callback.data
     user_id = callback.from_user.id
 
+    # 🔒 AUTHORIZATION LOCK: Only the command sender can click Admin buttons!
+    if callback.message.reply_to_message:
+        if callback.from_user.id != callback.message.reply_to_message.from_user.id:
+            return await callback.answer("⚠️ Access Denied: You cannot modify admin settings.", show_alert=True)
+
     if action in ["set_home", "set_inside", "set_shortener", "set_requests", "set_autodelete"] or action.startswith("set_mod_") or action.startswith("set_caption_"):
         if user_id in ADMIN_STATE: del ADMIN_STATE[user_id]
 
