@@ -231,6 +231,11 @@ async def callback_ui_router(client: Client, callback: CallbackQuery):
     user_id = callback.from_user.id
     bot_me = await client.get_me()
     
+    # 🔒 AUTHORIZATION LOCK: Only the command sender can click!
+    if callback.message.reply_to_message:
+        if callback.from_user.id != callback.message.reply_to_message.from_user.id:
+            return await callback.answer("⚠️ This is not your menu! Please type /start yourself.", show_alert=True)
+    
     # 🏠 MAIN MENU & FEATURES OVERRIDE (Fixes the "Back to Features" Button!)
     if target in ["back", "features"]:
         await callback.message.edit_text(text=START_TEXT.format(bot_name=bot_me.first_name), reply_markup=get_start_markup(bot_me.username, user_id), link_preview_options=LinkPreviewOptions(is_disabled=True))
