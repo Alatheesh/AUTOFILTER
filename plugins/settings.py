@@ -195,14 +195,17 @@ async def settings_router(client: Client, message: Message):
     if not message.from_user: return
     user_id = message.from_user.id
     
+    is_group_admin = False
+    
+    # 1. Check if we are in a group and if the user is the Primary Connector
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         g_sett = await db.get_group_settings(message.chat.id)
-        if not g_sett.get("connected_by"):
-            return await message.reply_text("⚠️ **Group Not Connected!**\nAn admin must send `/connect` in this group first to initialize the bot.")
+        if g_sett.get("connected_by") == user_id or is_creator(user_id):
+            is_group_admin = True
             
-        if g_sett.get("connected_by") != user_id and not is_creator(user_id):
-            return await message.reply_text("🛑 **Access Denied:** Only the Primary Connector who linked this group can change its settings.")
-
+    # 2. GROUP ADMIN VIEW (Only shows if they linked the group)
+    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP] and is_group_admin:
+        g_sett = await db.get_group_settings(message.chat.id)
         mode = g_sett.get("search_mode", "let_members_choose")
         c_mode = g_sett.get("color_mode", "let_members_choose")
         
@@ -222,19 +225,23 @@ async def settings_router(client: Client, message: Message):
             [InlineKeyboardButton("🛡️ Moderation Rules Hub", callback_data=f"set_mod_local_{message.chat.id}", style=ButtonStyle.PRIMARY)],
             [InlineKeyboardButton("📝 File Caption Settings", callback_data=f"set_caption_{message.chat.id}", style=ButtonStyle.PRIMARY)],
             [mode_btn],
-            [color_btn]
+            [color_btn],
+            [InlineKeyboardButton("❌ Close", callback_data="close_data", style=ButtonStyle.DANGER)] # <-- DYNAMIC CLOSE BUTTON
         ]
         await message.reply_text(f"🛠️ **Group Settings Menu:** `{message.chat.title}`\nConfigure settings and moderation limits for this group:", reply_markup=InlineKeyboardMarkup(buttons))
         raise StopPropagation
 
+    # 3. PERSONAL VIEW (For PMs AND Normal Users in Groups)
     else:
         keyboard = [[InlineKeyboardButton(text="👤 Personal Search Settings", callback_data="tier_user_home", style=ButtonStyle.PRIMARY)]]
-        if await db.get_connected_groups(user_id): keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list", style=ButtonStyle.PRIMARY)])
+        if await db.get_connected_groups(user_id): 
+            keyboard.append([InlineKeyboardButton(text="🛡️ Manage My Linked Groups", callback_data="tier_group_list", style=ButtonStyle.PRIMARY)])
         if is_creator(user_id):
             keyboard.append([InlineKeyboardButton("📊 User Stats Dashboard", callback_data="ui_userstats", style=ButtonStyle.PRIMARY)])
             keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="set_home", style=ButtonStyle.SUCCESS)])
             
-        keyboard.append([InlineKeyboardButton("🔙 Back to Features", callback_data="ui_features", style=ButtonStyle.DANGER)])
+        # <-- DYNAMIC CLOSE BUTTON (Because they used the command)
+        keyboard.append([InlineKeyboardButton("❌ Close", callback_data="close_data", style=ButtonStyle.DANGER)])
             
         await message.reply_text("🎛️ **Central Command Settings Hub:**\nSelect the access layer tier you wish to inspect or modify:", reply_markup=InlineKeyboardMarkup(keyboard))
         raise StopPropagation
@@ -261,6 +268,11 @@ async def admin_direct_command(client: Client, message: Message):
 async def menus_callback_handler(client: Client, query: CallbackQuery):
     user_id = query.from_user.id
     data = query.data
+
+    # 🔒 AUTHORIZATION LOCK: Only the command sender can click!
+    if query.message.reply_to_message:
+        if query.from_user.id != query.message.reply_to_message.from_user.id:
+            return await query.answer("⚠️ This is not your settings request! Please type /settings yourself.", show_alert=True)
 
     if data == "tier_user_home":
         u_sett = await db.get_user_settings(user_id)
@@ -416,7 +428,13 @@ async def menus_callback_handler(client: Client, query: CallbackQuery):
             keyboard.append([InlineKeyboardButton("📊 User Stats Dashboard", callback_data="ui_userstats", style=ButtonStyle.PRIMARY)])
             keyboard.append([InlineKeyboardButton(text="👑 Bot Creator Control Panel", callback_data="set_home", style=ButtonStyle.SUCCESS)])
             
-        keyboard.append([InlineKeyboardButton("🔙 Back to Features", callback_data="ui_features", style=ButtonStyle.DANGER)])
+        # 🧠 SMART BUTTON CHECK: Look at the original command message
+        is_from_cmd = query.message.reply_to_message and query.message.reply_to_message.text and query.message.reply_to_message.text.startswith("/settings")
+        
+        if is_from_cmd:
+            keyboard.append([InlineKeyboardButton("❌ Close", callback_data="close_data", style=ButtonStyle.DANGER)])
+        else:
+            keyboard.append([InlineKeyboardButton("🔙 Back to Features", callback_data="ui_features", style=ButtonStyle.DANGER)])
         
         return await query.message.edit_text("🎛️ **Central Command Settings Hub**", reply_markup=InlineKeyboardMarkup(keyboard))
 
