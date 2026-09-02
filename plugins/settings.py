@@ -814,12 +814,112 @@ async def clear_active_job(client: Client, message: Message):
     else: await message.reply_text("⚠️ **No active job found.**")
     raise StopPropagation
 
+# ==========================================
+# 📊 CORE USER STATS GENERATOR
+# ==========================================
+async def generate_advanced_user_stats():
+    try:
+        total_users = await db.users.count_documents({})
+        total_muted = await db.punishments.count_documents({"type": "mute"})
+        total_banned = await db.punishments.count_documents({"type": "ban"})
+
+        search_result = await db.users.aggregate([
+            {"$group": {"_id": None, "total_searches": {"$sum": {"$ifNull": ["$total_searches", 0]}}}}
+        ]).to_list(length=1)
+
+        total_searches = search_result[0].get("total_searches", 0) if search_result else 0
+        average_searches = round(total_searches / total_users, 2) if total_users > 0 else 0
+        users_with_no_searches = await db.users.count_documents({
+            "$or": [{"total_searches": {"$exists": False}}, {"total_searches": 0}, {"total_searches": None}]
+        })
+
+        async def get_most_used(field):
+            result = await db.users.aggregate([
+                {"$match": {field: {"$exists": True, "$nin": [None, ""]}}},
+                {"$group": {"_id": f"${field}", "count": {"$sum": 1}}},
+                {"$sort": {"count": -1}},
+                {"$limit": 1}
+            ]).to_list(length=1)
+            return str(result[0]["_id"]) if result else "N/A"
+
+        most_search_mode = await get_most_used("search_mode")
+        most_quality = await get_most_used("quality")
+        most_language = await get_most_used("language")
+        most_size = await get_most_used("size")
+
+        import time
+        from datetime import datetime
+        current_time = time.time()
+        vip_documents = await db.vip_users.find({}).to_list(length=None)
+
+        active_vip = 0
+        expired_vip = 0
+        trial_users = 0
+        plan_distribution = {}
+
+        for vip in vip_documents:
+            plan = vip.get("plan") or vip.get("plan_id") or "Unknown"
+            expiry = vip.get("expiry") or vip.get("expires_at")
+            if isinstance(expiry, datetime): expiry = expiry.timestamp()
+            try:
+                if expiry is not None: expiry = float(expiry)
+            except (ValueError, TypeError):
+                expiry = None
+
+            is_trial = "trial" in str(plan).lower()
+
+            if is_trial and expiry is not None:
+                if expiry > current_time: trial_users += 1
+                plan_distribution[plan] = plan_distribution.get(plan, 0) + 1
+                continue
+
+            if expiry is not None:
+                if expiry > current_time: active_vip += 1
+                else: expired_vip += 1
+            else:
+                status = str(vip.get("status", "")).lower()
+                if status == "active": active_vip += 1
+                elif status: expired_vip += 1
+
+            plan_distribution[plan] = plan_distribution.get(plan, 0) + 1
+
+        if plan_distribution:
+            plan_text = ""
+            for plan, count in sorted(plan_distribution.items(), key=lambda item: item[1], reverse=True):
+                plan_text += f"\n   • `{plan}`: `{count:,}`"
+        else:
+            plan_text = "\n   • No VIP plans found"
+
+        stats_text = (
+            "📊 **USER STATISTICS**\n\n"
+            f"👥 Total Users: `{total_users:,}`\n"
+            f"🟢 Active Users: `{total_users - total_banned:,}`\n"
+            f"🔇 Total Muted: `{total_muted}` | 🚫 Total Banned: `{total_banned}`\n"
+            f"🔎 Total Searches: `{total_searches:,}`\n"
+            f"📈 Average Searches/User: `{average_searches}`\n"
+            f"😴 Users With 0 Searches: `{users_with_no_searches:,}`\n\n"
+            "━━━━━━━━━━━━━━\n\n"
+            "⚙️ **USER PREFERENCES**\n\n"
+            f"🔍 Most Used Search Mode: `{most_search_mode}`\n"
+            f"🎬 Most Selected Quality: `{most_quality}`\n"
+            f"🌐 Most Selected Language: `{most_language}`\n"
+            f"📦 Most Selected Size: `{most_size}`\n\n"
+            "━━━━━━━━━━━━━━\n\n"
+            "💎 **VIP STATISTICS**\n\n"
+            f"├ 🟢 Active VIP Users: `{active_vip:,}`\n"
+            f"├ ⌛ Expired VIP Users: `{expired_vip:,}`\n"
+            f"├ 🎁 Trial Users: `{trial_users:,}`\n"
+            f"└ 📊 Plan Distribution:{plan_text}"
+        )
+        return stats_text
+    except Exception as e:
+        return f"❌ **Failed to get user statistics**\n\n`{str(e)}`"
+
 @Client.on_message(filters.command("userstats") & filters.user(Config.ADMINS))
-async def get_user_stats(client: Client, message: Message):
-    total_users = await db.users.count_documents({})
-    total_muted, total_banned = await db.punishments.count_documents({"type": "mute"}), await db.punishments.count_documents({"type": "ban"})
-    stats_text = f"📊 **Bot User Statistics**\n\n👥 Total Users: `{total_users}`\n🟢 Active Users: `{total_users - total_banned}`\n🔇 Total Muted: `{total_muted}`\n🚫 Total Banned: `{total_banned}`\n\n⚙️ **Admin Shortcuts:**\n`/mute <id> [time] [reason]`\n`/ban <id> [reason]`"
-    await message.reply_text(stats_text)
+async def get_user_stats_cmd(client: Client, message: Message):
+    progress = await message.reply_text("📊 **Calculating advanced user statistics...**")
+    stats_text = await generate_advanced_user_stats()
+    await progress.edit_text(stats_text)
     raise StopPropagation
 
 async def get_stats_home_text_and_buttons():
@@ -1065,26 +1165,13 @@ async def stats_callback_handler(client: Client, callback: CallbackQuery):
 # ==========================================
 @Client.on_callback_query(filters.regex("^ui_userstats$") & filters.user(Config.ADMINS))
 async def on_ui_userstats(client: Client, callback: CallbackQuery):
-    total_users = await db.users.count_documents({})
-    total_muted = await db.punishments.count_documents({"type": "mute"})
-    total_banned = await db.punishments.count_documents({"type": "ban"})
-    
-    stats_text = (
-        f"📊 **Bot User Statistics**\n\n"
-        f"👥 Total Users: `{total_users}`\n"
-        f"🟢 Active Users: `{total_users - total_banned}`\n"
-        f"🔇 Total Muted: `{total_muted}`\n"
-        f"🚫 Total Banned: `{total_banned}`\n\n"
-        f"⚙️ **Admin Shortcuts:**\n"
-        f"`/mute <id> [time] [reason]`\n"
-        f"`/ban <id> [reason]`"
-    )
+    await callback.answer("Calculating statistics...", show_alert=False)
+    stats_text = await generate_advanced_user_stats()
     
     markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="tier_root_fallback", style=ButtonStyle.DANGER)]])
     
     try:
         await callback.message.edit_text(stats_text, reply_markup=markup)
-        await callback.answer()
     except Exception as e:
         await callback.answer("⚠️ Error loading stats.", show_alert=True)
         logger.error(f"User Stats UI Error: {e}")
